@@ -6,10 +6,13 @@ import type {
   AttendanceRecord,
   AttendanceSession,
   Badge,
+  CodeBlankAnswer,
   Choice,
   CodeSubmission,
   FinalGrade,
   GradeCategory,
+  GradingTemplate,
+  GradingTemplateItem,
   LevelRule,
   Module,
   ModuleAccess,
@@ -28,6 +31,7 @@ import type {
   StudentProfile,
   Subject,
   SubjectSchedule,
+  TestCase,
   User,
 } from '../types'
 
@@ -39,6 +43,7 @@ export type AuthedRequest = <T>(
 export type WorkspaceData = {
   users: User[]
   currentUser: User | null
+  profiles: StudentProfile[]
   profile: StudentProfile | null
   subjects: Subject[]
   schoolYears: SchoolYear[]
@@ -51,7 +56,9 @@ export type WorkspaceData = {
   submissions: ModuleActivitySubmission[]
   progress: ModuleProgress[]
   problems: ProgrammingProblem[]
+  testCases: TestCase[]
   codeSubmissions: CodeSubmission[]
+  codeBlankAnswers: CodeBlankAnswer[]
   assessments: Assessment[]
   attempts: AssessmentAttempt[]
   questions: Question[]
@@ -59,6 +66,8 @@ export type WorkspaceData = {
   answers: Answer[]
   attendanceSessions: AttendanceSession[]
   attendanceRecords: AttendanceRecord[]
+  gradingTemplates: GradingTemplate[]
+  gradingTemplateItems: GradingTemplateItem[]
   gradeCategories: GradeCategory[]
   categoryGrades: StudentCategoryGrade[]
   periodGrades: PeriodGrade[]

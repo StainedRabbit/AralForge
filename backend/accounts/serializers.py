@@ -5,6 +5,7 @@ from .models import StudentProfile, User
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
+    is_admin_teacher = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
@@ -16,9 +17,10 @@ class UserSerializer(serializers.ModelSerializer):
             'first_name',
             'last_name',
             'role',
+            'is_admin_teacher',
             'is_active',
         )
-        read_only_fields = ('id',)
+        read_only_fields = ('id', 'is_admin_teacher')
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
