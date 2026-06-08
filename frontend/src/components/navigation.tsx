@@ -4,13 +4,13 @@ import { fullName, initials } from '../utils/student'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
 
-type NavItem = {
+export type NavItem = {
   to: string
   label: string
   icon: IconName
 }
 
-const navItems: NavItem[] = [
+const studentNavItems: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: 'dashboard' },
   { to: '/classes', label: 'Classes', icon: 'users' },
   { to: '/modules', label: 'Modules', icon: 'module' },
@@ -31,22 +31,33 @@ const mobileNavItems: NavItem[] = [
 
 export function Sidebar({
   currentUser,
+  items = studentNavItems,
+  badgePath = '/modules',
   profile,
   pendingCount,
   onLogout,
+  workspaceLabel,
 }: {
   currentUser: User | null
+  items?: NavItem[]
+  badgePath?: string
   profile: StudentProfile | null
   pendingCount: number
   onLogout: () => void
+  workspaceLabel?: string
 }) {
   return (
     <aside className="sidebar">
       <div className="sidebar__top">
         <BrandMark />
         <nav className="nav-list" aria-label="Primary">
-          {navItems.map((item) => (
-            <NavEntry item={item} key={item.to} pendingCount={pendingCount} />
+          {items.map((item) => (
+            <NavEntry
+              badgePath={badgePath}
+              item={item}
+              key={item.to}
+              pendingCount={pendingCount}
+            />
           ))}
         </nav>
       </div>
@@ -57,7 +68,10 @@ export function Sidebar({
           <div>
             <strong>{fullName(currentUser)}</strong>
             <span>
-              {profile?.section || currentUser?.role?.toLowerCase() || 'Account'}
+              {workspaceLabel ||
+                profile?.section ||
+                currentUser?.role?.toLowerCase() ||
+                'Account'}
             </span>
           </div>
         </div>
@@ -103,10 +117,18 @@ export function MobileHeader({
   )
 }
 
-export function MobileTabbar({ pendingCount }: { pendingCount: number }) {
+export function MobileTabbar({
+  badgePath = '/modules',
+  items = mobileNavItems,
+  pendingCount,
+}: {
+  badgePath?: string
+  items?: NavItem[]
+  pendingCount: number
+}) {
   return (
     <nav className="mobile-tabbar" aria-label="Primary mobile">
-      {mobileNavItems.map((item) => (
+      {items.map((item) => (
         <NavLink
           className={({ isActive }) => (isActive ? 'active' : '')}
           end={item.to === '/'}
@@ -115,7 +137,7 @@ export function MobileTabbar({ pendingCount }: { pendingCount: number }) {
         >
           <Icon name={item.icon} />
           <span>{item.label}</span>
-          {item.to === '/modules' && pendingCount ? (
+          {item.to === badgePath && pendingCount ? (
             <small>{pendingCount}</small>
           ) : null}
         </NavLink>
@@ -125,9 +147,11 @@ export function MobileTabbar({ pendingCount }: { pendingCount: number }) {
 }
 
 function NavEntry({
+  badgePath,
   item,
   pendingCount,
 }: {
+  badgePath: string
   item: NavItem
   pendingCount: number
 }) {
@@ -139,7 +163,7 @@ function NavEntry({
     >
       <Icon name={item.icon} />
       <span>{item.label}</span>
-      {item.to === '/modules' && pendingCount ? (
+      {item.to === badgePath && pendingCount ? (
         <small>{pendingCount}</small>
       ) : null}
     </NavLink>

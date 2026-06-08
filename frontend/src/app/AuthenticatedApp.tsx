@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import type { Session } from '../api'
+import { AdminApp } from './AdminApp'
 import { MobileHeader, MobileTabbar, Sidebar } from '../components/navigation'
 import { StatusBanner } from '../components/ui'
 import { useAuthenticatedRequest } from '../hooks/useAuthenticatedRequest'
@@ -29,6 +30,13 @@ export function AuthenticatedApp({
   const api = useAuthenticatedRequest(session, setSession, onLogout)
   const workspace = useWorkspaceData(api, session.access)
   const pendingCount = countPendingActivities(workspace)
+
+  if (
+    workspace.currentUser?.is_admin_teacher ||
+    workspace.currentUser?.role === 'ADMIN'
+  ) {
+    return <AdminApp api={api} workspace={workspace} onLogout={onLogout} />
+  }
 
   return (
     <div className="app-shell">

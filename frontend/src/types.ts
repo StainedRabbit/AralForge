@@ -1,4 +1,4 @@
-export type Role = 'ADMIN' | 'STUDENT'
+export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT'
 
 export type ApiList<T> = T[] | { results: T[] }
 
@@ -14,6 +14,7 @@ export type User = {
   first_name: string
   last_name: string
   role: Role
+  is_admin_teacher: boolean
   is_active: boolean
 }
 
@@ -177,6 +178,15 @@ export type CodeBlank = {
   points: string
 }
 
+export type TestCase = {
+  id: number
+  problem: number
+  input_data: string
+  expected_output: string
+  is_hidden: boolean
+  order: number
+}
+
 export type ProgrammingProblem = {
   id: number
   title: string
@@ -191,6 +201,7 @@ export type ProgrammingProblem = {
   points_possible: string
   is_published: boolean
   created_at: string
+  test_cases: TestCase[]
   blanks: CodeBlank[]
 }
 
@@ -206,6 +217,16 @@ export type CodeSubmission = {
   output: string
   error: string
   submitted_at: string
+}
+
+export type CodeBlankAnswer = {
+  id: number
+  submission: number
+  blank: number
+  answer: string
+  is_correct: boolean | null
+  points_earned: string | null
+  feedback: string
 }
 
 export type Assessment = {
@@ -293,6 +314,24 @@ export type AttendanceRecord = {
   points_earned: string
   remarks: string
   recorded_at: string
+}
+
+export type GradingTemplate = {
+  id: number
+  name: string
+  description: string
+  is_default: boolean
+  created_at: string
+  items: GradingTemplateItem[]
+}
+
+export type GradingTemplateItem = {
+  id: number
+  template: number
+  grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
+  category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'CODING' | 'OTHER'
+  name: string
+  weight: string
 }
 
 export type GradeCategory = {

@@ -5,13 +5,14 @@ from django.db import models
 class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', 'Admin'
+        TEACHER = 'TEACHER', 'Teacher'
         STUDENT = 'STUDENT', 'Student'
 
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
 
     @property
     def is_admin_teacher(self):
-        return self.role == self.Role.ADMIN or self.is_superuser
+        return self.role in {self.Role.ADMIN, self.Role.TEACHER} or self.is_superuser
 
     def __str__(self):
         return self.get_full_name() or self.username
