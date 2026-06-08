@@ -1,0 +1,210 @@
+@media (max-width: 1160px) {
+  .stat-grid,
+  .module-grid,
+  .problem-grid,
+  .class-grid,
+  .period-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .content-grid,
+  .content-grid--dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding-left: 0;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .app-main {
+    padding: 16px 16px 88px;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: 8px 8px max(8px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-tabbar a {
+    min-height: 58px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    border-radius: var(--radius);
+    font-size: 11px;
+    font-weight: 750;
+  }
+
+  .mobile-tabbar a.active {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+  }
+
+  .mobile-tabbar small {
+    position: absolute;
+    top: 4px;
+    right: 16px;
+    margin: 0;
+  }
+
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .login-visual {
+    min-height: 360px;
+  }
+
+  .login-panel {
+    min-height: auto;
+  }
+
+  .login-visual h1 {
+    font-size: 34px;
+  }
+
+  .login-proof-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .page-header h1,
+  .dashboard-hero h1 {
+    font-size: 32px;
+  }
+
+  .dashboard-hero,
+  .dashboard-hero img {
+    min-height: 390px;
+  }
+
+  .dashboard-hero__content,
+  .login-visual__content {
+    padding: 22px;
+  }
+
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-box,
+  .select-control {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .assessment-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .assessment-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .assessment-actions .button {
+    flex: 1 1 180px;
+  }
+
+  .attendance-row,
+  .grade-row {
+    grid-template-columns: 1fr;
+  }
+
+  .grade-row__score {
+    text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-main {
+    padding-inline: 12px;
+  }
+
+  .page {
+    gap: 18px;
+  }
+
+  .stat-grid,
+  .module-grid,
+  .problem-grid,
+  .class-grid,
+  .period-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-card {
+    min-height: auto;
+  }
+
+  .module-card,
+  .problem-card,
+  .class-card,
+  .period-card {
+    min-height: auto;
+  }
+
+  .module-card__top,
+  .module-card__bottom,
+  .question-card__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .module-card__bottom .button,
+  .class-card__actions .button,
+  .hero-actions .button,
+  .page-header__actions,
+  .page-header__actions .button {
+    width: 100%;
+  }
+
+  .hero-actions,
+  .page-header__actions {
+    width: 100%;
+  }
+
+  .activity-card {
+    align-items: flex-start;
+  }
+
+  .activity-card .status-pill {
+    margin-left: 0;
+  }
+
+  .meta-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .login-panel {
+    padding: 18px;
+  }
+
+  .login-card {
+    padding: 20px;
+  }
+}

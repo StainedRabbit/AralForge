@@ -1,0 +1,29 @@
+.app-shell {
+  min-height: 100vh;
+  padding-left: var(--sidebar-width);
+}
+
+.app-main {
+  width: 100%;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.page {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+  flex: 0 0 20px;
+  align-self: center;
+  justify-self: center;
+  vertical-align: middle;
+}
+

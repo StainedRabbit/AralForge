@@ -2,8 +2,16 @@ from rest_framework import permissions, viewsets
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
 
-from .models import Module, ModuleActivity, ModuleActivitySubmission, ModuleProgress
+from .models import (
+    Module,
+    ModuleAccess,
+    ModuleActivity,
+    ModuleActivitySubmission,
+    ModuleProgress,
+    active_module_access_filter,
+)
 from .serializers import (
+    ModuleAccessSerializer,
     ModuleActivitySerializer,
     ModuleActivitySubmissionSerializer,
     ModuleProgressSerializer,
@@ -21,7 +29,31 @@ class ModuleViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(is_published=True)
+        return queryset.filter(
+            is_published=True,
+        ).filter(
+            active_module_access_filter(self.request.user),
+        ).distinct()
+
+
+class ModuleAccessViewSet(viewsets.ModelViewSet):
+    serializer_class = ModuleAccessSerializer
+    permission_classes = [IsAdminTeacherOrReadOnly]
+
+    def get_queryset(self):
+        queryset = ModuleAccess.objects.select_related(
+            'module',
+            'student',
+            'activated_by',
+        )
+
+        if self.request.user.is_admin_teacher:
+            return queryset
+
+        return queryset.filter(student=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(activated_by=self.request.user)
 
 
 class ModuleActivityViewSet(viewsets.ModelViewSet):
@@ -34,7 +66,12 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(is_published=True, module__is_published=True)
+        return queryset.filter(
+            is_published=True,
+            module__is_published=True,
+        ).filter(
+            active_module_access_filter(self.request.user, prefix='module__'),
+        ).distinct()
 
 
 class ModuleActivitySubmissionViewSet(viewsets.ModelViewSet):
