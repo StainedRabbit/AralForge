@@ -65,6 +65,32 @@ class TestCase(models.Model):
         return f'{self.problem} test {self.order} ({visibility})'
 
 
+class CodeBlank(models.Model):
+    problem = models.ForeignKey(
+        ProgrammingProblem,
+        on_delete=models.CASCADE,
+        related_name='blanks',
+    )
+    key = models.CharField(max_length=50)
+    prompt = models.TextField(blank=True)
+    expected_answer = models.TextField()
+    hint = models.TextField(blank=True)
+    order = models.PositiveIntegerField(default=0)
+    points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['problem', 'key'],
+                name='unique_code_blank_key_per_problem',
+            ),
+        ]
+        ordering = ['problem', 'order', 'id']
+
+    def __str__(self):
+        return f'{self.problem}: blank {self.key}'
+
+
 class CodeSubmission(models.Model):
     class Status(models.TextChoices):
         PENDING = 'PENDING', 'Pending'
@@ -104,3 +130,32 @@ class CodeSubmission(models.Model):
 
     def __str__(self):
         return f'{self.student} - {self.problem}: {self.status}'
+
+
+class CodeBlankAnswer(models.Model):
+    submission = models.ForeignKey(
+        CodeSubmission,
+        on_delete=models.CASCADE,
+        related_name='blank_answers',
+    )
+    blank = models.ForeignKey(
+        CodeBlank,
+        on_delete=models.CASCADE,
+        related_name='answers',
+    )
+    answer = models.TextField()
+    is_correct = models.BooleanField(null=True, blank=True)
+    points_earned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['submission', 'blank'],
+                name='unique_code_blank_answer_per_submission',
+            ),
+        ]
+        ordering = ['submission', 'blank__order', 'blank__id']
+
+    def __str__(self):
+        return f'{self.submission} - {self.blank}'

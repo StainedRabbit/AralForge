@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CodeSubmission, ProgrammingProblem, TestCase
+from .models import CodeBlank, CodeBlankAnswer, CodeSubmission, ProgrammingProblem, TestCase
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
@@ -10,8 +10,34 @@ class TestCaseSerializer(serializers.ModelSerializer):
         read_only_fields = ('id',)
 
 
+class CodeBlankSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CodeBlank
+        fields = (
+            'id',
+            'problem',
+            'key',
+            'prompt',
+            'expected_answer',
+            'hint',
+            'order',
+            'points',
+        )
+        read_only_fields = ('id',)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+
+        if not request or not request.user.is_admin_teacher:
+            data.pop('expected_answer', None)
+
+        return data
+
+
 class ProgrammingProblemSerializer(serializers.ModelSerializer):
     test_cases = TestCaseSerializer(many=True, read_only=True)
+    blanks = CodeBlankSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProgrammingProblem
@@ -30,11 +56,55 @@ class ProgrammingProblemSerializer(serializers.ModelSerializer):
             'is_published',
             'created_at',
             'test_cases',
+            'blanks',
         )
         read_only_fields = ('id', 'created_at')
 
 
+class CodeBlankAnswerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CodeBlankAnswer
+        fields = (
+            'id',
+            'submission',
+            'blank',
+            'answer',
+            'is_correct',
+            'points_earned',
+            'feedback',
+        )
+        read_only_fields = ('id',)
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        submission = attrs.get('submission') or getattr(self.instance, 'submission', None)
+        blank = attrs.get('blank') or getattr(self.instance, 'blank', None)
+
+        if submission and blank and submission.problem_id != blank.problem_id:
+            raise serializers.ValidationError(
+                'Blank answer must belong to the same problem as the submission.'
+            )
+
+        if request and not request.user.is_admin_teacher:
+            if submission and submission.student_id != request.user.id:
+                raise serializers.ValidationError(
+                    'Students can only answer blanks for their own submissions.'
+                )
+
+            restricted_fields = {'is_correct', 'points_earned', 'feedback'}
+            submitted_restricted_fields = restricted_fields.intersection(self.initial_data)
+
+            if submitted_restricted_fields:
+                raise serializers.ValidationError(
+                    'Students cannot set grading fields.'
+                )
+
+        return attrs
+
+
 class CodeSubmissionSerializer(serializers.ModelSerializer):
+    blank_answers = CodeBlankAnswerSerializer(many=True, read_only=True)
+
     class Meta:
         model = CodeSubmission
         fields = (
@@ -49,6 +119,7 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             'output',
             'error',
             'submitted_at',
+            'blank_answers',
         )
         read_only_fields = ('id', 'submitted_at')
 
@@ -58,3 +129,16 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Students can only submit as themselves.')
 
         return value
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and not request.user.is_admin_teacher:
+            restricted_fields = {'status', 'score', 'output', 'error'}
+            submitted_restricted_fields = restricted_fields.intersection(self.initial_data)
+
+            if submitted_restricted_fields:
+                raise serializers.ValidationError(
+                    'Students cannot set execution or grading fields.'
+                )
+
+        return attrs

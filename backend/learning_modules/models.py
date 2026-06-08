@@ -7,6 +7,7 @@ class Module(models.Model):
     slug = models.SlugField(max_length=200, unique=True)
     description = models.TextField(blank=True)
     content = models.TextField(blank=True)
+    pdf_file = models.FileField(upload_to='module_pdfs/', blank=True)
     subjects = models.ManyToManyField(
         'subjects.Subject',
         blank=True,
@@ -24,13 +25,32 @@ class Module(models.Model):
 
 
 class ModuleActivity(models.Model):
+    class ActivityType(models.TextChoices):
+        TEXT = 'TEXT', 'Text'
+        FILE_UPLOAD = 'FILE_UPLOAD', 'File Upload'
+        CODE_COMPLETE = 'CODE_COMPLETE', 'Complete Coding'
+        CODE_FILL_BLANK = 'CODE_FILL_BLANK', 'Fill in the Blank Coding'
+
     module = models.ForeignKey(
         Module,
         on_delete=models.CASCADE,
         related_name='activities',
     )
+    programming_problem = models.ForeignKey(
+        'coding.ProgrammingProblem',
+        on_delete=models.SET_NULL,
+        related_name='module_activities',
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=180)
     instructions = models.TextField()
+    activity_type = models.CharField(
+        max_length=30,
+        choices=ActivityType,
+        default=ActivityType.TEXT,
+    )
+    order = models.PositiveIntegerField(default=0)
     points_possible = models.DecimalField(max_digits=6, decimal_places=2, default=100)
     due_at = models.DateTimeField(null=True, blank=True)
     accepts_text = models.BooleanField(default=True)
@@ -40,11 +60,39 @@ class ModuleActivity(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['module', 'title']
+        ordering = ['module', 'order', 'id']
         verbose_name_plural = 'module activities'
 
     def __str__(self):
         return f'{self.module}: {self.title}'
+
+
+class ModuleProgress(models.Model):
+    module = models.ForeignKey(
+        Module,
+        on_delete=models.CASCADE,
+        related_name='progress',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='module_progress',
+    )
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['module', 'student'],
+                name='unique_module_progress',
+            ),
+        ]
+        ordering = ['-started_at']
+        verbose_name_plural = 'module progress'
+
+    def __str__(self):
+        return f'{self.student} - {self.module}'
 
 
 class ModuleActivitySubmission(models.Model):
