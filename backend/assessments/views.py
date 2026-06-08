@@ -1,6 +1,8 @@
+from django.db.models import Q
 from rest_framework import permissions, viewsets
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
+from learning_modules.models import active_module_access_filter
 
 from .models import Answer, Assessment, AssessmentAttempt, Choice, Question
 from .serializers import (
@@ -22,7 +24,13 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(is_published=True)
+        return queryset.filter(is_published=True).filter(
+            Q(module__isnull=True)
+            | (
+                Q(module__is_published=True)
+                & active_module_access_filter(self.request.user, prefix='module__')
+            )
+        ).distinct()
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -35,7 +43,16 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(assessment__is_published=True)
+        return queryset.filter(assessment__is_published=True).filter(
+            Q(assessment__module__isnull=True)
+            | (
+                Q(assessment__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='assessment__module__',
+                )
+            )
+        ).distinct()
 
 
 class ChoiceViewSet(viewsets.ModelViewSet):
@@ -48,7 +65,16 @@ class ChoiceViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(question__assessment__is_published=True)
+        return queryset.filter(question__assessment__is_published=True).filter(
+            Q(question__assessment__module__isnull=True)
+            | (
+                Q(question__assessment__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='question__assessment__module__',
+                )
+            )
+        ).distinct()
 
 
 class AssessmentAttemptViewSet(viewsets.ModelViewSet):
@@ -61,7 +87,16 @@ class AssessmentAttemptViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(student=self.request.user)
+        return queryset.filter(student=self.request.user).filter(
+            Q(assessment__module__isnull=True)
+            | (
+                Q(assessment__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='assessment__module__',
+                )
+            )
+        ).distinct()
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
@@ -78,4 +113,13 @@ class AnswerViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(attempt__student=self.request.user)
+        return queryset.filter(attempt__student=self.request.user).filter(
+            Q(attempt__assessment__module__isnull=True)
+            | (
+                Q(attempt__assessment__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='attempt__assessment__module__',
+                )
+            )
+        ).distinct()

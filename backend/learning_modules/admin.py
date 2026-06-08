@@ -1,14 +1,37 @@
 from django.contrib import admin
 
-from .models import Module, ModuleActivity, ModuleActivitySubmission, ModuleProgress
+from .models import Module, ModuleAccess, ModuleActivity, ModuleActivitySubmission, ModuleProgress
 
 
 @admin.register(Module)
 class ModuleAdmin(admin.ModelAdmin):
-    list_display = ('title', 'is_published', 'created_at')
-    list_filter = ('is_published', 'subjects')
+    list_display = ('title', 'is_paid', 'price', 'is_published', 'created_at')
+    list_filter = ('is_paid', 'is_published', 'subjects')
     search_fields = ('title', 'description')
     prepopulated_fields = {'slug': ('title',)}
+
+
+@admin.register(ModuleAccess)
+class ModuleAccessAdmin(admin.ModelAdmin):
+    list_display = (
+        'module',
+        'student',
+        'payment_status',
+        'amount_paid',
+        'is_active',
+        'expires_at',
+        'activated_by',
+        'activated_at',
+    )
+    list_filter = ('payment_status', 'is_active', 'module')
+    search_fields = (
+        'module__title',
+        'student__username',
+        'student__first_name',
+        'student__last_name',
+        'payment_reference',
+    )
+    autocomplete_fields = ('module', 'student', 'activated_by')
 
 
 @admin.register(ModuleActivity)

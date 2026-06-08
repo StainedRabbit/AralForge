@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from learning_modules.models import user_has_module_access
+
 from .models import CodeBlank, CodeBlankAnswer, CodeSubmission, ProgrammingProblem, TestCase
 
 
@@ -132,6 +134,8 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context.get('request')
+        problem = attrs.get('problem') or getattr(self.instance, 'problem', None)
+
         if request and not request.user.is_admin_teacher:
             restricted_fields = {'status', 'score', 'output', 'error'}
             submitted_restricted_fields = restricted_fields.intersection(self.initial_data)
@@ -139,6 +143,14 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             if submitted_restricted_fields:
                 raise serializers.ValidationError(
                     'Students cannot set execution or grading fields.'
+                )
+
+            if problem and problem.module and not user_has_module_access(
+                request.user,
+                problem.module,
+            ):
+                raise serializers.ValidationError(
+                    'This module has not been activated for your account.'
                 )
 
         return attrs

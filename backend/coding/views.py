@@ -1,6 +1,8 @@
+from django.db.models import Q
 from rest_framework import permissions, viewsets
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
+from learning_modules.models import active_module_access_filter
 
 from .models import CodeBlank, CodeBlankAnswer, CodeSubmission, ProgrammingProblem, TestCase
 from .serializers import (
@@ -26,7 +28,13 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(is_published=True)
+        return queryset.filter(is_published=True).filter(
+            Q(module__isnull=True)
+            | (
+                Q(module__is_published=True)
+                & active_module_access_filter(self.request.user, prefix='module__')
+            )
+        ).distinct()
 
 
 class TestCaseViewSet(viewsets.ModelViewSet):
@@ -39,7 +47,16 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(problem__is_published=True, is_hidden=False)
+        return queryset.filter(problem__is_published=True, is_hidden=False).filter(
+            Q(problem__module__isnull=True)
+            | (
+                Q(problem__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='problem__module__',
+                )
+            )
+        ).distinct()
 
 
 class CodeBlankViewSet(viewsets.ModelViewSet):
@@ -52,7 +69,16 @@ class CodeBlankViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(problem__is_published=True)
+        return queryset.filter(problem__is_published=True).filter(
+            Q(problem__module__isnull=True)
+            | (
+                Q(problem__module__is_published=True)
+                & active_module_access_filter(
+                    self.request.user,
+                    prefix='problem__module__',
+                )
+            )
+        ).distinct()
 
 
 class CodeSubmissionViewSet(viewsets.ModelViewSet):

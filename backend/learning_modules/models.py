@@ -1,5 +1,7 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 
 
 class Module(models.Model):
@@ -8,6 +10,8 @@ class Module(models.Model):
     description = models.TextField(blank=True)
     content = models.TextField(blank=True)
     pdf_file = models.FileField(upload_to='module_pdfs/', blank=True)
+    is_paid = models.BooleanField(default=True)
+    price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     subjects = models.ManyToManyField(
         'subjects.Subject',
         blank=True,
@@ -22,6 +26,101 @@ class Module(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class ModuleAccess(models.Model):
+    class PaymentStatus(models.TextChoices):
+        UNPAID = 'UNPAID', 'Unpaid'
+        PAID = 'PAID', 'Paid'
+        WAIVED = 'WAIVED', 'Waived'
+
+    module = models.ForeignKey(
+        Module,
+        on_delete=models.CASCADE,
+        related_name='access_grants',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='module_access_grants',
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='activated_module_access_grants',
+        null=True,
+        blank=True,
+    )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PaymentStatus,
+        default=PaymentStatus.PAID,
+    )
+    amount_paid = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    payment_reference = models.CharField(max_length=120, blank=True)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    activated_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['module', 'student'],
+                name='unique_module_access_per_student',
+            ),
+        ]
+        ordering = ['module__title', 'student__username']
+        verbose_name_plural = 'module access grants'
+
+    @property
+    def is_available(self):
+        if not self.is_active:
+            return False
+
+        return self.expires_at is None or self.expires_at > timezone.now()
+
+    def clean(self):
+        super().clean()
+
+        if self.student_id and getattr(self.student, 'role', None) != self.student.Role.STUDENT:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError('Only student users can receive module access.')
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.student} access to {self.module}'
+
+
+def active_module_access_filter(user, prefix=''):
+    access_prefix = f'{prefix}access_grants__'
+
+    return Q(**{f'{prefix}is_paid': False}) | (
+        Q(**{f'{access_prefix}student': user})
+        & Q(**{f'{access_prefix}is_active': True})
+        & (
+            Q(**{f'{access_prefix}expires_at__isnull': True})
+            | Q(**{f'{access_prefix}expires_at__gt': timezone.now()})
+        )
+    )
+
+
+def user_has_module_access(user, module):
+    if not module.is_paid:
+        return True
+
+    return ModuleAccess.objects.filter(
+        module=module,
+        student=user,
+        is_active=True,
+    ).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+    ).exists()
 
 
 class ModuleActivity(models.Model):
