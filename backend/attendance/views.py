@@ -7,7 +7,10 @@ from .serializers import AttendanceRecordSerializer, AttendanceSessionSerializer
 
 
 class AttendanceSessionViewSet(viewsets.ModelViewSet):
-    queryset = AttendanceSession.objects.select_related('subject')
+    queryset = AttendanceSession.objects.select_related(
+        'subject',
+        'school_year_semester__school_year',
+    )
     serializer_class = AttendanceSessionSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
 
@@ -17,7 +20,12 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminTeacherOrReadOnly]
 
     def get_queryset(self):
-        queryset = AttendanceRecord.objects.select_related('session', 'session__subject', 'student')
+        queryset = AttendanceRecord.objects.select_related(
+            'session',
+            'session__subject',
+            'session__school_year_semester__school_year',
+            'student',
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset

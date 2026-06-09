@@ -4,10 +4,22 @@ from .models import AttendanceRecord, AttendanceSession
 
 
 class AttendanceSessionSerializer(serializers.ModelSerializer):
+    term_name = serializers.CharField(source='school_year_semester.name', read_only=True)
+
     class Meta:
         model = AttendanceSession
-        fields = ('id', 'subject', 'title', 'date', 'points_possible', 'notes', 'created_at')
-        read_only_fields = ('id', 'created_at')
+        fields = (
+            'id',
+            'subject',
+            'school_year_semester',
+            'term_name',
+            'title',
+            'date',
+            'points_possible',
+            'notes',
+            'created_at',
+        )
+        read_only_fields = ('id', 'term_name', 'created_at')
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):

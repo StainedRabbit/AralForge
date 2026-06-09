@@ -179,7 +179,7 @@ export function attendanceSessionName(
     return 'No session'
   }
 
-  return `${subjectName(subjects, session.subject)} ${formatDate(session.date)}`
+  return `${subjectName(subjects, session.subject)} ${session.term_name || ''} ${formatDate(session.date)}`
 }
 
 export function gradeCategoryName(

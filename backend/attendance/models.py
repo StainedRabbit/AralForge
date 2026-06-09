@@ -8,6 +8,13 @@ class AttendanceSession(models.Model):
         on_delete=models.CASCADE,
         related_name='attendance_sessions',
     )
+    school_year_semester = models.ForeignKey(
+        'subjects.SchoolYearSemester',
+        on_delete=models.CASCADE,
+        related_name='attendance_sessions',
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=150, blank=True)
     date = models.DateField()
     points_possible = models.DecimalField(max_digits=5, decimal_places=2, default=1)
@@ -17,14 +24,15 @@ class AttendanceSession(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['subject', 'date', 'title'],
-                name='unique_attendance_session',
+                fields=['subject', 'school_year_semester', 'date', 'title'],
+                name='unique_attendance_session_term',
             ),
         ]
         ordering = ['-date']
 
     def __str__(self):
-        return f'{self.subject} - {self.date}'
+        term = f' - {self.school_year_semester}' if self.school_year_semester_id else ''
+        return f'{self.subject}{term} - {self.date}'
 
 
 class AttendanceRecord(models.Model):
