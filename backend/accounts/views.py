@@ -1,4 +1,9 @@
+from django.db.models import Q
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+from subjects.models import ScheduleStudent
 
 from .models import StudentProfile, User
 from .permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
@@ -20,6 +25,44 @@ class UserViewSet(viewsets.ModelViewSet):
 
         return [IsAdminTeacherOrReadOnly()]
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAdminTeacher])
+    def available_students(self, request):
+        queryset = User.objects.filter(
+            is_active=True,
+            role=User.Role.STUDENT,
+        ).select_related('student_profile')
+        schedule_id = bounded_int(request.query_params.get('schedule'), default=0)
+        search = request.query_params.get('search', '').strip()
+
+        if schedule_id:
+            enrolled_ids = ScheduleStudent.objects.filter(
+                is_active=True,
+                schedule_id=schedule_id,
+            ).values('student_id')
+            queryset = queryset.exclude(id__in=enrolled_ids)
+
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(username__icontains=search)
+                | Q(email__icontains=search)
+                | Q(student_profile__student_number__icontains=search),
+            )
+
+        queryset = queryset.order_by('last_name', 'first_name', 'username', 'id')
+        count = queryset.count()
+        limit = bounded_int(request.query_params.get('limit'), default=50, maximum=100)
+        offset = bounded_int(request.query_params.get('offset'), default=0)
+        results = queryset[offset:offset + limit]
+
+        return Response({
+            'count': count,
+            'next': offset + limit if offset + limit < count else None,
+            'previous': max(offset - limit, 0) if offset > 0 else None,
+            'results': self.get_serializer(results, many=True).data,
+        })
+
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
@@ -30,3 +73,17 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
             return StudentProfile.objects.select_related('user')
 
         return StudentProfile.objects.select_related('user').filter(user=self.request.user)
+
+
+def bounded_int(value, default=0, maximum=None):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+
+    number = max(number, 0)
+
+    if maximum is not None:
+        return min(number, maximum)
+
+    return number
