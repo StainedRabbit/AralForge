@@ -26,7 +26,7 @@ const adminNavItems: NavItem[] = [
 const adminMobileNavItems: NavItem[] = [
   { to: '/admin', label: 'Home', icon: 'dashboard' },
   { to: '/admin/students', label: 'Students', icon: 'users' },
-  { to: '/admin/modules', label: 'Modules', icon: 'module' },
+  { to: '/admin/classes', label: 'Classes', icon: 'calendar' },
   { to: '/admin/assessments', label: 'Tests', icon: 'assessment' },
   { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]

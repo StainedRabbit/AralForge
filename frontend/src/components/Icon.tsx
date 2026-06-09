@@ -7,6 +7,7 @@ export type IconName =
   | 'book'
   | 'calendar'
   | 'check'
+  | 'close'
   | 'code'
   | 'dashboard'
   | 'file'
@@ -65,6 +66,12 @@ const iconPaths: Record<IconName, ReactNode> = {
   check: (
     <>
       <path d="m20 6-11 11-5-5" />
+    </>
+  ),
+  close: (
+    <>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </>
   ),
   code: (
