@@ -299,6 +299,8 @@ export type Answer = {
 export type AttendanceSession = {
   id: number
   subject: number
+  school_year_semester: number | null
+  term_name: string
   title: string
   date: string
   points_possible: string
