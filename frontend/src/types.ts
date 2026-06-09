@@ -1,6 +1,13 @@
 export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT'
 
-export type ApiList<T> = T[] | { results: T[] }
+export type ApiPage<T> = {
+  count: number
+  next: number | null
+  previous: number | null
+  results: T[]
+}
+
+export type ApiList<T> = T[] | ApiPage<T>
 
 export type TokenPair = {
   access: string
