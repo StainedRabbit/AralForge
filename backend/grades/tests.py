@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from rest_framework.test import APITestCase
 
 from accounts.models import User
 from assessments.models import Assessment
@@ -16,6 +17,7 @@ from grades.models import (
 )
 from grades.services import compute_final_grade, compute_period_grade, compute_student_category_grade
 from subjects.models import Subject
+from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, SubjectSchedule
 
 
 class GradeComputationTests(TestCase):
@@ -190,3 +192,61 @@ class GradeComputationTests(TestCase):
         self.assertFalse(fallback.is_item_computed)
         self.assertEqual(fallback.raw_score, Decimal('35.00'))
         self.assertEqual(fallback.total_score, Decimal('50.00'))
+
+
+class GradeItemAccessTests(APITestCase):
+    def setUp(self):
+        self.student = User.objects.create_user(
+            username='student2',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.visible_subject = Subject.objects.create(code='CS102', name='Visible')
+        self.hidden_subject = Subject.objects.create(code='CS103', name='Hidden')
+        school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        schedule = SubjectSchedule.objects.create(
+            subject=self.visible_subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='08:00',
+            end_time='09:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        self.visible_category = GradeCategory.objects.create(
+            subject=self.visible_subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Visible Quizzes',
+            weight=Decimal('50.00'),
+        )
+        self.hidden_category = GradeCategory.objects.create(
+            subject=self.hidden_subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Hidden Quizzes',
+            weight=Decimal('50.00'),
+        )
+        self.visible_item = GradeItem.objects.create(
+            grade_category=self.visible_category,
+            title='Visible Quiz',
+            points_possible=Decimal('10.00'),
+        )
+        GradeItem.objects.create(
+            grade_category=self.hidden_category,
+            title='Hidden Quiz',
+            points_possible=Decimal('10.00'),
+        )
+
+    def test_student_only_reads_grade_items_for_enrolled_subjects(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get('/api/grades/items/')
+
+        self.assertEqual(response.status_code, 200)
+        ids = {item['id'] for item in response.data}
+        self.assertEqual(ids, {self.visible_item.id})

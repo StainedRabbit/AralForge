@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('attendance', '0001_initial'),
-        ('subjects', '0001_initial'),
+        ('subjects', '0002_schoolyear_schoolyearsemester_subjectschedule_and_more'),
     ]
 
     operations = [

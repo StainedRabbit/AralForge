@@ -32,6 +32,12 @@ class AssessmentViewSet(viewsets.ModelViewSet):
     serializer_class = AssessmentSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
 
+    def get_permissions(self):
+        if self.action == 'start_mock':
+            return [permissions.IsAuthenticated()]
+
+        return super().get_permissions()
+
     def get_queryset(self):
         queryset = Assessment.objects.select_related('subject', 'module')
 
