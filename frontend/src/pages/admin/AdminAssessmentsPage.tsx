@@ -8,6 +8,7 @@ import type {
   Answer,
   Assessment,
   AssessmentAttempt,
+  AssessmentAttemptQuestion,
   Choice,
   Question,
 } from '../../types'
@@ -102,7 +103,7 @@ export function AdminAssessmentsPage({
           { header: 'Prompt', render: (question) => question.prompt.slice(0, 80) },
         ]}
         endpoint="/assessments/questions/"
-        fields={questionFields(assessmentOptions)}
+        fields={questionFields(assessmentOptions, moduleOptions)}
         getSearchText={(question) =>
           `${question.prompt} ${question.question_type} ${question.explanation ?? ''}`
         }
@@ -139,7 +140,7 @@ export function AdminAssessmentsPage({
           { header: 'Submitted', render: (attempt) => booleanLabel(attempt.is_submitted) },
         ]}
         endpoint="/assessments/attempts/"
-        fields={attemptFields(assessmentOptions, studentOptions)}
+        fields={attemptFields(assessmentOptions, studentOptions, moduleOptions)}
         getSearchText={(attempt) =>
           `${userName(data.users, attempt.student)} ${assessmentName(data.assessments, attempt.assessment)}`
         }
@@ -147,6 +148,29 @@ export function AdminAssessmentsPage({
         noun="Attempt"
         onRefresh={refresh}
         title="Assessment Attempts"
+      />
+
+      <AdminResourcePanel<AssessmentAttemptQuestion>
+        api={api}
+        columns={[
+          {
+            header: 'Attempt',
+            render: (item) =>
+              attemptOptions.find((option) => Number(option.value) === item.attempt)
+                ?.label ?? 'Attempt',
+          },
+          { header: 'Question', render: (item) => questionName(data.questions, item.question) },
+          { header: 'Order', render: (item) => item.order },
+        ]}
+        endpoint="/assessments/attempt-questions/"
+        fields={attemptQuestionFields(attemptOptions, questionOptions)}
+        getSearchText={(item) =>
+          `${questionName(data.questions, item.question)} ${item.order}`
+        }
+        items={data.attemptQuestions}
+        noun="Attempt Question"
+        onRefresh={refresh}
+        title="Mock Attempt Questions"
       />
 
       <AdminResourcePanel<Answer>
@@ -208,18 +232,27 @@ function assessmentFields(
     },
     { label: 'Instructions', name: 'instructions', rows: 4, type: 'textarea' },
     { defaultValue: '100.00', label: 'Points', name: 'points_possible', type: 'number' },
+    {
+      defaultValue: '25',
+      label: 'Mock question count',
+      name: 'mock_question_count',
+      type: 'number',
+    },
     { label: 'Time limit minutes', name: 'time_limit_minutes', nullable: true, type: 'number' },
     { defaultValue: '1', label: 'Max attempts', name: 'max_attempts', type: 'number' },
     { defaultValue: false, label: 'Randomize questions', name: 'randomize_questions', type: 'checkbox' },
     { defaultValue: false, label: 'Show answers after submit', name: 'show_answers_after_submit', type: 'checkbox' },
-    { defaultValue: true, label: 'Counts toward grade', name: 'counts_toward_grade', type: 'checkbox' },
+    { defaultValue: false, label: 'Counts toward grade', name: 'counts_toward_grade', type: 'checkbox' },
     { defaultValue: false, label: 'Published', name: 'is_published', type: 'checkbox' },
     { label: 'Opens at', name: 'opens_at', nullable: true, type: 'datetime-local' },
     { label: 'Closes at', name: 'closes_at', nullable: true, type: 'datetime-local' },
   ] satisfies AdminField<Assessment>[]
 }
 
-function questionFields(assessmentOptions: { label: string; value: number | string }[]) {
+function questionFields(
+  assessmentOptions: { label: string; value: number | string }[],
+  moduleOptions: { label: string; value: number | string }[],
+) {
   return [
     {
       label: 'Assessment',
@@ -241,6 +274,12 @@ function questionFields(assessmentOptions: { label: string; value: number | stri
     { defaultValue: '1.00', label: 'Points', name: 'points', type: 'number' },
     { defaultValue: '0', label: 'Order', name: 'order', type: 'number' },
     { label: 'Explanation', name: 'explanation', rows: 3, type: 'textarea' },
+    {
+      label: 'Mock topics',
+      name: 'topics',
+      options: moduleOptions,
+      type: 'multiselect',
+    },
   ] satisfies AdminField<Question>[]
 }
 
@@ -263,6 +302,7 @@ function choiceFields(questionOptions: { label: string; value: number | string }
 function attemptFields(
   assessmentOptions: { label: string; value: number | string }[],
   studentOptions: { label: string; value: number | string }[],
+  moduleOptions: { label: string; value: number | string }[],
 ) {
   return [
     {
@@ -285,7 +325,38 @@ function attemptFields(
     { label: 'Score', name: 'score', nullable: true, type: 'number' },
     { label: 'Submitted at', name: 'submitted_at', nullable: true, type: 'datetime-local' },
     { defaultValue: false, label: 'Submitted', name: 'is_submitted', type: 'checkbox' },
+    {
+      label: 'Selected topics',
+      name: 'selected_topics',
+      options: moduleOptions,
+      type: 'multiselect',
+    },
   ] satisfies AdminField<AssessmentAttempt>[]
+}
+
+function attemptQuestionFields(
+  attemptOptions: { label: string; value: number | string }[],
+  questionOptions: { label: string; value: number | string }[],
+) {
+  return [
+    {
+      label: 'Attempt',
+      name: 'attempt',
+      options: attemptOptions,
+      parse: Number,
+      required: true,
+      type: 'select',
+    },
+    {
+      label: 'Question',
+      name: 'question',
+      options: questionOptions,
+      parse: Number,
+      required: true,
+      type: 'select',
+    },
+    { defaultValue: '0', label: 'Order', name: 'order', type: 'number' },
+  ] satisfies AdminField<AssessmentAttemptQuestion>[]
 }
 
 function answerFields(

@@ -1,10 +1,12 @@
 import type { AnswerDraft, WorkspaceData } from '../app/types'
 import type {
   AttendanceRecord,
+  Assessment,
   GradeCategory,
   LevelRule,
   Module,
   ModuleActivity,
+  AssessmentAttempt,
   Question,
   SubjectSchedule,
   User,
@@ -40,6 +42,93 @@ export function getStudentEnrollments(data: WorkspaceData) {
   return data.enrollments.filter(
     (enrollment) => enrollment.student === data.currentUser?.id,
   )
+}
+
+export function getActiveStudentEnrollments(data: WorkspaceData) {
+  return getStudentEnrollments(data).filter((enrollment) => enrollment.is_active)
+}
+
+export function getActiveStudentSubjectIds(data: WorkspaceData) {
+  return new Set(
+    getActiveStudentEnrollments(data).map((enrollment) => enrollment.subject),
+  )
+}
+
+export function hasActiveSubjectAccess(
+  data: WorkspaceData,
+  subjectId: number | null,
+) {
+  if (!subjectId) {
+    return true
+  }
+
+  return getActiveStudentSubjectIds(data).has(subjectId)
+}
+
+export function hasActiveModuleAccess(data: WorkspaceData, module: Module) {
+  if (!module.subjects.length) {
+    return true
+  }
+
+  const activeSubjectIds = getActiveStudentSubjectIds(data)
+  return module.subjects.some((subjectId) => activeSubjectIds.has(subjectId))
+}
+
+export function hasActiveAssessmentAccess(
+  data: WorkspaceData,
+  assessment: Assessment,
+) {
+  if (assessment.module) {
+    const module = data.modules.find((item) => item.id === assessment.module)
+    return module ? hasActiveModuleAccess(data, module) : false
+  }
+
+  return hasActiveSubjectAccess(data, assessment.subject)
+}
+
+export function isMockAssessment(assessment: Assessment) {
+  return assessment.kind === 'MOCK_EXAM' || assessment.kind === 'MOCK_QUIZ'
+}
+
+export function getMockTopicModules(data: WorkspaceData, assessment: Assessment) {
+  return data.modules
+    .filter((module) => {
+      if (!module.is_published || !hasActiveModuleAccess(data, module)) {
+        return false
+      }
+
+      if (assessment.subject) {
+        return module.subjects.includes(assessment.subject)
+      }
+
+      return true
+    })
+    .sort((first, second) => first.title.localeCompare(second.title))
+}
+
+export function getAssessmentQuestions(
+  data: WorkspaceData,
+  assessment: Assessment,
+  attempt?: AssessmentAttempt | null,
+) {
+  if (isMockAssessment(assessment) && attempt) {
+    const selectedQuestionIds = attempt.selected_question_ids.length
+      ? attempt.selected_question_ids
+      : data.attemptQuestions
+          .filter((item) => item.attempt === attempt.id)
+          .sort((first, second) => first.order - second.order || first.id - second.id)
+          .map((item) => item.question)
+
+    if (selectedQuestionIds.length) {
+      return selectedQuestionIds
+        .map((id) => data.questions.find((question) => question.id === id))
+        .filter((question): question is Question => Boolean(question))
+    }
+  }
+
+  return data.questions
+    .filter((question) => question.assessment === assessment.id)
+    .sort((first, second) => first.order - second.order || first.id - second.id)
 }
 
 export function scheduleTime(schedule?: SubjectSchedule) {

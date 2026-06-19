@@ -1,31 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   ApiPage,
+  GradeCategory,
+  GradeItem,
   ScheduleStudent,
-  SchoolYear,
   SchoolYearSemester,
+  StudentGradeItemScore,
   StudentProfile,
-  Subject,
   SubjectSchedule,
   User,
 } from '../../types'
 import { toOptions } from '../../admin/adminHelpers'
-import { formatTime, toErrorMessage } from '../../utils/format'
+import { formatTime, numeric, toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
 
-const semesterOptions = [
-  { label: '1st Semester', value: 'FIRST' },
-  { label: '2nd Semester', value: 'SECOND' },
-  { label: 'Summer', value: 'SUMMER' },
-]
-
 const STUDENT_PAGE_SIZE = 50
-
-type ClassSetupMode = 'schedule' | 'subject' | 'term'
+const gradingPeriods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
+const gradingPeriodLabels: Record<(typeof gradingPeriods)[number], string> = {
+  FINAL: 'Final',
+  MIDTERM: 'Midterm',
+  PREFINAL: 'Prefinal',
+  PRELIM: 'Prelim',
+}
 
 type StudentImportRow = {
   email: string
@@ -35,6 +36,23 @@ type StudentImportRow = {
   studentNumber: string
   username: string
   yearLevel: number | null
+}
+
+type RosterRowData = {
+  email: string
+  enrollment: ScheduleStudent
+  grades: PrimaryGradeSummary
+  studentName: string
+  studentNumber: string
+}
+
+type PrimaryGradeSummary = {
+  finalPeriod: string
+  midterm: string
+  overall: string
+  prefinal: string
+  prelim: string
+  remarks: string
 }
 
 export function AdminClassesPage({
@@ -62,14 +80,14 @@ export function AdminClassesPage({
       <PageHeader
         eyebrow="Academic structure"
         title="Classes"
-        description="Find classes, create academic setup, and manage class rosters."
+        description="Select a class, edit its schedule, and manage its roster."
       />
 
       <section className="classes-setup__grid">
         <div className="classes-setup__panel section-block">
           <SectionHeading
             subtitle={`${visibleSchedules.length} class${visibleSchedules.length === 1 ? '' : 'es'}`}
-            title="Find Class"
+            title="Select Class"
           />
           <ClassFinder
             query={query}
@@ -85,12 +103,13 @@ export function AdminClassesPage({
 
         <div className="classes-setup__panel section-block">
           <SectionHeading
-            subtitle={selectedSchedule ? classScheduleSummary(selectedSchedule) : 'Create or update setup'}
-            title="Class Setup"
+            subtitle={selectedSchedule ? classScheduleSummary(selectedSchedule) : 'Create or update schedule'}
+            title="Schedule Setup"
           />
-          <ClassSetupPanel
+          <ScheduleForm
             api={api}
             data={data}
+            key={selectedSchedule?.id ?? 'new'}
             refresh={refresh}
             selectedSchedule={selectedSchedule}
             setSelectedScheduleId={setSelectedScheduleId}
@@ -186,66 +205,6 @@ function ClassFinder({
   )
 }
 
-function ClassSetupPanel({
-  api,
-  data,
-  refresh,
-  selectedSchedule,
-  setSelectedScheduleId,
-}: {
-  api: AuthedRequest
-  data: WorkspaceData
-  refresh: () => Promise<void>
-  selectedSchedule: SubjectSchedule | null
-  setSelectedScheduleId: (value: number | null) => void
-}) {
-  const [mode, setMode] = useState<ClassSetupMode>('schedule')
-
-  return (
-    <div className="class-setup">
-      <div className="segmented-control" role="tablist" aria-label="Class setup">
-        <button
-          className={mode === 'schedule' ? 'active' : ''}
-          onClick={() => setMode('schedule')}
-          type="button"
-        >
-          Schedule
-        </button>
-        <button
-          className={mode === 'subject' ? 'active' : ''}
-          onClick={() => setMode('subject')}
-          type="button"
-        >
-          Subject
-        </button>
-        <button
-          className={mode === 'term' ? 'active' : ''}
-          onClick={() => setMode('term')}
-          type="button"
-        >
-          Term
-        </button>
-      </div>
-
-      {mode === 'schedule' ? (
-        <ScheduleForm
-          api={api}
-          data={data}
-          refresh={refresh}
-          selectedSchedule={selectedSchedule}
-          setSelectedScheduleId={setSelectedScheduleId}
-        />
-      ) : null}
-      {mode === 'subject' ? (
-        <SubjectForm api={api} refresh={refresh} />
-      ) : null}
-      {mode === 'term' ? (
-        <TermForm api={api} data={data} refresh={refresh} />
-      ) : null}
-    </div>
-  )
-}
-
 function ScheduleForm({
   api,
   data,
@@ -268,10 +227,6 @@ function ScheduleForm({
     (subject) => `${subject.code} ${subject.name}`,
   )
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
-
-  useEffect(() => {
-    setDraft(scheduleDraft(selectedSchedule))
-  }, [selectedSchedule])
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -449,345 +404,6 @@ function ScheduleForm({
   )
 }
 
-function SubjectForm({
-  api,
-  refresh,
-}: {
-  api: AuthedRequest
-  refresh: () => Promise<void>
-}) {
-  const [draft, setDraft] = useState({
-    code: '',
-    description: '',
-    is_active: true,
-    name: '',
-  })
-  const [message, setMessage] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  async function submitForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSaving(true)
-    setMessage('')
-
-    try {
-      await api<Subject>('/subjects/subjects/', {
-        body: JSON.stringify(draft),
-        method: 'POST',
-      })
-      setDraft({ code: '', description: '', is_active: true, name: '' })
-      setMessage('Subject created.')
-      await refresh()
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form className="class-form" onSubmit={submitForm}>
-      <label className="admin-field">
-        <span>Code</span>
-        <input
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, code: event.target.value }))
-          }
-          required
-          type="text"
-          value={draft.code}
-        />
-      </label>
-      <label className="admin-field">
-        <span>Name</span>
-        <input
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, name: event.target.value }))
-          }
-          required
-          type="text"
-          value={draft.name}
-        />
-      </label>
-      <label className="admin-field">
-        <span>Description</span>
-        <textarea
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, description: event.target.value }))
-          }
-          rows={3}
-          value={draft.description}
-        />
-      </label>
-      <label className="admin-check">
-        <input
-          checked={draft.is_active}
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, is_active: event.target.checked }))
-          }
-          type="checkbox"
-        />
-        <span>Active subject</span>
-      </label>
-      {message ? <p className="admin-message">{message}</p> : null}
-      <button className="button button--primary class-save-button" disabled={saving} type="submit">
-        <Icon name="save" />
-        <span>{saving ? 'Saving...' : 'Create subject'}</span>
-      </button>
-    </form>
-  )
-}
-
-function TermForm({
-  api,
-  data,
-  refresh,
-}: {
-  api: AuthedRequest
-  data: WorkspaceData
-  refresh: () => Promise<void>
-}) {
-  const [yearDraft, setYearDraft] = useState({
-    end_year: new Date().getFullYear() + 1,
-    is_active: true,
-    start_year: new Date().getFullYear(),
-  })
-  const [termDraft, setTermDraft] = useState({
-    is_active: true,
-    school_year: '',
-    semester: 'FIRST',
-  })
-  const [message, setMessage] = useState('')
-  const [saving, setSaving] = useState(false)
-  const schoolYearOptions = toOptions(
-    data.schoolYears,
-    (year) => year.id,
-    (year) => year.name,
-  )
-
-  async function createYear(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSaving(true)
-    setMessage('')
-
-    try {
-      const year = await api<SchoolYear>('/subjects/school-years/', {
-        body: JSON.stringify(yearDraft),
-        method: 'POST',
-      })
-      setTermDraft((current) => ({ ...current, school_year: String(year.id) }))
-      setMessage('School year created.')
-      await refresh()
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function createTerm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSaving(true)
-    setMessage('')
-
-    try {
-      const term = await api<SchoolYearSemester>('/subjects/school-year-semesters/', {
-        body: JSON.stringify({
-          is_active: false,
-          school_year: Number(termDraft.school_year),
-          semester: termDraft.semester,
-        }),
-        method: 'POST',
-      })
-      if (termDraft.is_active) {
-        await setOnlyActiveTerm(api, data.terms, term.id)
-      }
-      setMessage('Term created.')
-      await refresh()
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="class-form">
-      <form className="class-form__subform" onSubmit={createYear}>
-        <strong>School year</strong>
-        <div className="class-form__split">
-          <label className="admin-field">
-            <span>Start</span>
-            <input
-              onChange={(event) =>
-                setYearDraft((current) => ({
-                  ...current,
-                  start_year: Number(event.target.value),
-                  end_year: Number(event.target.value) + 1,
-                }))
-              }
-              required
-              type="number"
-              value={yearDraft.start_year}
-            />
-          </label>
-          <label className="admin-field">
-            <span>End</span>
-            <input
-              onChange={(event) =>
-                setYearDraft((current) => ({
-                  ...current,
-                  end_year: Number(event.target.value),
-                }))
-              }
-              required
-              type="number"
-              value={yearDraft.end_year}
-            />
-          </label>
-        </div>
-        <button className="button button--secondary" disabled={saving} type="submit">
-          <Icon name="plus" />
-          <span>Create school year</span>
-        </button>
-      </form>
-
-      <form className="class-form__subform" onSubmit={createTerm}>
-        <strong>Term</strong>
-        <label className="admin-field">
-          <span>School year</span>
-          <select
-            onChange={(event) =>
-              setTermDraft((current) => ({
-                ...current,
-                school_year: event.target.value,
-              }))
-            }
-            required
-            value={termDraft.school_year}
-          >
-            <option value="">Select school year</option>
-            {schoolYearOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="admin-field">
-          <span>Semester</span>
-          <select
-            onChange={(event) =>
-              setTermDraft((current) => ({
-                ...current,
-                semester: event.target.value,
-              }))
-            }
-            value={termDraft.semester}
-          >
-            {semesterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="admin-check">
-          <input
-            checked={termDraft.is_active}
-            onChange={(event) =>
-              setTermDraft((current) => ({
-                ...current,
-                is_active: event.target.checked,
-              }))
-            }
-            type="checkbox"
-          />
-          <span>Active term</span>
-        </label>
-        <button className="button button--primary" disabled={saving} type="submit">
-          <Icon name="save" />
-          <span>Create term</span>
-        </button>
-      </form>
-
-      <div className="class-form__subform">
-        <strong>Existing terms</strong>
-        <div className="term-toggle-list">
-          {data.terms.map((term) => (
-            <TermToggleRow
-              api={api}
-              key={term.id}
-              refresh={refresh}
-              setMessage={setMessage}
-              setSaving={setSaving}
-              term={term}
-              terms={data.terms}
-            />
-          ))}
-          {!data.terms.length ? (
-            <p className="admin-empty-line">No terms created yet.</p>
-          ) : null}
-        </div>
-      </div>
-
-      {message ? <p className="admin-message">{message}</p> : null}
-    </div>
-  )
-}
-
-function TermToggleRow({
-  api,
-  refresh,
-  setMessage,
-  setSaving,
-  term,
-  terms,
-}: {
-  api: AuthedRequest
-  refresh: () => Promise<void>
-  setMessage: (value: string) => void
-  setSaving: (value: boolean) => void
-  term: SchoolYearSemester
-  terms: SchoolYearSemester[]
-}) {
-  async function toggleTerm(isActive: boolean) {
-    setSaving(true)
-    setMessage('')
-
-    try {
-      if (isActive) {
-        await setOnlyActiveTerm(api, terms, term.id)
-      } else {
-        await api(`/subjects/school-year-semesters/${term.id}/`, {
-          body: JSON.stringify({ is_active: false }),
-          method: 'PATCH',
-        })
-      }
-      setMessage(isActive ? `${term.name} is now active.` : `${term.name} deactivated.`)
-      await refresh()
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <label className="term-toggle-list__item">
-      <span>
-        <strong>{term.name}</strong>
-        <small>{term.is_active ? 'Active default' : 'Inactive'}</small>
-      </span>
-      <input
-        checked={term.is_active}
-        onChange={(event) => void toggleTerm(event.target.checked)}
-        type="checkbox"
-      />
-    </label>
-  )
-}
-
 function ClassRoster({
   api,
   data,
@@ -800,34 +416,77 @@ function ClassRoster({
   selectedSchedule: SubjectSchedule | null
 }) {
   const [isAdding, setIsAdding] = useState(false)
+  const [rosterQuery, setRosterQuery] = useState('')
+  const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const roster = selectedSchedule
     ? data.enrollments.filter(
-        (enrollment) =>
-          enrollment.schedule === selectedSchedule.id && enrollment.is_active,
+        (enrollment) => enrollment.schedule === selectedSchedule.id,
       )
     : []
+  const rosterRows = roster.map((enrollment) => getRosterRow(enrollment, data))
+  const visibleRows = filterRosterRows(rosterRows, rosterQuery)
+  const activeCount = roster.filter((enrollment) => enrollment.is_active).length
+  const rosterSubtitle = selectedSchedule
+    ? `${selectedSchedule.subject_code} ${selectedSchedule.section || ''} - ${activeCount} active student${activeCount === 1 ? '' : 's'}`
+    : 'Select a class'
 
   return (
     <section className="section-block">
       <SectionHeading
         action={
-          <button
-            className="button button--primary"
-            disabled={!selectedSchedule}
-            onClick={() => setIsAdding(true)}
-            type="button"
-          >
-            <Icon name="plus" />
-            <span>Add students</span>
-          </button>
+          <div className="class-roster-actions">
+            <button
+              className="button button--secondary"
+              disabled={!selectedSchedule || !visibleRows.length}
+              onClick={() => exportRosterCsv(selectedSchedule, visibleRows)}
+              type="button"
+            >
+              <Icon name="file" />
+              <span>Export CSV</span>
+            </button>
+            {selectedSchedule ? (
+              <Link
+                className="button button--secondary"
+                to={gradebookUrl(selectedSchedule.id)}
+              >
+                <Icon name="grade" />
+                <span>Open Gradebook</span>
+              </Link>
+            ) : null}
+            <button
+              className="button button--primary"
+              disabled={!selectedSchedule}
+              onClick={() => setIsAdding(true)}
+              type="button"
+            >
+              <Icon name="plus" />
+              <span>Add students</span>
+            </button>
+          </div>
         }
-        subtitle={
-          selectedSchedule
-            ? `${selectedSchedule.subject_code} ${selectedSchedule.section || ''} - ${roster.length} student${roster.length === 1 ? '' : 's'}`
-            : 'Select a class'
-        }
+        subtitle={rosterSubtitle}
         title="Roster"
       />
+
+      {selectedSchedule ? (
+        <div className="class-roster-tools">
+          <div className="class-roster-summary">
+            <span>
+              <strong>{activeCount}</strong>
+              Active students
+            </span>
+          </div>
+          <label className="admin-search class-roster-search">
+            <Icon name="search" />
+            <input
+              onChange={(event) => setRosterQuery(event.target.value)}
+              placeholder="Search roster by name or student number"
+              type="search"
+              value={rosterQuery}
+            />
+          </label>
+        </div>
+      ) : null}
 
       <div className="table-wrap">
         <table className="admin-table class-roster-table">
@@ -835,27 +494,39 @@ function ClassRoster({
             <tr>
               <th>Student</th>
               <th>Student number</th>
+              <th>Email</th>
+              <th>Prelim</th>
+              <th>Midterm</th>
+              <th>Prefinal</th>
+              <th>Final</th>
+              <th>Overall</th>
               <th>Status</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
-            {roster.map((enrollment) => (
+            {visibleRows.map((row) => (
               <RosterRow
                 api={api}
-                enrollment={enrollment}
-                key={enrollment.id}
+                row={row}
+                key={row.enrollment.id}
+                onOpenGrades={setGradeRow}
                 refresh={refresh}
               />
             ))}
             {!selectedSchedule ? (
               <tr>
-                <td colSpan={4}>Select a class to view its roster.</td>
+                <td colSpan={10}>Select a class to view and manage enrolled students.</td>
               </tr>
             ) : null}
             {selectedSchedule && !roster.length ? (
               <tr>
-                <td colSpan={4}>No active students in this class.</td>
+                <td colSpan={10}>No active students in this class yet. Add students to build the roster.</td>
+              </tr>
+            ) : null}
+            {selectedSchedule && roster.length && !visibleRows.length ? (
+              <tr>
+                <td colSpan={10}>No roster matches found for this search.</td>
               </tr>
             ) : null}
           </tbody>
@@ -871,27 +542,40 @@ function ClassRoster({
           onClose={() => setIsAdding(false)}
         />
       ) : null}
+
+      {selectedSchedule && gradeRow ? (
+        <GradeDetailsModal
+          data={data}
+          row={gradeRow}
+          schedule={selectedSchedule}
+          onClose={() => setGradeRow(null)}
+        />
+      ) : null}
     </section>
   )
 }
 
 function RosterRow({
   api,
-  enrollment,
+  onOpenGrades,
+  row,
   refresh,
 }: {
   api: AuthedRequest
-  enrollment: ScheduleStudent
+  onOpenGrades: (row: RosterRowData) => void
+  row: RosterRowData
   refresh: () => Promise<void>
 }) {
   const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const { enrollment } = row
 
-  async function removeStudent() {
+  async function toggleEnrollment() {
     setSaving(true)
 
     try {
       await api(`/subjects/schedule-students/${enrollment.id}/`, {
-        body: JSON.stringify({ is_active: false }),
+        body: JSON.stringify({ is_active: !enrollment.is_active }),
         method: 'PATCH',
       })
       await refresh()
@@ -900,23 +584,298 @@ function RosterRow({
     }
   }
 
+  async function removeEnrollment() {
+    setRemoving(true)
+
+    try {
+      await api(`/subjects/schedule-students/${enrollment.id}/`, {
+        method: 'DELETE',
+      })
+      await refresh()
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   return (
     <tr>
-      <td>{enrollment.student_name}</td>
-      <td>{enrollment.student_number || 'None'}</td>
-      <td>{enrollment.is_active ? 'Active' : 'Inactive'}</td>
       <td>
-        <button
-          className="button button--secondary"
-          disabled={saving}
-          onClick={() => void removeStudent()}
-          type="button"
-        >
-          <Icon name="trash" />
-          <span>Remove</span>
-        </button>
+        <strong>{row.studentName}</strong>
+      </td>
+      <td>{row.studentNumber}</td>
+      <td>{row.email}</td>
+      <td><GradeCell value={row.grades.prelim} /></td>
+      <td><GradeCell value={row.grades.midterm} /></td>
+      <td><GradeCell value={row.grades.prefinal} /></td>
+      <td><GradeCell value={row.grades.finalPeriod} /></td>
+      <td><GradeCell value={row.grades.overall} strong /></td>
+      <td>
+        <span className={enrollment.is_active ? 'roster-status roster-status--active' : 'roster-status'}>
+          {enrollment.is_active ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      <td>
+        <div className="roster-row-actions">
+          <button
+            className="button button--secondary button--compact"
+            disabled={saving || removing}
+            onClick={() => onOpenGrades(row)}
+            type="button"
+          >
+            <Icon name="grade" />
+            <span>Grades</span>
+          </button>
+          <Link
+            className="button button--secondary button--compact"
+            to={gradebookUrl(enrollment.schedule, enrollment.student)}
+          >
+            <Icon name="edit" />
+            <span>Record Score</span>
+          </Link>
+          <button
+            className="button button--secondary button--compact"
+            disabled={saving || removing}
+            onClick={() => void toggleEnrollment()}
+            type="button"
+          >
+            <Icon name={enrollment.is_active ? 'close' : 'check'} />
+            <span>
+              {saving
+                ? 'Saving...'
+                : enrollment.is_active
+                  ? 'Deactivate'
+                  : 'Activate'}
+            </span>
+          </button>
+          <button
+            className="button button--secondary button--compact roster-remove-button"
+            disabled={saving || removing}
+            onClick={() => void removeEnrollment()}
+            type="button"
+          >
+            <Icon name="trash" />
+            <span>{removing ? 'Removing...' : 'Remove'}</span>
+          </button>
+        </div>
       </td>
     </tr>
+  )
+}
+
+function GradeCell({ strong = false, value }: { strong?: boolean; value: string }) {
+  return (
+    <span className={strong ? 'roster-grade roster-grade--strong' : 'roster-grade'}>
+      {value}
+    </span>
+  )
+}
+
+function GradeDetailsModal({
+  data,
+  onClose,
+  row,
+  schedule,
+}: {
+  data: WorkspaceData
+  onClose: () => void
+  row: RosterRowData
+  schedule: SubjectSchedule
+}) {
+  const finalGrade = findFinalGrade(data, schedule.subject, row.enrollment.student)
+  const categories = data.gradeCategories.filter(
+    (category) => category.subject === schedule.subject,
+  )
+  const categoryGrades = data.categoryGrades.filter(
+    (grade) =>
+      grade.subject === schedule.subject &&
+      grade.student === row.enrollment.student,
+  )
+  const itemScores = data.gradeItemScores.filter(
+    (score) =>
+      score.subject === schedule.subject &&
+      score.student === row.enrollment.student,
+  )
+
+  return (
+    <div
+      aria-labelledby="grade-details-title"
+      aria-modal="true"
+      className="attendance-modal"
+      role="dialog"
+    >
+      <div className="attendance-modal__backdrop" onClick={onClose} />
+      <div className="attendance-modal__panel attendance-modal__panel--wide">
+        <div className="attendance-modal__header">
+          <div>
+            <strong id="grade-details-title">Grade details</strong>
+            <span>
+              {row.studentName} - {row.studentNumber} - {schedule.subject_code}
+            </span>
+          </div>
+          <button className="icon-button" onClick={onClose} title="Close" type="button">
+            <Icon name="close" />
+          </button>
+        </div>
+
+        <div className="grade-modal-meta">
+          <span className={row.enrollment.is_active ? 'roster-status roster-status--active' : 'roster-status'}>
+            {row.enrollment.is_active ? 'Active enrollment' : 'Inactive enrollment'}
+          </span>
+          <span>{schedule.subject_name}</span>
+          <span>{classScheduleSummary(schedule) || 'No schedule summary'}</span>
+        </div>
+
+        <section className="grade-summary-grid">
+          <GradeSummaryItem label="Prelim" value={row.grades.prelim} />
+          <GradeSummaryItem label="Midterm" value={row.grades.midterm} />
+          <GradeSummaryItem label="Prefinal" value={row.grades.prefinal} />
+          <GradeSummaryItem label="Final period" value={row.grades.finalPeriod} />
+          <GradeSummaryItem label="Overall" value={row.grades.overall} />
+        </section>
+
+        {!hasAnyPeriodGrade(row.grades) ? (
+          <p className="admin-empty-line">No period grades recorded for this student yet.</p>
+        ) : null}
+        {!finalGrade ? (
+          <p className="admin-empty-line">No final grade record yet.</p>
+        ) : null}
+        {finalGrade?.remarks ? (
+          <p className="grade-remarks">
+            <strong>Remarks</strong>
+            <span>{finalGrade.remarks}</span>
+          </p>
+        ) : null}
+
+        <section className="grade-breakdown-panel">
+          <SectionHeading
+            subtitle={`${itemScores.length} item score${itemScores.length === 1 ? '' : 's'} recorded`}
+            title="Grade Breakdown"
+          />
+          {!categories.length ? (
+            <p className="admin-empty-line">No grade categories configured for this subject yet.</p>
+          ) : (
+            gradingPeriods.map((period) => {
+              const periodCategories = categories.filter(
+                (category) => category.grading_period === period,
+              )
+
+              if (!periodCategories.length) {
+                return null
+              }
+
+              return (
+                <div className="grade-period-block" key={period}>
+                  <strong>{gradingPeriodLabels[period]}</strong>
+                  <div className="table-wrap">
+                    <table className="admin-table grade-breakdown-table">
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>Raw / Total</th>
+                          <th>Transmuted</th>
+                          <th>Weighted / Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periodCategories.map((category) => {
+                          const grade = categoryGrades.find(
+                            (candidate) => candidate.grade_category === category.id,
+                          )
+                          const gradeItems = data.gradeItems
+                            .filter((item) => item.grade_category === category.id)
+                            .sort((left, right) => left.order - right.order || left.id - right.id)
+                          const rows = gradeItems
+                            .map((item) => ({
+                              item,
+                              score: itemScores.find((score) => score.grade_item === item.id) ?? null,
+                            }))
+                            .filter((entry) => entry.score)
+
+                          return (
+                            <GradeCategoryBreakdownRows
+                              category={category}
+                              grade={grade ?? null}
+                              itemRows={rows}
+                              key={category.id}
+                            />
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })
+          )}
+          {categories.length && !categoryGrades.length ? (
+            <p className="admin-empty-line">No category grades recorded for this student yet.</p>
+          ) : null}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function GradeCategoryBreakdownRows({
+  category,
+  grade,
+  itemRows,
+}: {
+  category: GradeCategory
+  grade: {
+    raw_score: string
+    total_score: string
+    transmuted_grade: string | null
+    weighted_score: string | null
+  } | null
+  itemRows: { item: GradeItem; score: StudentGradeItemScore | null }[]
+}) {
+  if (!itemRows.length) {
+    return (
+      <tr>
+        <td>
+          <strong>{category.name}</strong>
+          <span>{category.category} - {formatGradeValue(category.weight)}%</span>
+        </td>
+        <td>{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
+        <td>{gradeValue(grade?.transmuted_grade ?? null)}</td>
+        <td>{gradeValue(grade?.weighted_score ?? null)}</td>
+      </tr>
+    )
+  }
+
+  return (
+    <>
+      {itemRows.map(({ item, score }) => (
+        <tr key={item.id}>
+          <td>
+            <strong>{item.source_title || item.title}</strong>
+            <span>{sourceTypeLabel(item.source_type)} - {category.name}</span>
+          </td>
+          <td>{score ? `${formatGradeValue(score.raw_score)} / ${formatGradeValue(score.total_score)}` : '-'}</td>
+          <td>{gradeValue(score?.transmuted_grade ?? null)}</td>
+          <td>{score?.remarks || '-'}</td>
+        </tr>
+      ))}
+      <tr className="grade-category-total-row">
+        <td>
+          <strong>{category.name} total</strong>
+          <span>{category.category} - {formatGradeValue(category.weight)}%</span>
+        </td>
+        <td>{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
+        <td>{gradeValue(grade?.transmuted_grade ?? null)}</td>
+        <td>{gradeValue(grade?.weighted_score ?? null)}</td>
+      </tr>
+    </>
+  )
+}
+
+function GradeSummaryItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grade-summary-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   )
 }
 
@@ -945,23 +904,7 @@ function AddStudentsModal({
   const [studentError, setStudentError] = useState('')
   const hasMoreStudents = nextStudentOffset !== null
 
-  useEffect(() => {
-    const controller = new AbortController()
-    const timeout = window.setTimeout(() => {
-      void loadAvailableStudents({
-        offset: 0,
-        reset: true,
-        signal: controller.signal,
-      })
-    }, 250)
-
-    return () => {
-      controller.abort()
-      window.clearTimeout(timeout)
-    }
-  }, [query, schedule.id, data.enrollments])
-
-  async function loadAvailableStudents({
+  const loadAvailableStudents = useCallback(async function loadAvailableStudents({
     offset,
     reset,
     signal,
@@ -991,7 +934,23 @@ function AddStudentsModal({
     } finally {
       setLoadingStudents(false)
     }
-  }
+  }, [api, query, schedule.id])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      void loadAvailableStudents({
+        offset: 0,
+        reset: true,
+        signal: controller.signal,
+      })
+    }, 250)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timeout)
+    }
+  }, [data.enrollments, loadAvailableStudents])
 
   async function addStudents() {
     setSaving(true)
@@ -999,16 +958,28 @@ function AddStudentsModal({
 
     try {
       await Promise.all(
-        selectedIds.map((studentId) =>
-          api('/subjects/schedule-students/', {
+        selectedIds.map((studentId) => {
+          const existingEnrollment = data.enrollments.find(
+            (enrollment) =>
+              enrollment.schedule === schedule.id && enrollment.student === studentId,
+          )
+
+          if (existingEnrollment) {
+            return api(`/subjects/schedule-students/${existingEnrollment.id}/`, {
+              body: JSON.stringify({ is_active: true }),
+              method: 'PATCH',
+            })
+          }
+
+          return api('/subjects/schedule-students/', {
             body: JSON.stringify({
               is_active: true,
               schedule: schedule.id,
               student: studentId,
             }),
             method: 'POST',
-          }),
-        ),
+          })
+        }),
       )
       setMessage('Students added.')
       setSelectedIds([])
@@ -1347,37 +1318,170 @@ function mergeStudents(current: User[], incoming: User[]) {
   ]
 }
 
+function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterRowData {
+  const profile = data.profiles.find((candidate) => candidate.user === enrollment.student)
+  const user = data.users.find((candidate) => candidate.id === enrollment.student)
+
+  return {
+    email: user?.email || 'None',
+    enrollment,
+    grades: getPrimaryGradeSummary(data, enrollment.subject, enrollment.student),
+    studentName: enrollment.student_name || fullName(user ?? null),
+    studentNumber: enrollment.student_number || profile?.student_number || 'None',
+  }
+}
+
+function getPrimaryGradeSummary(
+  data: WorkspaceData,
+  subjectId: number,
+  studentId: number,
+): PrimaryGradeSummary {
+  const finalGrade = findFinalGrade(data, subjectId, studentId)
+
+  return {
+    finalPeriod: gradeValue(
+      finalGrade?.final_period_grade ?? findPeriodGrade(data, subjectId, studentId, 'FINAL'),
+    ),
+    midterm: gradeValue(
+      finalGrade?.midterm_grade ?? findPeriodGrade(data, subjectId, studentId, 'MIDTERM'),
+    ),
+    overall: gradeValue(finalGrade?.final_grade ?? null),
+    prefinal: gradeValue(
+      finalGrade?.prefinal_grade ?? findPeriodGrade(data, subjectId, studentId, 'PREFINAL'),
+    ),
+    prelim: gradeValue(
+      finalGrade?.prelim_grade ?? findPeriodGrade(data, subjectId, studentId, 'PRELIM'),
+    ),
+    remarks: finalGrade?.remarks || '',
+  }
+}
+
+function findFinalGrade(data: WorkspaceData, subjectId: number, studentId: number) {
+  return data.finalGrades.find(
+    (grade) => grade.subject === subjectId && grade.student === studentId,
+  )
+}
+
+function findPeriodGrade(
+  data: WorkspaceData,
+  subjectId: number,
+  studentId: number,
+  period: (typeof gradingPeriods)[number],
+) {
+  return data.periodGrades.find(
+    (grade) =>
+      grade.subject === subjectId &&
+      grade.student === studentId &&
+      grade.grading_period === period,
+  )?.raw_score ?? null
+}
+
+function gradeValue(value: string | null) {
+  return value ? formatGradeValue(value) : '-'
+}
+
+function formatGradeValue(value: string | number) {
+  return numeric(value).toFixed(2)
+}
+
+function sourceTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    ASSESSMENT: 'Assessment',
+    ATTENDANCE: 'Attendance',
+    CODING: 'Coding',
+    MANUAL: 'Manual',
+    MODULE_ACTIVITY: 'Module activity',
+  }
+
+  return labels[value] ?? value
+}
+
+function hasAnyPeriodGrade(grades: PrimaryGradeSummary) {
+  return [
+    grades.finalPeriod,
+    grades.midterm,
+    grades.prefinal,
+    grades.prelim,
+  ].some((value) => value !== '-')
+}
+
+function filterRosterRows(rows: RosterRowData[], query: string) {
+  const normalizedQuery = query.trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return rows
+  }
+
+  return rows.filter((row) =>
+    `${row.studentName} ${row.studentNumber}`.toLowerCase().includes(normalizedQuery),
+  )
+}
+
+function exportRosterCsv(
+  schedule: SubjectSchedule | null,
+  rows: RosterRowData[],
+) {
+  if (!schedule || !rows.length) {
+    return
+  }
+
+  const headers = [
+    'Student',
+    'Student number',
+    'Email',
+    'Prelim',
+    'Midterm',
+    'Prefinal',
+    'Final',
+    'Overall',
+    'Status',
+  ]
+  const csvRows = rows.map((row) => [
+    row.studentName,
+    row.studentNumber,
+    row.email,
+    row.grades.prelim,
+    row.grades.midterm,
+    row.grades.prefinal,
+    row.grades.finalPeriod,
+    row.grades.overall,
+    row.enrollment.is_active ? 'Active' : 'Inactive',
+  ])
+  const csv = [headers, ...csvRows]
+    .map((row) => row.map(csvEscape).join(','))
+    .join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+
+  link.href = url
+  link.download = `${schedule.subject_code}-${schedule.section || 'class'}-roster.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function csvEscape(value: string) {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+
+  return value
+}
+
+function gradebookUrl(scheduleId: number, studentId?: number) {
+  const params = new URLSearchParams({ schedule: String(scheduleId) })
+
+  if (studentId) {
+    params.set('student', String(studentId))
+  }
+
+  return `/admin/gradebook?${params.toString()}`
+}
+
 function isAbortError(caughtError: unknown) {
   return (
     caughtError instanceof DOMException
     && caughtError.name === 'AbortError'
-  )
-}
-
-async function setOnlyActiveTerm(
-  api: AuthedRequest,
-  terms: SchoolYearSemester[],
-  activeTermId: number,
-) {
-  const includesActiveTerm = terms.some((term) => term.id === activeTermId)
-
-  await Promise.all(
-    [
-      ...terms.map((term) =>
-        api(`/subjects/school-year-semesters/${term.id}/`, {
-          body: JSON.stringify({ is_active: term.id === activeTermId }),
-          method: 'PATCH',
-        }),
-      ),
-      ...(!includesActiveTerm
-        ? [
-            api(`/subjects/school-year-semesters/${activeTermId}/`, {
-              body: JSON.stringify({ is_active: true }),
-              method: 'PATCH',
-            }),
-          ]
-        : []),
-    ],
   )
 }
 

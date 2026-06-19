@@ -8,7 +8,14 @@ import { QuestionCard } from '../components/QuestionCard'
 import { EmptyState, NotFoundState, Page, PageHeader, SectionHeading, SkeletonList, StatusBanner } from '../components/ui'
 import type { Assessment, AssessmentAttempt } from '../types'
 import { displayScore, formatDateTime, toErrorMessage } from '../utils/format'
-import { emptyAnswerDraft } from '../utils/student'
+import {
+  emptyAnswerDraft,
+  getAssessmentQuestions,
+  getMockTopicModules,
+  hasActiveAssessmentAccess,
+  isMockAssessment,
+  moduleSubjectLabel,
+} from '../utils/student'
 
 export function AssessmentsPage({
   api,
@@ -21,9 +28,17 @@ export function AssessmentsPage({
 }) {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
+  const availableAssessments = data.assessments.filter((assessment) =>
+    hasActiveAssessmentAccess(data, assessment),
+  )
 
   async function startAttempt(assessment: Assessment) {
-    if (!data.currentUser) {
+    if (!data.currentUser || !hasActiveAssessmentAccess(data, assessment)) {
+      return
+    }
+
+    if (isMockAssessment(assessment)) {
+      setMessage('Open the mock exam and select topics before starting.')
       return
     }
 
@@ -71,8 +86,8 @@ export function AssessmentsPage({
       <div className="assessment-list">
         {data.loading ? (
           <SkeletonList count={4} />
-        ) : data.assessments.length ? (
-          data.assessments.map((assessment) => (
+        ) : availableAssessments.length ? (
+          availableAssessments.map((assessment) => (
       <AssessmentRow
               assessment={assessment}
               attempts={data.attempts.filter(
@@ -90,7 +105,7 @@ export function AssessmentsPage({
           <EmptyState
             icon="assessment"
             title="No assessments"
-            message="Published assessments will appear here."
+            message="Assessments for your active classes will appear here."
           />
         )}
       </div>
@@ -113,6 +128,7 @@ export function AssessmentDetailPage({
   )
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
   const [responses, setResponses] = useState<Record<number, AnswerDraft>>({})
+  const [selectedTopicIds, setSelectedTopicIds] = useState<number[]>([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -123,19 +139,20 @@ export function AssessmentDetailPage({
         .sort((first, second) => second.attempt_number - first.attempt_number),
     [assessment?.id, data.attempts],
   )
+  const isMock = assessment ? isMockAssessment(assessment) : false
+  const canStart = assessment ? attempts.length < assessment.max_attempts : false
   const activeAttempt =
     attempts.find((attempt) => attempt.id === selectedAttemptId) ??
     attempts.find((attempt) => !attempt.is_submitted) ??
-    attempts[0] ??
-    null
-  const questions = useMemo(
-    () =>
-      data.questions
-        .filter((question) => question.assessment === assessment?.id)
-        .sort((first, second) => first.order - second.order || first.id - second.id),
-    [assessment?.id, data.questions],
+    (isMock && canStart ? null : attempts[0] ?? null)
+  const topicModules = useMemo(
+    () => (assessment ? getMockTopicModules(data, assessment) : []),
+    [assessment, data],
   )
-  const canStart = assessment ? attempts.length < assessment.max_attempts : false
+  const questions = useMemo(
+    () => (assessment ? getAssessmentQuestions(data, assessment, activeAttempt) : []),
+    [activeAttempt, assessment, data],
+  )
 
   useEffect(() => {
     const responseTimer = window.setTimeout(() => {
@@ -163,11 +180,11 @@ export function AssessmentDetailPage({
     return () => window.clearTimeout(responseTimer)
   }, [activeAttempt, data.answers, questions])
 
-  if (!assessment) {
+  if (!assessment || !hasActiveAssessmentAccess(data, assessment)) {
     return (
       <Page>
         <NotFoundState
-          message="This assessment is not available in the current API response."
+          message="This assessment is not available for your active classes."
           to="/assessments"
         />
       </Page>
@@ -175,7 +192,7 @@ export function AssessmentDetailPage({
   }
 
   async function startAttempt() {
-    if (!data.currentUser || !assessment) {
+    if (!data.currentUser || !assessment || !hasActiveAssessmentAccess(data, assessment)) {
       return
     }
 
@@ -183,16 +200,30 @@ export function AssessmentDetailPage({
     setMessage('')
 
     try {
-      const attempt = await api<AssessmentAttempt>('/assessments/attempts/', {
-        method: 'POST',
-        body: JSON.stringify({
-          assessment: assessment.id,
-          student: data.currentUser.id,
-          attempt_number: attempts.length + 1,
-        }),
-      })
+      const attempt = isMock
+        ? await api<AssessmentAttempt>(
+            `/assessments/assessments/${assessment.id}/start-mock/`,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                selected_topics: selectedTopicIds,
+              }),
+            },
+          )
+        : await api<AssessmentAttempt>('/assessments/attempts/', {
+            method: 'POST',
+            body: JSON.stringify({
+              assessment: assessment.id,
+              student: data.currentUser.id,
+              attempt_number: attempts.length + 1,
+            }),
+          })
       setSelectedAttemptId(attempt.id)
-      setMessage('Attempt started. You can now answer the questions.')
+      setMessage(
+        isMock
+          ? `Mock exam started with ${attempt.selected_question_ids.length} question${attempt.selected_question_ids.length === 1 ? '' : 's'}.`
+          : 'Attempt started. You can now answer the questions.',
+      )
       await refresh()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -258,7 +289,7 @@ export function AssessmentDetailPage({
         title={assessment.title}
         description={assessment.instructions || 'Answer each question before submitting.'}
         actions={
-          canStart ? (
+          canStart && !isMock ? (
             <button
               className="button button--secondary"
               disabled={saving}
@@ -267,6 +298,16 @@ export function AssessmentDetailPage({
             >
               <Icon name="send" />
               <span>{saving ? 'Starting...' : 'Start attempt'}</span>
+            </button>
+          ) : canStart && isMock && activeAttempt ? (
+            <button
+              className="button button--secondary"
+              disabled={saving}
+              onClick={() => setSelectedAttemptId(null)}
+              type="button"
+            >
+              <Icon name="send" />
+              <span>New mock attempt</span>
             </button>
           ) : null
         }
@@ -280,6 +321,14 @@ export function AssessmentDetailPage({
         />
       ) : null}
 
+      {activeAttempt?.is_submitted ? (
+        <StatusBanner
+          tone="success"
+          title="Result"
+          message={`Score: ${displayScore(activeAttempt.score)}`}
+        />
+      ) : null}
+
       <section className="content-grid">
         <form className="assessment-workspace" onSubmit={submitAssessment}>
           <SectionHeading
@@ -287,7 +336,17 @@ export function AssessmentDetailPage({
             title="Question Sheet"
           />
 
-          {!activeAttempt ? (
+          {!activeAttempt && isMock ? (
+            <MockTopicPicker
+              canStart={canStart}
+              isSaving={saving}
+              onStart={startAttempt}
+              selectedTopicIds={selectedTopicIds}
+              setSelectedTopicIds={setSelectedTopicIds}
+              data={data}
+              topics={topicModules}
+            />
+          ) : !activeAttempt ? (
             <EmptyState
               icon="assessment"
               title="No active attempt"
@@ -371,5 +430,74 @@ export function AssessmentDetailPage({
         </aside>
       </section>
     </Page>
+  )
+}
+
+function MockTopicPicker({
+  canStart,
+  isSaving,
+  onStart,
+  selectedTopicIds,
+  setSelectedTopicIds,
+  data,
+  topics,
+}: {
+  canStart: boolean
+  data: WorkspaceData
+  isSaving: boolean
+  onStart: () => void
+  selectedTopicIds: number[]
+  setSelectedTopicIds: (ids: number[]) => void
+  topics: ReturnType<typeof getMockTopicModules>
+}) {
+  function toggleTopic(topicId: number) {
+    setSelectedTopicIds(
+      selectedTopicIds.includes(topicId)
+        ? selectedTopicIds.filter((id) => id !== topicId)
+        : [...selectedTopicIds, topicId],
+    )
+  }
+
+  return (
+    <div className="question-card">
+      <div className="question-card__header">
+        <span className="subject-chip">Mock topics</span>
+        <span className="status-pill">{selectedTopicIds.length} selected</span>
+      </div>
+
+      {topics.length ? (
+        <div className="choice-list">
+          {topics.map((topic) => (
+            <label className="choice-option" key={topic.id}>
+              <input
+                checked={selectedTopicIds.includes(topic.id)}
+                disabled={!canStart || isSaving}
+                onChange={() => toggleTopic(topic.id)}
+                type="checkbox"
+              />
+              <span>
+                {topic.title} - {moduleSubjectLabel(data, topic)}
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon="book"
+          title="No available topics"
+          message="Published modules for this mock exam will appear here."
+        />
+      )}
+
+      <button
+        className="button button--primary"
+        disabled={!canStart || isSaving || !selectedTopicIds.length}
+        onClick={onStart}
+        type="button"
+      >
+        <Icon name="send" />
+        <span>{isSaving ? 'Starting...' : canStart ? 'Start mock exam' : 'Maxed'}</span>
+      </button>
+    </div>
   )
 }

@@ -3,11 +3,13 @@ import type { AuthedRequest, WorkspaceDataWithRefresh } from './types'
 import { MobileHeader, MobileTabbar, Sidebar } from '../components/navigation'
 import type { NavItem } from '../components/navigation'
 import { StatusBanner } from '../components/ui'
+import { AdminAcademicSetupPage } from '../pages/admin/AdminAcademicSetupPage'
 import { AdminAssessmentsPage } from '../pages/admin/AdminAssessmentsPage'
 import { AdminAttendancePage } from '../pages/admin/AdminAttendancePage'
 import { AdminClassesPage } from '../pages/admin/AdminClassesPage'
 import { AdminCodingPage } from '../pages/admin/AdminCodingPage'
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage'
+import { AdminGradebookPage } from '../pages/admin/AdminGradebookPage'
 import { AdminGradesPage } from '../pages/admin/AdminGradesPage'
 import { AdminModulesPage } from '../pages/admin/AdminModulesPage'
 import { AdminStudentsPage } from '../pages/admin/AdminStudentsPage'
@@ -16,10 +18,12 @@ const adminNavItems: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' },
   { to: '/admin/students', label: 'Students', icon: 'users' },
   { to: '/admin/classes', label: 'Classes', icon: 'calendar' },
+  { to: '/admin/academic-setup', label: 'Academic Setup', icon: 'book' },
   { to: '/admin/modules', label: 'Modules', icon: 'module' },
   { to: '/admin/coding', label: 'Coding', icon: 'code' },
   { to: '/admin/assessments', label: 'Assessments', icon: 'assessment' },
   { to: '/admin/attendance', label: 'Attendance', icon: 'check' },
+  { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' },
   { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]
 
@@ -103,6 +107,16 @@ export function AdminApp({
             }
           />
           <Route
+            path="/admin/academic-setup"
+            element={
+              <AdminAcademicSetupPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
             path="/admin/modules"
             element={
               <AdminModulesPage
@@ -146,6 +160,16 @@ export function AdminApp({
             path="/admin/grades"
             element={
               <AdminGradesPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/gradebook"
+            element={
+              <AdminGradebookPage
                 api={api}
                 data={workspace}
                 refresh={workspace.refresh}

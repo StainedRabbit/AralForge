@@ -1,11 +1,15 @@
 import type { WorkspaceData } from '../app/types'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard } from '../components/ui'
-import { attendanceStatusLabel, attendanceSummary, subjectLabel } from '../utils/student'
+import { attendanceStatusLabel, attendanceSummary, hasActiveSubjectAccess, subjectLabel } from '../utils/student'
 import { formatDate, numeric } from '../utils/format'
 
 export function AttendancePage({ data }: { data: WorkspaceData }) {
-  const summary = attendanceSummary(data.attendanceRecords)
-  const totalAttendancePoints = data.attendanceRecords.reduce(
+  const activeAttendanceRecords = data.attendanceRecords.filter((record) => {
+    const session = data.attendanceSessions.find((item) => item.id === record.session)
+    return session ? hasActiveSubjectAccess(data, session.subject) : true
+  })
+  const summary = attendanceSummary(activeAttendanceRecords)
+  const totalAttendancePoints = activeAttendanceRecords.reduce(
     (sum, record) => sum + numeric(record.points_earned),
     0,
   )
@@ -47,14 +51,14 @@ export function AttendancePage({ data }: { data: WorkspaceData }) {
 
       <section className="section-block">
         <SectionHeading
-          subtitle={`${data.attendanceRecords.length} recorded session${data.attendanceRecords.length === 1 ? '' : 's'}`}
+          subtitle={`${activeAttendanceRecords.length} recorded session${activeAttendanceRecords.length === 1 ? '' : 's'}`}
           title="Attendance History"
         />
         <div className="attendance-list">
           {data.loading ? (
             <SkeletonList count={5} />
-          ) : data.attendanceRecords.length ? (
-            data.attendanceRecords.map((record) => {
+          ) : activeAttendanceRecords.length ? (
+            activeAttendanceRecords.map((record) => {
               const session = data.attendanceSessions.find(
                 (item) => item.id === record.session,
               )
@@ -86,7 +90,7 @@ export function AttendancePage({ data }: { data: WorkspaceData }) {
             <EmptyState
               icon="calendar"
               title="No attendance records"
-              message="Your teacher's attendance records will appear here."
+              message="Attendance records for your active classes will appear here."
             />
           )}
         </div>

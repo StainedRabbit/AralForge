@@ -3,6 +3,7 @@ from rest_framework import permissions, viewsets
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from learning_modules.models import active_module_access_filter
+from subjects.models import active_subject_access_filter
 
 from .models import CodeBlank, CodeBlankAnswer, CodeSubmission, ProgrammingProblem, TestCase
 from .serializers import (
@@ -29,7 +30,10 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(is_published=True).filter(
-            Q(module__isnull=True)
+            (
+                Q(module__isnull=True)
+                & active_subject_access_filter(self.request.user, subject_prefix='subject__')
+            )
             | (
                 Q(module__is_published=True)
                 & active_module_access_filter(self.request.user, prefix='module__')
@@ -48,7 +52,13 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(problem__is_published=True, is_hidden=False).filter(
-            Q(problem__module__isnull=True)
+            (
+                Q(problem__module__isnull=True)
+                & active_subject_access_filter(
+                    self.request.user,
+                    subject_prefix='problem__subject__',
+                )
+            )
             | (
                 Q(problem__module__is_published=True)
                 & active_module_access_filter(
@@ -70,7 +80,13 @@ class CodeBlankViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(problem__is_published=True).filter(
-            Q(problem__module__isnull=True)
+            (
+                Q(problem__module__isnull=True)
+                & active_subject_access_filter(
+                    self.request.user,
+                    subject_prefix='problem__subject__',
+                )
+            )
             | (
                 Q(problem__module__is_published=True)
                 & active_module_access_filter(

@@ -3,7 +3,7 @@ import type { AuthedRequest, WorkspaceData } from '../app/types'
 import { CodingBlankPanel, ModuleSubmissionForm } from '../components/activityForms'
 import { Icon } from '../components/Icon'
 import { MetaStrip, NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
-import { activityTypeLabel } from '../utils/student'
+import { activityTypeLabel, hasActiveModuleAccess } from '../utils/student'
 import { formatDateTime, numeric } from '../utils/format'
 
 export function ActivityDetailPage({
@@ -30,6 +30,18 @@ export function ActivityDetailPage({
   }
 
   const module = data.modules.find((item) => item.id === activity.module)
+
+  if (module && !hasActiveModuleAccess(data, module)) {
+    return (
+      <Page>
+        <NotFoundState
+          message="This activity is not available for your active classes."
+          to="/modules"
+        />
+      </Page>
+    )
+  }
+
   const problem = data.problems.find(
     (item) => item.id === activity.programming_problem,
   )

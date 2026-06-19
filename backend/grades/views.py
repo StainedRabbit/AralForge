@@ -9,18 +9,22 @@ from subjects.models import Subject
 from .models import (
     FinalGrade,
     GradeCategory,
+    GradeItem,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
     StudentCategoryGrade,
+    StudentGradeItemScore,
 )
 from .serializers import (
     FinalGradeSerializer,
     GradeCategorySerializer,
+    GradeItemSerializer,
     GradingTemplateItemSerializer,
     GradingTemplateSerializer,
     PeriodGradeSerializer,
     StudentCategoryGradeSerializer,
+    StudentGradeItemScoreSerializer,
 )
 
 
@@ -56,6 +60,39 @@ class StudentCategoryGradeViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = StudentCategoryGrade.objects.select_related('subject', 'student', 'grade_category')
+
+        if self.request.user.is_admin_teacher:
+            return queryset
+
+        return queryset.filter(student=self.request.user)
+
+
+class GradeItemViewSet(viewsets.ModelViewSet):
+    serializer_class = GradeItemSerializer
+    permission_classes = [IsAdminTeacherOrReadOnly]
+
+    def get_queryset(self):
+        return GradeItem.objects.select_related(
+            'grade_category',
+            'grade_category__subject',
+            'assessment',
+            'module_activity',
+            'attendance_session',
+            'coding_problem',
+        )
+
+
+class StudentGradeItemScoreViewSet(viewsets.ModelViewSet):
+    serializer_class = StudentGradeItemScoreSerializer
+    permission_classes = [IsAdminTeacherOrReadOnly]
+
+    def get_queryset(self):
+        queryset = StudentGradeItemScore.objects.select_related(
+            'grade_item',
+            'grade_item__grade_category',
+            'grade_item__grade_category__subject',
+            'student',
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset
