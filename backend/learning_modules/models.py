@@ -3,12 +3,21 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from subjects.models import active_subject_access_filter
+
 
 class Module(models.Model):
     title = models.CharField(max_length=180)
     slug = models.SlugField(max_length=200, unique=True)
     description = models.TextField(blank=True)
     content = models.TextField(blank=True)
+    learning_objectives = models.TextField(blank=True)
+    lesson_overview = models.TextField(blank=True)
+    detailed_discussion = models.TextField(blank=True)
+    examples = models.TextField(blank=True)
+    teacher_notes = models.TextField(blank=True)
+    student_activities = models.TextField(blank=True)
+    resources = models.TextField(blank=True)
     pdf_file = models.FileField(upload_to='module_pdfs/', blank=True)
     is_paid = models.BooleanField(default=True)
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -100,7 +109,7 @@ class ModuleAccess(models.Model):
 def active_module_access_filter(user, prefix=''):
     access_prefix = f'{prefix}access_grants__'
 
-    return Q(**{f'{prefix}is_paid': False}) | (
+    paid_access_filter = Q(**{f'{prefix}is_paid': False}) | (
         Q(**{f'{access_prefix}student': user})
         & Q(**{f'{access_prefix}is_active': True})
         & (
@@ -109,8 +118,16 @@ def active_module_access_filter(user, prefix=''):
         )
     )
 
+    return paid_access_filter & active_subject_access_filter(
+        user,
+        subject_prefix=f'{prefix}subjects__',
+    )
+
 
 def user_has_module_access(user, module):
+    if not user_has_module_class_access(user, module):
+        return False
+
     if not module.is_paid:
         return True
 
@@ -121,6 +138,22 @@ def user_has_module_access(user, module):
     ).filter(
         Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
     ).exists()
+
+
+def user_has_module_class_access(user, module):
+    subjects = module.subjects.all()
+
+    if not subjects:
+        return True
+
+    return any(
+        subject.schedules.filter(
+            is_active=True,
+            students__student=user,
+            students__is_active=True,
+        ).exists()
+        for subject in subjects
+    )
 
 
 class ModuleActivity(models.Model):

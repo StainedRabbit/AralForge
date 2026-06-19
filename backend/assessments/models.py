@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Assessment(models.Model):
@@ -29,6 +30,7 @@ class Assessment(models.Model):
     )
     instructions = models.TextField(blank=True)
     points_possible = models.DecimalField(max_digits=7, decimal_places=2, default=100)
+    mock_question_count = models.PositiveSmallIntegerField(default=25)
     time_limit_minutes = models.PositiveIntegerField(null=True, blank=True)
     max_attempts = models.PositiveSmallIntegerField(default=1)
     randomize_questions = models.BooleanField(default=False)
@@ -65,6 +67,11 @@ class Question(models.Model):
     points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
     order = models.PositiveIntegerField(default=0)
     explanation = models.TextField(blank=True)
+    topics = models.ManyToManyField(
+        'learning_modules.Module',
+        blank=True,
+        related_name='assessment_questions',
+    )
 
     class Meta:
         ordering = ['assessment', 'order', 'id']
@@ -106,6 +113,11 @@ class AssessmentAttempt(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     is_submitted = models.BooleanField(default=False)
+    selected_topics = models.ManyToManyField(
+        'learning_modules.Module',
+        blank=True,
+        related_name='mock_exam_attempts',
+    )
 
     class Meta:
         constraints = [
@@ -118,6 +130,67 @@ class AssessmentAttempt(models.Model):
 
     def __str__(self):
         return f'{self.student} - {self.assessment} attempt {self.attempt_number}'
+
+    def score_multiple_choice_answers(self):
+        answers = self.answers.select_related('question', 'selected_choice').prefetch_related(
+            'question__choices',
+        )
+        total_score = 0
+
+        for answer in answers:
+            if answer.question.question_type not in {
+                Question.QuestionType.MULTIPLE_CHOICE,
+                Question.QuestionType.TRUE_FALSE,
+            }:
+                continue
+
+            correct_choice = next(
+                (choice for choice in answer.question.choices.all() if choice.is_correct),
+                None,
+            )
+            is_correct = bool(
+                correct_choice
+                and answer.selected_choice_id
+                and answer.selected_choice_id == correct_choice.id
+            )
+            answer.is_correct = is_correct
+            answer.points_earned = answer.question.points if is_correct else 0
+            answer.save(update_fields=['is_correct', 'points_earned'])
+
+            if is_correct:
+                total_score += answer.question.points
+
+        self.score = total_score
+        if not self.submitted_at:
+            self.submitted_at = timezone.now()
+        self.is_submitted = True
+        self.save(update_fields=['score', 'submitted_at', 'is_submitted'])
+
+
+class AssessmentAttemptQuestion(models.Model):
+    attempt = models.ForeignKey(
+        AssessmentAttempt,
+        on_delete=models.CASCADE,
+        related_name='selected_questions',
+    )
+    question = models.ForeignKey(
+        Question,
+        on_delete=models.CASCADE,
+        related_name='mock_attempts',
+    )
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['attempt', 'question'],
+                name='unique_question_per_mock_attempt',
+            ),
+        ]
+        ordering = ['attempt', 'order', 'id']
+
+    def __str__(self):
+        return f'{self.attempt}: {self.question}'
 
 
 class Answer(models.Model):

@@ -278,6 +278,42 @@
   margin-bottom: 0;
 }
 
+.lesson-material {
+  display: grid;
+  gap: 18px;
+}
+
+.lesson-section {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lesson-section:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.lesson-section h2 {
+  color: var(--text);
+  font-size: 22px;
+}
+
+.lesson-side-list {
+  margin-bottom: 20px;
+}
+
+.lesson-side-note {
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
 .meta-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

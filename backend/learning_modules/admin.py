@@ -7,7 +7,17 @@ from .models import Module, ModuleAccess, ModuleActivity, ModuleActivitySubmissi
 class ModuleAdmin(admin.ModelAdmin):
     list_display = ('title', 'is_paid', 'price', 'is_published', 'created_at')
     list_filter = ('is_paid', 'is_published', 'subjects')
-    search_fields = ('title', 'description')
+    search_fields = (
+        'title',
+        'description',
+        'learning_objectives',
+        'lesson_overview',
+        'detailed_discussion',
+        'examples',
+        'teacher_notes',
+        'student_activities',
+        'resources',
+    )
     prepopulated_fields = {'slug': ('title',)}
 
 

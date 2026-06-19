@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { WorkspaceData } from '../app/types'
 import { ModuleCard } from '../components/cards'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard, Toolbar } from '../components/ui'
+import { hasActiveModuleAccess } from '../utils/student'
 
 export function ModulesPage({ data }: { data: WorkspaceData }) {
   const [query, setQuery] = useState('')
@@ -13,15 +14,15 @@ export function ModulesPage({ data }: { data: WorkspaceData }) {
     return data.modules.filter((module) => {
       const matchesQuery =
         !normalizedQuery ||
-        `${module.title} ${module.description} ${module.content}`
+        `${module.title} ${module.description} ${module.content} ${module.learning_objectives} ${module.lesson_overview} ${module.detailed_discussion} ${module.examples} ${module.teacher_notes} ${module.student_activities} ${module.resources}`
           .toLowerCase()
           .includes(normalizedQuery)
       const matchesSubject =
         subjectId === 'all' || module.subjects.includes(Number(subjectId))
 
-      return matchesQuery && matchesSubject
+      return matchesQuery && matchesSubject && hasActiveModuleAccess(data, module)
     })
-  }, [data.modules, query, subjectId])
+  }, [data, query, subjectId])
 
   return (
     <Page>

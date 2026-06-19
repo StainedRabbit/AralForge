@@ -101,6 +101,13 @@ export type Module = {
   slug: string
   description: string
   content: string
+  learning_objectives: string
+  lesson_overview: string
+  detailed_discussion: string
+  examples: string
+  teacher_notes: string
+  student_activities: string
+  resources: string
   pdf_file: string
   is_paid: boolean
   price: string
@@ -244,6 +251,7 @@ export type Assessment = {
   module: number | null
   instructions: string
   points_possible: string
+  mock_question_count: number
   time_limit_minutes: number | null
   max_attempts: number
   randomize_questions: boolean
@@ -265,6 +273,15 @@ export type AssessmentAttempt = {
   started_at: string
   submitted_at: string | null
   is_submitted: boolean
+  selected_topics: number[]
+  selected_question_ids: number[]
+}
+
+export type AssessmentAttemptQuestion = {
+  id: number
+  attempt: number
+  question: number
+  order: number
 }
 
 export type Choice = {
@@ -288,6 +305,7 @@ export type Question = {
   points: string
   order: number
   explanation?: string
+  topics: number[]
   choices: Choice[]
 }
 
@@ -353,6 +371,31 @@ export type GradeCategory = {
   weight: string
 }
 
+export type GradeItemSourceType =
+  | 'MANUAL'
+  | 'ASSESSMENT'
+  | 'MODULE_ACTIVITY'
+  | 'ATTENDANCE'
+  | 'CODING'
+
+export type GradeItem = {
+  id: number
+  grade_category: number
+  subject: number
+  title: string
+  points_possible: string
+  order: number
+  source_type: GradeItemSourceType
+  assessment: number | null
+  module_activity: number | null
+  attendance_session: number | null
+  coding_problem: number | null
+  source_title: string
+  source_points_possible: string
+  created_at: string
+  updated_at: string
+}
+
 export type StudentCategoryGrade = {
   id: number
   subject: number
@@ -362,6 +405,20 @@ export type StudentCategoryGrade = {
   total_score: string
   transmuted_grade: string | null
   weighted_score: string | null
+  is_item_computed: boolean
+  computed_at: string
+}
+
+export type StudentGradeItemScore = {
+  id: number
+  grade_item: number
+  grade_category: number
+  subject: number
+  student: number
+  raw_score: string
+  total_score: string
+  transmuted_grade: string | null
+  remarks: string
   computed_at: string
 }
 

@@ -26,6 +26,14 @@ class GradeCategoryChoices(models.TextChoices):
     OTHER = 'OTHER', 'Other'
 
 
+class GradeItemSourceType(models.TextChoices):
+    MANUAL = 'MANUAL', 'Manual'
+    ASSESSMENT = 'ASSESSMENT', 'Assessment'
+    MODULE_ACTIVITY = 'MODULE_ACTIVITY', 'Module activity'
+    ATTENDANCE = 'ATTENDANCE', 'Attendance'
+    CODING = 'CODING', 'Coding'
+
+
 class GradingTemplate(models.Model):
     name = models.CharField(max_length=120, unique=True)
     description = models.TextField(blank=True)
@@ -167,6 +175,7 @@ class StudentCategoryGrade(models.Model):
     total_score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     transmuted_grade = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     weighted_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    is_item_computed = models.BooleanField(default=False)
     computed_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -195,6 +204,160 @@ class StudentCategoryGrade(models.Model):
 
     def __str__(self):
         return f'{self.student} - {self.grade_category}: {self.transmuted_grade}'
+
+
+class GradeItem(models.Model):
+    grade_category = models.ForeignKey(
+        GradeCategory,
+        on_delete=models.CASCADE,
+        related_name='items',
+    )
+    title = models.CharField(max_length=180)
+    points_possible = models.DecimalField(max_digits=7, decimal_places=2, default=100)
+    order = models.PositiveIntegerField(default=0)
+    source_type = models.CharField(
+        max_length=30,
+        choices=GradeItemSourceType,
+        default=GradeItemSourceType.MANUAL,
+    )
+    assessment = models.ForeignKey(
+        'assessments.Assessment',
+        on_delete=models.SET_NULL,
+        related_name='grade_items',
+        null=True,
+        blank=True,
+    )
+    module_activity = models.ForeignKey(
+        'learning_modules.ModuleActivity',
+        on_delete=models.SET_NULL,
+        related_name='grade_items',
+        null=True,
+        blank=True,
+    )
+    attendance_session = models.ForeignKey(
+        'attendance.AttendanceSession',
+        on_delete=models.SET_NULL,
+        related_name='grade_items',
+        null=True,
+        blank=True,
+    )
+    coding_problem = models.ForeignKey(
+        'coding.ProgrammingProblem',
+        on_delete=models.SET_NULL,
+        related_name='grade_items',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['grade_category__subject__code', 'grade_category__grading_period', 'order', 'id']
+
+    @property
+    def subject(self):
+        return self.grade_category.subject
+
+    @property
+    def source_title(self):
+        if self.source_type == GradeItemSourceType.ASSESSMENT and self.assessment_id:
+            return self.assessment.title
+        if self.source_type == GradeItemSourceType.MODULE_ACTIVITY and self.module_activity_id:
+            return self.module_activity.title
+        if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:
+            return self.attendance_session.title or str(self.attendance_session.date)
+        if self.source_type == GradeItemSourceType.CODING and self.coding_problem_id:
+            return self.coding_problem.title
+        return self.title
+
+    @property
+    def source_points_possible(self):
+        if self.source_type == GradeItemSourceType.ASSESSMENT and self.assessment_id:
+            return self.assessment.points_possible
+        if self.source_type == GradeItemSourceType.MODULE_ACTIVITY and self.module_activity_id:
+            return self.module_activity.points_possible
+        if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:
+            return self.attendance_session.points_possible
+        if self.source_type == GradeItemSourceType.CODING and self.coding_problem_id:
+            return self.coding_problem.points_possible
+        return self.points_possible
+
+    def save(self, *args, **kwargs):
+        if not self.title:
+            self.title = self.source_title
+        if self.source_type != GradeItemSourceType.MANUAL:
+            self.points_possible = self.source_points_possible
+        super().save(*args, **kwargs)
+        from .services import recompute_student_category_from_items
+
+        for score in self.student_scores.select_related('student'):
+            recompute_student_category_from_items(score.student, self.grade_category)
+
+    def delete(self, *args, **kwargs):
+        affected = [
+            (score.student, self.grade_category)
+            for score in self.student_scores.select_related('student')
+        ]
+        result = super().delete(*args, **kwargs)
+        from .services import recompute_student_category_from_items
+
+        for student, grade_category in affected:
+            recompute_student_category_from_items(student, grade_category)
+        return result
+
+    def __str__(self):
+        return f'{self.grade_category} - {self.title}'
+
+
+class StudentGradeItemScore(models.Model):
+    grade_item = models.ForeignKey(
+        GradeItem,
+        on_delete=models.CASCADE,
+        related_name='student_scores',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='grade_item_scores',
+    )
+    raw_score = models.DecimalField(max_digits=7, decimal_places=2)
+    remarks = models.CharField(max_length=160, blank=True)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['grade_item', 'student'],
+                name='unique_student_grade_item_score',
+            ),
+        ]
+        ordering = ['grade_item__grade_category__grading_period', 'grade_item__order', 'student__username']
+
+    @property
+    def total_score(self):
+        return self.grade_item.points_possible
+
+    @property
+    def transmuted_grade(self):
+        return transmute_score(self.raw_score, self.total_score)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from .services import recompute_from_item_score
+
+        recompute_from_item_score(self)
+
+    def delete(self, *args, **kwargs):
+        student = self.student
+        grade_category = self.grade_item.grade_category
+        result = super().delete(*args, **kwargs)
+        from .services import recompute_student_category_from_items
+
+        recompute_student_category_from_items(student, grade_category)
+        return result
+
+    def __str__(self):
+        return f'{self.student} - {self.grade_item}: {self.raw_score}'
 
 
 class PeriodGrade(models.Model):
