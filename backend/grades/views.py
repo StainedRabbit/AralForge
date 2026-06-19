@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from subjects.models import Subject
+from subjects.models import Subject, active_subject_access_filter
 
 from .models import (
     FinalGrade,
@@ -72,7 +72,7 @@ class GradeItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminTeacherOrReadOnly]
 
     def get_queryset(self):
-        return GradeItem.objects.select_related(
+        queryset = GradeItem.objects.select_related(
             'grade_category',
             'grade_category__subject',
             'assessment',
@@ -80,6 +80,16 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'attendance_session',
             'coding_problem',
         )
+
+        if self.request.user.is_admin_teacher:
+            return queryset
+
+        return queryset.filter(
+            active_subject_access_filter(
+                self.request.user,
+                subject_prefix='grade_category__subject__',
+            )
+        ).distinct()
 
 
 class StudentGradeItemScoreViewSet(viewsets.ModelViewSet):
