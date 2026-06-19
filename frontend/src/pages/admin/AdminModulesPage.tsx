@@ -81,7 +81,7 @@ export function AdminModulesPage({
         endpoint="/modules/modules/"
         fields={moduleFields(subjectOptions)}
         getSearchText={(module) =>
-          `${module.title} ${module.slug} ${module.description} ${module.content}`
+          `${module.title} ${module.slug} ${module.description} ${module.content} ${module.learning_objectives} ${module.lesson_overview} ${module.detailed_discussion} ${module.examples} ${module.teacher_notes} ${module.student_activities} ${module.resources}`
         }
         items={data.modules}
         noun="Module"
@@ -182,7 +182,44 @@ function moduleFields(subjectOptions: { label: string; value: number | string }[
     { label: 'Title', name: 'title', required: true, type: 'text' },
     { label: 'Slug', name: 'slug', required: true, type: 'text' },
     { label: 'Description', name: 'description', rows: 3, type: 'textarea' },
-    { label: 'Content', name: 'content', rows: 8, type: 'textarea' },
+    {
+      label: 'Learning objectives',
+      name: 'learning_objectives',
+      rows: 5,
+      type: 'textarea',
+    },
+    {
+      label: 'Lesson overview',
+      name: 'lesson_overview',
+      rows: 5,
+      type: 'textarea',
+    },
+    {
+      label: 'Detailed discussion',
+      name: 'detailed_discussion',
+      rows: 8,
+      type: 'textarea',
+    },
+    { label: 'Examples', name: 'examples', rows: 7, type: 'textarea' },
+    {
+      label: 'Teacher notes / guide',
+      name: 'teacher_notes',
+      rows: 5,
+      type: 'textarea',
+    },
+    {
+      label: 'Student activities',
+      name: 'student_activities',
+      rows: 5,
+      type: 'textarea',
+    },
+    { label: 'Resources / references', name: 'resources', rows: 5, type: 'textarea' },
+    {
+      label: 'Legacy content',
+      name: 'content',
+      rows: 5,
+      type: 'textarea',
+    },
     { label: 'PDF file', name: 'pdf_file', type: 'file' },
     {
       defaultValue: true,

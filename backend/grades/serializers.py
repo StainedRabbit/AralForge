@@ -3,10 +3,12 @@ from rest_framework import serializers
 from .models import (
     FinalGrade,
     GradeCategory,
+    GradeItem,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
     StudentCategoryGrade,
+    StudentGradeItemScore,
 )
 
 
@@ -90,9 +92,96 @@ class StudentCategoryGradeSerializer(serializers.ModelSerializer):
             'total_score',
             'transmuted_grade',
             'weighted_score',
+            'is_item_computed',
             'computed_at',
         )
-        read_only_fields = ('id', 'transmuted_grade', 'weighted_score', 'computed_at')
+        read_only_fields = ('id', 'transmuted_grade', 'weighted_score', 'is_item_computed', 'computed_at')
+
+
+class GradeItemSerializer(serializers.ModelSerializer):
+    subject = serializers.IntegerField(source='grade_category.subject_id', read_only=True)
+    source_title = serializers.CharField(read_only=True)
+    source_points_possible = serializers.DecimalField(max_digits=7, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = GradeItem
+        fields = (
+            'id',
+            'grade_category',
+            'subject',
+            'title',
+            'points_possible',
+            'order',
+            'source_type',
+            'assessment',
+            'module_activity',
+            'attendance_session',
+            'coding_problem',
+            'source_title',
+            'source_points_possible',
+            'created_at',
+            'updated_at',
+        )
+        read_only_fields = ('id', 'subject', 'source_title', 'source_points_possible', 'created_at', 'updated_at')
+
+    def validate(self, attrs):
+        source_type = attrs.get('source_type', getattr(self.instance, 'source_type', 'MANUAL'))
+        grade_category = attrs.get('grade_category', getattr(self.instance, 'grade_category', None))
+        source_fields = {
+            'ASSESSMENT': 'assessment',
+            'MODULE_ACTIVITY': 'module_activity',
+            'ATTENDANCE': 'attendance_session',
+            'CODING': 'coding_problem',
+        }
+        required_field = source_fields.get(source_type)
+
+        if required_field:
+            source_value = attrs.get(required_field, getattr(self.instance, required_field, None))
+            if not source_value:
+                raise serializers.ValidationError({required_field: 'This source is required for the selected source type.'})
+            if grade_category and not source_matches_subject(source_type, source_value, grade_category.subject_id):
+                raise serializers.ValidationError({required_field: 'This source does not belong to the selected subject.'})
+
+        return attrs
+
+
+class StudentGradeItemScoreSerializer(serializers.ModelSerializer):
+    grade_category = serializers.IntegerField(source='grade_item.grade_category_id', read_only=True)
+    subject = serializers.IntegerField(source='grade_item.grade_category.subject_id', read_only=True)
+    total_score = serializers.DecimalField(max_digits=7, decimal_places=2, read_only=True)
+    transmuted_grade = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = StudentGradeItemScore
+        fields = (
+            'id',
+            'grade_item',
+            'grade_category',
+            'subject',
+            'student',
+            'raw_score',
+            'total_score',
+            'transmuted_grade',
+            'remarks',
+            'computed_at',
+        )
+        read_only_fields = ('id', 'grade_category', 'subject', 'total_score', 'transmuted_grade', 'computed_at')
+
+
+def source_matches_subject(source_type, source, subject_id):
+    if source_type == 'ASSESSMENT':
+        return source.subject_id == subject_id
+    if source_type == 'ATTENDANCE':
+        return source.subject_id == subject_id
+    if source_type == 'MODULE_ACTIVITY':
+        return source.module.subjects.filter(pk=subject_id).exists()
+    if source_type == 'CODING':
+        if source.subject_id == subject_id:
+            return True
+        if source.module_id:
+            return source.module.subjects.filter(pk=subject_id).exists()
+        return False
+    return True
 
 
 class PeriodGradeSerializer(serializers.ModelSerializer):

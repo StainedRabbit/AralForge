@@ -42,7 +42,11 @@ export function ModuleCard({ data, module }: { data: WorkspaceData; module: Modu
         </span>
       </div>
       <h2>{module.title}</h2>
-      <p>{module.description || 'Open this module to view lesson notes and activities.'}</p>
+      <p>
+        {module.description ||
+          module.lesson_overview ||
+          'Open this module to view lesson material, examples, and activities.'}
+      </p>
       <div className="progress-line">
         <span
           style={{

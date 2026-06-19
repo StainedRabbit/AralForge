@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 
 class Semester(models.TextChoices):
@@ -158,3 +159,25 @@ class ScheduleStudent(models.Model):
 
     def __str__(self):
         return f'{self.student} in {self.schedule}'
+
+
+def active_subject_access_filter(user, subject_prefix='subject__'):
+    subject_path = subject_prefix[:-2] if subject_prefix.endswith('__') else subject_prefix
+
+    return Q(**{f'{subject_path}__isnull': True}) | (
+        Q(**{f'{subject_prefix}schedules__students__student': user})
+        & Q(**{f'{subject_prefix}schedules__students__is_active': True})
+        & Q(**{f'{subject_prefix}schedules__is_active': True})
+    )
+
+
+def user_has_active_subject_access(user, subject):
+    if not subject:
+        return True
+
+    return ScheduleStudent.objects.filter(
+        student=user,
+        is_active=True,
+        schedule__is_active=True,
+        schedule__subject=subject,
+    ).exists()

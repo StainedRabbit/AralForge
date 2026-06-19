@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from learning_modules.models import user_has_module_access
+from subjects.models import user_has_active_subject_access
 
 from .models import CodeBlank, CodeBlankAnswer, CodeSubmission, ProgrammingProblem, TestCase
 
@@ -151,6 +152,15 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             ):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
+                )
+
+            if (
+                problem
+                and not problem.module
+                and not user_has_active_subject_access(request.user, problem.subject)
+            ):
+                raise serializers.ValidationError(
+                    'This problem is not available for your active classes.'
                 )
 
         return attrs

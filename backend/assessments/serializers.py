@@ -2,8 +2,16 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from learning_modules.models import user_has_module_access
+from subjects.models import user_has_active_subject_access
 
-from .models import Answer, Assessment, AssessmentAttempt, Choice, Question
+from .models import (
+    Answer,
+    Assessment,
+    AssessmentAttempt,
+    AssessmentAttemptQuestion,
+    Choice,
+    Question,
+)
 
 
 class ChoiceSerializer(serializers.ModelSerializer):
@@ -27,7 +35,17 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ('id', 'assessment', 'question_type', 'prompt', 'points', 'order', 'explanation', 'choices')
+        fields = (
+            'id',
+            'assessment',
+            'question_type',
+            'prompt',
+            'points',
+            'order',
+            'explanation',
+            'topics',
+            'choices',
+        )
         read_only_fields = ('id',)
 
     def to_representation(self, instance):
@@ -51,6 +69,7 @@ class AssessmentSerializer(serializers.ModelSerializer):
             'module',
             'instructions',
             'points_possible',
+            'mock_question_count',
             'time_limit_minutes',
             'max_attempts',
             'randomize_questions',
@@ -64,8 +83,19 @@ class AssessmentSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
 
+    def validate(self, attrs):
+        if (
+            attrs.get('kind') in {Assessment.Kind.MOCK_EXAM, Assessment.Kind.MOCK_QUIZ}
+            and 'counts_toward_grade' not in self.initial_data
+        ):
+            attrs['counts_toward_grade'] = False
+
+        return attrs
+
 
 class AssessmentAttemptSerializer(serializers.ModelSerializer):
+    selected_question_ids = serializers.SerializerMethodField()
+
     class Meta:
         model = AssessmentAttempt
         fields = (
@@ -77,8 +107,21 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
             'started_at',
             'submitted_at',
             'is_submitted',
+            'selected_topics',
+            'selected_question_ids',
         )
-        read_only_fields = ('id', 'started_at')
+        read_only_fields = ('id', 'started_at', 'selected_question_ids')
+
+    def get_selected_question_ids(self, obj):
+        selected = getattr(obj, 'selected_questions', None)
+
+        if selected is None:
+            return []
+
+        return [
+            item.question_id
+            for item in selected.all().order_by('order', 'id')
+        ]
 
     def validate_student(self, value):
         request = self.context.get('request')
@@ -105,12 +148,33 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
                     'Submitted attempts cannot be reopened by students.'
                 )
 
+            if (
+                not self.instance
+                and assessment
+                and assessment.kind in {
+                    Assessment.Kind.MOCK_EXAM,
+                    Assessment.Kind.MOCK_QUIZ,
+                }
+            ):
+                raise serializers.ValidationError(
+                    'Start mock assessments by selecting topics first.'
+                )
+
             if assessment and assessment.module and not user_has_module_access(
                 request.user,
                 assessment.module,
             ):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
+                )
+
+            if (
+                assessment
+                and not assessment.module
+                and not user_has_active_subject_access(request.user, assessment.subject)
+            ):
+                raise serializers.ValidationError(
+                    'This assessment is not available for your active classes.'
                 )
 
         return attrs
@@ -121,7 +185,19 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
         if is_submitted and not instance.submitted_at:
             validated_data['submitted_at'] = timezone.now()
 
-        return super().update(instance, validated_data)
+        updated = super().update(instance, validated_data)
+
+        if is_submitted:
+            updated.score_multiple_choice_answers()
+
+        return updated
+
+
+class AssessmentAttemptQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssessmentAttemptQuestion
+        fields = ('id', 'attempt', 'question', 'order')
+        read_only_fields = ('id',)
 
 
 class AnswerSerializer(serializers.ModelSerializer):
@@ -155,6 +231,19 @@ class AnswerSerializer(serializers.ModelSerializer):
                 'Answer must belong to a question in the same assessment attempt.'
             )
 
+        if (
+            attempt
+            and question
+            and attempt.assessment.kind in {
+                Assessment.Kind.MOCK_EXAM,
+                Assessment.Kind.MOCK_QUIZ,
+            }
+            and not attempt.selected_questions.filter(question=question).exists()
+        ):
+            raise serializers.ValidationError(
+                'Answer must belong to a question selected for this mock attempt.'
+            )
+
         if selected_choice and question and selected_choice.question_id != question.id:
             raise serializers.ValidationError(
                 'Selected choice must belong to the answered question.'
@@ -173,6 +262,18 @@ class AnswerSerializer(serializers.ModelSerializer):
             ):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
+                )
+
+            if (
+                attempt
+                and not attempt.assessment.module
+                and not user_has_active_subject_access(
+                    request.user,
+                    attempt.assessment.subject,
+                )
+            ):
+                raise serializers.ValidationError(
+                    'This assessment is not available for your active classes.'
                 )
 
             if attempt and attempt.is_submitted:

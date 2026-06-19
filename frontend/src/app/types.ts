@@ -3,6 +3,7 @@ import type {
   Answer,
   Assessment,
   AssessmentAttempt,
+  AssessmentAttemptQuestion,
   AttendanceRecord,
   AttendanceSession,
   Badge,
@@ -11,6 +12,7 @@ import type {
   CodeSubmission,
   FinalGrade,
   GradeCategory,
+  GradeItem,
   GradingTemplate,
   GradingTemplateItem,
   LevelRule,
@@ -28,6 +30,7 @@ import type {
   SchoolYearSemester,
   StudentBadge,
   StudentCategoryGrade,
+  StudentGradeItemScore,
   StudentProfile,
   Subject,
   SubjectSchedule,
@@ -61,6 +64,7 @@ export type WorkspaceData = {
   codeBlankAnswers: CodeBlankAnswer[]
   assessments: Assessment[]
   attempts: AssessmentAttempt[]
+  attemptQuestions: AssessmentAttemptQuestion[]
   questions: Question[]
   choices: Choice[]
   answers: Answer[]
@@ -69,7 +73,9 @@ export type WorkspaceData = {
   gradingTemplates: GradingTemplate[]
   gradingTemplateItems: GradingTemplateItem[]
   gradeCategories: GradeCategory[]
+  gradeItems: GradeItem[]
   categoryGrades: StudentCategoryGrade[]
+  gradeItemScores: StudentGradeItemScore[]
   periodGrades: PeriodGrade[]
   finalGrades: FinalGrade[]
   points: PointLedger[]

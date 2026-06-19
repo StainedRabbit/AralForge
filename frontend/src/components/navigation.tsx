@@ -131,7 +131,7 @@ export function MobileTabbar({
       {items.map((item) => (
         <NavLink
           className={({ isActive }) => (isActive ? 'active' : '')}
-          end={item.to === '/'}
+          end={isExactNavItem(item.to)}
           key={item.to}
           to={item.to}
         >
@@ -158,7 +158,7 @@ function NavEntry({
   return (
     <NavLink
       className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-      end={item.to === '/'}
+      end={isExactNavItem(item.to)}
       to={item.to}
     >
       <Icon name={item.icon} />
@@ -168,6 +168,10 @@ function NavEntry({
       ) : null}
     </NavLink>
   )
+}
+
+function isExactNavItem(path: string) {
+  return path === '/' || path === '/admin'
 }
 
 export function BrandMark({ compact = false }: { compact?: boolean }) {

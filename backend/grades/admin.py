@@ -3,10 +3,12 @@ from django.contrib import admin
 from .models import (
     FinalGrade,
     GradeCategory,
+    GradeItem,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
     StudentCategoryGrade,
+    StudentGradeItemScore,
 )
 
 
@@ -48,6 +50,20 @@ class GradeCategoryAdmin(admin.ModelAdmin):
     list_display = ('subject', 'grading_period', 'name', 'category', 'weight')
     list_filter = ('subject', 'grading_period', 'category')
     search_fields = ('subject__code', 'subject__name', 'name')
+
+
+@admin.register(GradeItem)
+class GradeItemAdmin(admin.ModelAdmin):
+    list_display = ('grade_category', 'title', 'source_type', 'points_possible', 'order')
+    list_filter = ('grade_category__subject', 'grade_category__grading_period', 'source_type')
+    search_fields = ('title', 'grade_category__subject__code', 'grade_category__name')
+
+
+@admin.register(StudentGradeItemScore)
+class StudentGradeItemScoreAdmin(admin.ModelAdmin):
+    list_display = ('grade_item', 'student', 'raw_score', 'total_score', 'computed_at')
+    list_filter = ('grade_item__grade_category__subject', 'grade_item__grade_category__grading_period')
+    search_fields = ('student__username', 'student__first_name', 'student__last_name', 'grade_item__title')
 
 
 @admin.register(StudentCategoryGrade)
