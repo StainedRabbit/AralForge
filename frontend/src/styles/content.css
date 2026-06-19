@@ -96,6 +96,96 @@
   font-weight: 750;
 }
 
+.lesson-subject-list,
+.topic-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lesson-subject {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  text-align: left;
+}
+
+.lesson-subject:hover,
+.lesson-subject.active {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: var(--primary-soft);
+}
+
+.lesson-subject strong,
+.lesson-subject span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-subject span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.topic-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 78px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.topic-row:hover {
+  border-color: rgba(37, 99, 235, 0.34);
+  box-shadow: var(--shadow-soft);
+}
+
+.topic-row__icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+}
+
+.topic-row strong,
+.topic-row span {
+  display: block;
+  min-width: 0;
+}
+
+.topic-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-row span,
+.topic-row small {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.topic-row small {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .subject-chip,
 .status-pill,
 .difficulty {

@@ -1249,6 +1249,85 @@
   color: var(--primary);
 }
 
+.module-workspace,
+.lesson-browser {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.34fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.module-workspace__picker,
+.module-workspace__main,
+.lesson-browser__subjects,
+.lesson-browser__topics,
+.module-preview,
+.lesson-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.module-preview__header,
+.module-preview__actions,
+.lesson-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.module-preview__header {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.module-preview__header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 30px;
+  line-height: 1.12;
+}
+
+.module-preview__header p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.module-preview__actions,
+.lesson-editor__actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.module-preview__lesson {
+  margin-top: 8px;
+}
+
+.module-context-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.lesson-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lesson-editor__meta {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.6fr) minmax(160px, 0.5fr) minmax(160px, 0.5fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.lesson-editor__meta .admin-check {
+  align-self: center;
+}
+
 @media (max-width: 1160px) {
   .admin-quick-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1259,7 +1338,10 @@
   .classes-setup__grid,
   .gradebook-grid,
   .attendance-workspace,
-  .attendance-setup__grid {
+  .attendance-setup__grid,
+  .module-workspace,
+  .lesson-browser,
+  .lesson-editor__meta {
     grid-template-columns: 1fr;
   }
 }
@@ -1269,7 +1351,8 @@
   .admin-form__fields,
   .admin-inline-form,
   .gradebook-controls,
-  .gradebook-item-form {
+  .gradebook-item-form,
+  .lesson-editor__grid {
     grid-template-columns: 1fr;
   }
 

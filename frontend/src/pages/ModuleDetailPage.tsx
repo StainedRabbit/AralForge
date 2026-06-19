@@ -5,6 +5,7 @@ import { EmptyState, NotFoundState, Page, PageHeader, SectionHeading } from '../
 import type { WorkspaceData } from '../app/types'
 import { getModuleActivities, hasActiveModuleAccess, moduleAccessLabel } from '../utils/student'
 import { resolveMediaUrl } from '../utils/format'
+import { getLessonSections } from '../utils/modules'
 
 export function ModuleDetailPage({ data }: { data: WorkspaceData }) {
   const { moduleId } = useParams()
@@ -152,35 +153,6 @@ export function ModuleDetailPage({ data }: { data: WorkspaceData }) {
       </section>
     </Page>
   )
-}
-
-function getLessonSections(module: {
-  content: string
-  detailed_discussion: string
-  examples: string
-  learning_objectives: string
-  lesson_overview: string
-  resources: string
-  student_activities: string
-  teacher_notes: string
-}) {
-  const sections = [
-    ['Learning Objectives', module.learning_objectives],
-    ['Lesson Overview', module.lesson_overview],
-    ['Detailed Discussion', module.detailed_discussion],
-    ['Examples', module.examples],
-    ['Teacher Notes / Guide', module.teacher_notes],
-    ['Student Activities', module.student_activities],
-    ['Resources / References', module.resources],
-  ]
-    .filter(([, content]) => content.trim())
-    .map(([title, content]) => ({ title, content }))
-
-  if (sections.length || !module.content.trim()) {
-    return sections
-  }
-
-  return [{ title: 'Lesson Notes', content: module.content }]
 }
 
 function RichText({ value }: { value: string }) {

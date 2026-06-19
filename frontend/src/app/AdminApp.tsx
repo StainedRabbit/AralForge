@@ -11,6 +11,7 @@ import { AdminCodingPage } from '../pages/admin/AdminCodingPage'
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage'
 import { AdminGradebookPage } from '../pages/admin/AdminGradebookPage'
 import { AdminGradesPage } from '../pages/admin/AdminGradesPage'
+import { AdminModuleEditorPage } from '../pages/admin/AdminModuleEditorPage'
 import { AdminModulesPage } from '../pages/admin/AdminModulesPage'
 import { AdminStudentsPage } from '../pages/admin/AdminStudentsPage'
 
@@ -120,6 +121,26 @@ export function AdminApp({
             path="/admin/modules"
             element={
               <AdminModulesPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/new"
+            element={
+              <AdminModuleEditorPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/:moduleId/edit"
+            element={
+              <AdminModuleEditorPage
                 api={api}
                 data={workspace}
                 refresh={workspace.refresh}
