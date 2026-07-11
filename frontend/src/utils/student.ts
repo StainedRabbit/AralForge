@@ -65,13 +65,26 @@ export function hasActiveSubjectAccess(
   return getActiveStudentSubjectIds(data).has(subjectId)
 }
 
-export function hasActiveModuleAccess(data: WorkspaceData, module: Module) {
-  if (!module.subjects.length) {
-    return true
-  }
+export function hasActiveModuleAccess(_data: WorkspaceData, module: Module) {
+  return module.is_accessible
+}
 
-  const activeSubjectIds = getActiveStudentSubjectIds(data)
-  return module.subjects.some((subjectId) => activeSubjectIds.has(subjectId))
+export function getStudentModuleSubjectIds(data: WorkspaceData) {
+  const subjectIds = getActiveStudentSubjectIds(data)
+  data.modules.forEach((module) => {
+    if (!hasActiveModuleAccess(data, module)) {
+      return
+    }
+    if (module.subject) {
+      subjectIds.add(module.subject)
+    }
+    module.subjects.forEach((subjectId) => subjectIds.add(subjectId))
+  })
+  return subjectIds
+}
+
+export function isModuleGrantAvailable(grant: WorkspaceData['moduleAccess'][number]) {
+  return grant.is_available
 }
 
 export function hasActiveAssessmentAccess(
@@ -91,14 +104,15 @@ export function isMockAssessment(assessment: Assessment) {
 }
 
 export function getMockTopicModules(data: WorkspaceData, assessment: Assessment) {
-  return data.modules
-    .filter((module) => {
-      if (!module.is_published || !hasActiveModuleAccess(data, module)) {
+  return data.moduleTopics
+    .filter((topic) => {
+      const module = data.modules.find((item) => item.id === topic.module)
+      if (!module || !topic.is_published || !module.is_published || !hasActiveModuleAccess(data, module)) {
         return false
       }
 
       if (assessment.subject) {
-        return module.subjects.includes(assessment.subject)
+        return module.subject === assessment.subject || module.subjects.includes(assessment.subject)
       }
 
       return true
@@ -220,6 +234,11 @@ export function getModuleActivities(data: WorkspaceData, moduleId: number) {
 }
 
 export function moduleSubjectLabel(data: WorkspaceData, module: Module) {
+  if (module.subject) {
+    const subject = data.subjects.find((item) => item.id === module.subject)
+    return subject?.code ?? 'General'
+  }
+
   const subjects = module.subjects
     .map((id) => data.subjects.find((subject) => subject.id === id))
     .filter(Boolean)
@@ -231,22 +250,11 @@ export function moduleSubjectLabel(data: WorkspaceData, module: Module) {
   return subjects.map((subject) => subject?.code).join(' / ')
 }
 
-export function moduleAccessLabel(data: WorkspaceData, module: Module) {
-  if (!module.is_paid) {
-    return 'Free module'
-  }
-
-  const grant = data.moduleAccess.find((item) => item.module === module.id)
-
-  if (grant?.is_available) {
-    return grant.payment_status === 'WAIVED' ? 'Access waived' : 'Paid access'
-  }
-
-  if (module.is_accessible) {
-    return numeric(module.price) ? `Paid ${numeric(module.price).toFixed(2)}` : 'Active access'
-  }
-
-  return 'Locked'
+export function moduleAccessLabel(_data: WorkspaceData, module: Module) {
+  if (module.access_status === 'ADVANCE_PAID') return 'Advance module'
+  if (module.access_status === 'ENROLLED_PAID') return 'Paid access'
+  if (module.access_status === 'LOCKED') return 'Payment required'
+  return module.is_accessible ? 'Active access' : 'Locked'
 }
 
 export function subjectLabel(data: WorkspaceData, subjectId: number) {
@@ -260,6 +268,7 @@ export function activityTypeLabel(type: ModuleActivity['activity_type']) {
     FILE_UPLOAD: 'File upload',
     CODE_COMPLETE: 'Complete coding',
     CODE_FILL_BLANK: 'Fill in the blank coding',
+    INTERACTIVE: 'Interactive activity',
   }
 
   return labels[type]

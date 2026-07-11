@@ -72,6 +72,11 @@ class Question(models.Model):
         blank=True,
         related_name='assessment_questions',
     )
+    module_topics = models.ManyToManyField(
+        'learning_modules.ModuleTopic',
+        blank=True,
+        related_name='assessment_questions',
+    )
 
     class Meta:
         ordering = ['assessment', 'order', 'id']
@@ -115,6 +120,11 @@ class AssessmentAttempt(models.Model):
     is_submitted = models.BooleanField(default=False)
     selected_topics = models.ManyToManyField(
         'learning_modules.Module',
+        blank=True,
+        related_name='mock_exam_attempts',
+    )
+    selected_module_topics = models.ManyToManyField(
+        'learning_modules.ModuleTopic',
         blank=True,
         related_name='mock_exam_attempts',
     )

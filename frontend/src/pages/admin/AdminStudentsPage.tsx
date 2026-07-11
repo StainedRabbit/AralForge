@@ -5,6 +5,7 @@ import {
   AdminResourcePanel,
   type AdminField,
 } from '../../components/admin/AdminResourcePanel'
+import { ManageStudentModulesDialog } from '../../components/admin/ManageStudentModulesDialog'
 import { Icon } from '../../components/Icon'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
@@ -17,7 +18,6 @@ import {
   booleanLabel,
   compactDateTime,
   moduleName,
-  paymentStatusOptions,
   roleOptions,
   scheduleName,
   studentUsers,
@@ -36,6 +36,7 @@ export function AdminStudentsPage({
   data: WorkspaceData
   refresh: () => Promise<void>
 }) {
+  const [managedStudentId, setManagedStudentId] = useState<number | null>(null)
   const students = studentUsers(data.users)
   const studentOptions = toOptions(students, (user) => user.id, fullName)
   const userOptions = toOptions(data.users, (user) => user.id, fullName)
@@ -55,10 +56,15 @@ export function AdminStudentsPage({
       <PageHeader
         eyebrow="People and access"
         title="Students"
-        description="Create accounts, maintain student profiles, enroll students in schedules, and activate paid modules."
+        description="Create accounts, maintain student profiles, enroll students, and record cash module payments."
       />
 
       <QuickStudentSetupPanel api={api} refresh={refresh} />
+
+      <StudentModuleAccessPanel
+        onManage={setManagedStudentId}
+        students={students}
+      />
 
       <BulkModuleAccessPanel
         api={api}
@@ -138,10 +144,10 @@ export function AdminStudentsPage({
         getSearchText={(grant) =>
           `${grant.student_name} ${grant.module_title} ${grant.payment_status} ${grant.payment_reference}`
         }
-        items={data.moduleAccess}
+        items={data.moduleAccess.filter((grant) => grant.access_type === 'PAYMENT')}
         noun="Module access"
         onRefresh={refresh}
-        title="Paid Module Access"
+        title="Module Payment Records"
         columns={[
           { header: 'Student', render: (grant) => grant.student_name },
           { header: 'Module', render: (grant) => moduleName(data.modules, grant.module) },
@@ -150,7 +156,64 @@ export function AdminStudentsPage({
           { header: 'Expires', render: (grant) => compactDateTime(grant.expires_at) },
         ]}
       />
+
+      {managedStudentId ? (
+        <ManageStudentModulesDialog
+          api={api}
+          data={data}
+          onClose={() => setManagedStudentId(null)}
+          refresh={refresh}
+          studentId={managedStudentId}
+          studentName={fullName(
+            students.find((student) => student.id === managedStudentId) ?? null,
+          )}
+        />
+      ) : null}
     </Page>
+  )
+}
+
+function StudentModuleAccessPanel({
+  onManage,
+  students,
+}: {
+  onManage: (studentId: number) => void
+  students: User[]
+}) {
+  const [studentId, setStudentId] = useState('')
+
+  return (
+    <section className="admin-resource section-block">
+      <SectionHeading
+        subtitle="Grant one student an additional module without changing enrollment."
+        title="Student Module Access"
+      />
+      <div className="student-module-access-launcher">
+        <label className="admin-field">
+          <span>Student</span>
+          <select
+            onChange={(event) => setStudentId(event.target.value)}
+            value={studentId}
+          >
+            <option value="">Select a student</option>
+            {students.map((student) => (
+              <option key={student.id} value={student.id}>
+                {fullName(student)} ({student.username})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="button button--primary"
+          disabled={!studentId}
+          onClick={() => onManage(Number(studentId))}
+          type="button"
+        >
+          <Icon name="module" />
+          <span>Manage Modules</span>
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -315,7 +378,6 @@ function BulkModuleAccessPanel({
 }) {
   const [moduleId, setModuleId] = useState('')
   const [scheduleId, setScheduleId] = useState('')
-  const [paymentStatus, setPaymentStatus] = useState('PAID')
   const [amountPaid, setAmountPaid] = useState('0.00')
   const [reference, setReference] = useState('')
   const [saving, setSaving] = useState(false)
@@ -356,7 +418,10 @@ function BulkModuleAccessPanel({
       await Promise.all(
         students.map((student) => {
           const existing = data.moduleAccess.find(
-            (grant) => grant.module === selectedModule.id && grant.student === student.id,
+            (grant) =>
+              grant.access_type === 'PAYMENT' &&
+              grant.module === selectedModule.id &&
+              grant.student === student.id,
           )
           const endpoint = existing
             ? `/modules/access/${existing.id}/`
@@ -365,11 +430,12 @@ function BulkModuleAccessPanel({
           return api(endpoint, {
             body: JSON.stringify({
               amount_paid: amountPaid || selectedModule.price,
+              access_type: 'PAYMENT',
               is_active: true,
               module: selectedModule.id,
               notes: `Activated from ${scheduleName(data.schedules, data.subjects, Number(scheduleId))}`,
               payment_reference: reference,
-              payment_status: paymentStatus,
+              payment_status: 'PAID',
               student: student.id,
             }),
             method: existing ? 'PATCH' : 'POST',
@@ -422,20 +488,6 @@ function BulkModuleAccessPanel({
           >
             <option value="">Select</option>
             {scheduleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="admin-field">
-          <span>Status</span>
-          <select
-            onChange={(event) => setPaymentStatus(event.target.value)}
-            required
-            value={paymentStatus}
-          >
-            {paymentStatusOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -549,6 +601,18 @@ function accessFields(
 ) {
   return [
     {
+      defaultValue: 'PAYMENT',
+      label: 'Access type',
+      name: 'access_type',
+      options: [
+        { label: 'Enrolled module', value: 'PAYMENT' },
+        { label: 'Advance module', value: 'ADVANCE_STUDY' },
+      ],
+      readOnlyOnEdit: true,
+      required: true,
+      type: 'select',
+    },
+    {
       label: 'Module',
       name: 'module',
       options: moduleOptions,
@@ -568,7 +632,7 @@ function accessFields(
       defaultValue: 'PAID',
       label: 'Payment status',
       name: 'payment_status',
-      options: paymentStatusOptions,
+      options: [{ label: 'Paid', value: 'PAID' }],
       required: true,
       type: 'select',
     },

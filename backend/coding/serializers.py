@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.core.exceptions import ObjectDoesNotExist
 
 from learning_modules.models import user_has_module_access
 from subjects.models import user_has_active_subject_access
@@ -54,6 +55,8 @@ class ProgrammingProblemSerializer(serializers.ModelSerializer):
             'difficulty',
             'subject',
             'module',
+            'topic',
+            'lesson',
             'assessment_question',
             'points_possible',
             'is_published',
@@ -62,6 +65,30 @@ class ProgrammingProblemSerializer(serializers.ModelSerializer):
             'blanks',
         )
         read_only_fields = ('id', 'created_at')
+
+    def validate(self, attrs):
+        module = attrs.get('module') or getattr(self.instance, 'module', None)
+        topic = attrs.get('topic') or getattr(self.instance, 'topic', None)
+        lesson = attrs.get('lesson') or getattr(self.instance, 'lesson', None)
+
+        if lesson:
+            if topic and lesson.topic_id != topic.id:
+                raise serializers.ValidationError(
+                    'The selected lesson must belong to the selected topic.'
+                )
+
+            topic = lesson.topic
+            attrs['topic'] = topic
+
+        if topic:
+            if module and topic.module_id != module.id:
+                raise serializers.ValidationError(
+                    'The selected topic must belong to the selected module.'
+                )
+
+            attrs['module'] = topic.module
+
+        return attrs
 
 
 class CodeBlankAnswerSerializer(serializers.ModelSerializer):
@@ -157,10 +184,50 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             if (
                 problem
                 and not problem.module
-                and not user_has_active_subject_access(request.user, problem.subject)
+                and problem.lesson
+                and not user_has_module_access(request.user, problem.lesson.topic.module)
+            ):
+                raise serializers.ValidationError(
+                    'This module has not been activated for your account.'
+                )
+
+            if (
+                problem
+                and not problem.module
+                and not problem.lesson
+                and problem.topic
+                and not user_has_module_access(request.user, problem.topic.module)
+            ):
+                raise serializers.ValidationError(
+                    'This module has not been activated for your account.'
+                )
+
+            if (
+                problem
+                and not problem.module
+                and not problem.lesson
+                and not problem.topic
+                and not user_has_subject_content_access(
+                    request.user,
+                    problem.subject,
+                )
             ):
                 raise serializers.ValidationError(
                     'This problem is not available for your active classes.'
                 )
 
         return attrs
+
+
+def user_has_subject_content_access(user, subject):
+    if not subject:
+        return True
+    try:
+        module = subject.learning_module
+    except ObjectDoesNotExist:
+        module = None
+    return (
+        user_has_module_access(user, module)
+        if module
+        else user_has_active_subject_access(user, subject)
+    )

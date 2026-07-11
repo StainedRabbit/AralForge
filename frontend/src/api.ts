@@ -88,6 +88,15 @@ function createHeaders(options: RequestOptions, accessToken?: string) {
 
 async function parseResponse<T>(response: Response) {
   const contentType = response.headers.get('content-type') ?? ''
+  if (
+    contentType.includes('application/pdf') ||
+    contentType.includes('application/octet-stream')
+  ) {
+    if (!response.ok) {
+      throw new ApiError('The file could not be downloaded.', response.status)
+    }
+    return (await response.blob()) as T
+  }
   const hasJson = contentType.includes('application/json')
   const payload = hasJson ? await response.json() : await response.text()
 

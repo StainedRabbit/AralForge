@@ -99,6 +99,7 @@ export type Module = {
   id: number
   title: string
   slug: string
+  subject: number | null
   description: string
   content: string
   learning_objectives: string
@@ -109,13 +110,103 @@ export type Module = {
   student_activities: string
   resources: string
   pdf_file: string
+  pdf_generated_at: string | null
+  pdf_is_outdated: boolean
   is_paid: boolean
   price: string
   is_accessible: boolean
+  access_status: 'ADMIN' | 'LOCKED' | 'ENROLLED_PAID' | 'ADVANCE_PAID'
+  has_pdf: boolean
   subjects: number[]
   is_published: boolean
   created_at: string
   updated_at: string
+}
+
+export type ModuleTopic = {
+  id: number
+  module: number
+  legacy_module: number | null
+  title: string
+  order: number
+  competency_code: string
+  competency_text: string
+  unit: string
+  overview: string
+  essential_question: string
+  enduring_understanding: string
+  performance_task: string
+  success_criteria: string
+  values_focus: string
+  is_published: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type ModuleLesson = {
+  id: number
+  topic: number
+  title: string
+  order: number
+  learning_targets: string
+  key_terms: string
+  before_you_start: string
+  short_discussion: string
+  guided_examples: string
+  lets_practice: string
+  apply_what_you_learned: string
+  challenge_task: string
+  rubric: string
+  reflection: string
+  evidence_of_learning: string
+  objectives: string
+  overview: string
+  subtopics: string
+  acquisition: string
+  making_meaning: string
+  transfer: string
+  examples: string
+  teacher_notes: string
+  answer_key: string
+  expected_outputs: string
+  common_misconceptions: string
+  teaching_tips: string
+  remediation: string
+  enrichment: string
+  student_activities: string
+  resources: string
+  assessment_url: string
+  pdf_file: string
+  pdf_generated_at: string | null
+  pdf_is_outdated: boolean
+  has_pdf: boolean
+  is_published: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type ModuleLessonExample = {
+  id: number
+  lesson: number
+  order: number
+  title: string
+  image: string
+  alt_text: string
+  body: string
+  common_mistake: string
+  mini_check: string
+  is_published: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type ModuleLessonAsset = {
+  id: number
+  lesson: number
+  file: string
+  original_name: string
+  alt_text: string
+  created_at: string
 }
 
 export type ModuleAccess = {
@@ -126,6 +217,7 @@ export type ModuleAccess = {
   student_name: string
   activated_by: number | null
   activated_by_name: string
+  access_type: 'PAYMENT' | 'ADVANCE_STUDY'
   payment_status: 'UNPAID' | 'PAID' | 'WAIVED'
   amount_paid: string
   payment_reference: string
@@ -142,10 +234,13 @@ export type ModuleActivityType =
   | 'FILE_UPLOAD'
   | 'CODE_COMPLETE'
   | 'CODE_FILL_BLANK'
+  | 'INTERACTIVE'
 
 export type ModuleActivity = {
   id: number
   module: number
+  topic: number | null
+  lesson: number | null
   programming_problem: number | null
   title: string
   instructions: string
@@ -156,8 +251,75 @@ export type ModuleActivity = {
   accepts_text: boolean
   accepts_file: boolean
   accepts_code: boolean
+  max_attempts: number
+  passing_score: string | null
   is_published: boolean
   created_at: string
+}
+
+export type ModuleActivityQuestionType =
+  | 'multiple_choice'
+  | 'true_false'
+  | 'fill_blank'
+  | 'ordering'
+  | 'matching'
+  | 'code_output'
+
+export type ModuleActivityQuestion = {
+  id: number
+  activity: number
+  question_type: ModuleActivityQuestionType
+  prompt: string
+  points: string
+  order: number
+  explanation?: string
+  correct_text_answers?: string[]
+  case_sensitive: boolean
+  code_snippet: string
+  expected_output?: string
+  matching_options: string[]
+  is_published: boolean
+}
+
+export type ModuleActivityQuestionChoice = {
+  id: number
+  question: number
+  text: string
+  is_correct?: boolean
+  order: number
+}
+
+export type ModuleActivityMatchingPair = {
+  id: number
+  question: number
+  left_text: string
+  right_text?: string
+  order: number
+}
+
+export type ModuleActivityAttempt = {
+  id: number
+  activity: number
+  student: number
+  attempt_number: number
+  score: string | null
+  max_score: string
+  started_at: string
+  submitted_at: string | null
+  is_submitted: boolean
+}
+
+export type ModuleActivityAnswer = {
+  id: number
+  attempt: number
+  question: number
+  selected_choice: number | null
+  text_answer: string
+  choice_order: number[]
+  matching_answer: Record<string, string>
+  is_correct?: boolean | null
+  points_earned?: string | null
+  feedback?: string
 }
 
 export type ModuleProgress = {
@@ -165,6 +327,23 @@ export type ModuleProgress = {
   module: number
   student: number
   started_at: string
+  completed_at: string | null
+}
+
+export type ModuleTopicProgress = {
+  id: number
+  topic: number
+  student: number
+  started_at: string
+  completed_at: string | null
+}
+
+export type ModuleLessonProgress = {
+  id: number
+  lesson: number
+  student: number
+  started_at: string
+  last_viewed_at: string
   completed_at: string | null
 }
 
@@ -179,6 +358,53 @@ export type ModuleActivitySubmission = {
   feedback: string
   submitted_at: string
   graded_at: string | null
+}
+
+export type ModuleTeacherSummaryAccessStatus =
+  | 'ACTIVE'
+  | 'EXPIRED'
+  | 'LOCKED'
+  | 'REVOKED'
+
+export type ModuleTeacherSummaryStudent = {
+  student_id: number
+  student_name: string
+  username: string
+  email: string
+  is_enrolled: boolean
+  schedule_id: number | null
+  schedule_display: string
+  access_status: ModuleTeacherSummaryAccessStatus
+  access_expires_at: string | null
+  access_activated_at: string | null
+  lesson_progress: {
+    started_count: number
+    completed_count: number
+    total_count: number
+    percent_complete: number
+    last_viewed_at: string | null
+    last_viewed_lesson: string
+  }
+  activity_submissions: {
+    submitted_count: number
+    pending_count: number
+    graded_count: number
+    ungraded_count: number
+    total_count: number
+  }
+}
+
+export type ModuleTeacherSummary = {
+  module: number
+  module_title: string
+  total_students: number
+  total_lessons: number
+  total_activities: number
+  active_access_count: number
+  locked_count: number
+  completed_count: number
+  ungraded_submission_count: number
+  students: ModuleTeacherSummaryStudent[]
 }
 
 export type CodeBlank = {
@@ -211,6 +437,8 @@ export type ProgrammingProblem = {
   difficulty: 'EASY' | 'MEDIUM' | 'HARD'
   subject: number | null
   module: number | null
+  topic: number | null
+  lesson: number | null
   assessment_question: number | null
   points_possible: string
   is_published: boolean
@@ -274,6 +502,7 @@ export type AssessmentAttempt = {
   submitted_at: string | null
   is_submitted: boolean
   selected_topics: number[]
+  selected_module_topics: number[]
   selected_question_ids: number[]
 }
 
@@ -306,6 +535,7 @@ export type Question = {
   order: number
   explanation?: string
   topics: number[]
+  module_topics: number[]
   choices: Choice[]
 }
 

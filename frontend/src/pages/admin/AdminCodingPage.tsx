@@ -42,6 +42,8 @@ export function AdminCodingPage({
     (subject) => `${subject.code} ${subject.name}`,
   )
   const moduleOptions = toOptions(data.modules, (module) => module.id, (module) => module.title)
+  const topicOptions = toOptions(data.moduleTopics, (topic) => topic.id, (topic) => topic.title)
+  const lessonOptions = toOptions(data.moduleLessons, (lesson) => lesson.id, (lesson) => lesson.title)
   const questionOptions = toOptions(
     data.questions,
     (question) => question.id,
@@ -86,10 +88,12 @@ export function AdminCodingPage({
           { header: 'Difficulty', render: (problem) => problem.difficulty },
           { header: 'Subject', render: (problem) => subjectName(data.subjects, problem.subject) },
           { header: 'Module', render: (problem) => moduleName(data.modules, problem.module) },
+          { header: 'Topic', render: (problem) => topicName(data.moduleTopics, problem.topic) },
+          { header: 'Lesson', render: (problem) => lessonName(data.moduleLessons, problem.lesson) },
           { header: 'Published', render: (problem) => booleanLabel(problem.is_published) },
         ]}
         endpoint="/coding/problems/"
-        fields={problemFields(subjectOptions, moduleOptions, questionOptions)}
+        fields={problemFields(subjectOptions, moduleOptions, topicOptions, lessonOptions, questionOptions)}
         getSearchText={(problem) =>
           `${problem.title} ${problem.slug} ${problem.description} ${problem.expected_language}`
         }
@@ -183,6 +187,8 @@ export function AdminCodingPage({
 function problemFields(
   subjectOptions: { label: string; value: number | string }[],
   moduleOptions: { label: string; value: number | string }[],
+  topicOptions: { label: string; value: number | string }[],
+  lessonOptions: { label: string; value: number | string }[],
   questionOptions: { label: string; value: number | string }[],
 ) {
   return [
@@ -216,6 +222,22 @@ function problemFields(
       type: 'select',
     },
     {
+      label: 'Topic',
+      name: 'topic',
+      nullable: true,
+      options: topicOptions,
+      parse: (value) => (value ? Number(value) : null),
+      type: 'select',
+    },
+    {
+      label: 'Lesson',
+      name: 'lesson',
+      nullable: true,
+      options: lessonOptions,
+      parse: (value) => (value ? Number(value) : null),
+      type: 'select',
+    },
+    {
       label: 'Assessment question',
       name: 'assessment_question',
       nullable: true,
@@ -226,6 +248,14 @@ function problemFields(
     { defaultValue: '100.00', label: 'Points', name: 'points_possible', type: 'number' },
     { defaultValue: false, label: 'Published', name: 'is_published', type: 'checkbox' },
   ] satisfies AdminField<ProgrammingProblem>[]
+}
+
+function topicName(topics: { id: number; title: string }[], topicId: number | null) {
+  return topics.find((topic) => topic.id === topicId)?.title ?? 'Not set'
+}
+
+function lessonName(lessons: { id: number; title: string }[], lessonId: number | null) {
+  return lessons.find((lesson) => lesson.id === lessonId)?.title ?? 'Not set'
 }
 
 function blankFields(problemOptions: { label: string; value: number | string }[]) {

@@ -3,3 +3,6 @@ djangorestframework==3.17.1
 django-cors-headers==4.9.0
 djangorestframework-simplejwt==5.5.1
 psycopg[binary]==3.3.4
+weasyprint==66.0
+Markdown==3.8.2
+bleach==6.2.0

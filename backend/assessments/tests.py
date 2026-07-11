@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework.test import APITestCase
 
 from accounts.models import User
-from learning_modules.models import Module
+from learning_modules.models import Module, ModuleAccess
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 from .models import Assessment, Choice, Question
@@ -15,6 +15,11 @@ class MockExamWorkflowTests(APITestCase):
             username='mock-student',
             password='testpass123',
             role=User.Role.STUDENT,
+        )
+        self.teacher = User.objects.create_user(
+            username='mock-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
         )
         self.subject = Subject.objects.create(code='CC104', name='Mock Subject')
         school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)
@@ -38,9 +43,15 @@ class MockExamWorkflowTests(APITestCase):
             is_published=True,
         )
         self.topic.subjects.add(self.subject)
+        ModuleAccess.objects.create(
+            activated_by=self.teacher,
+            module=self.topic,
+            student=self.student,
+        )
         self.assessment = Assessment.objects.create(
             title='Mock Exam',
             kind=Assessment.Kind.MOCK_EXAM,
+            module=self.topic,
             subject=self.subject,
             mock_question_count=1,
             max_attempts=2,

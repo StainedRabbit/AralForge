@@ -19,8 +19,19 @@ import type {
   Module,
   ModuleAccess,
   ModuleActivity,
+  ModuleActivityAnswer,
+  ModuleActivityAttempt,
+  ModuleActivityMatchingPair,
+  ModuleActivityQuestion,
+  ModuleActivityQuestionChoice,
   ModuleActivitySubmission,
+  ModuleLessonAsset,
+  ModuleLesson,
+  ModuleLessonExample,
+  ModuleLessonProgress,
   ModuleProgress,
+  ModuleTopic,
+  ModuleTopicProgress,
   PeriodGrade,
   PointLedger,
   ProgrammingProblem,
@@ -54,10 +65,21 @@ export type WorkspaceData = {
   schedules: SubjectSchedule[]
   enrollments: ScheduleStudent[]
   modules: Module[]
+  moduleTopics: ModuleTopic[]
+  moduleLessons: ModuleLesson[]
+  lessonAssets: ModuleLessonAsset[]
+  lessonExamples: ModuleLessonExample[]
+  lessonProgress: ModuleLessonProgress[]
   moduleAccess: ModuleAccess[]
   activities: ModuleActivity[]
+  activityQuestions: ModuleActivityQuestion[]
+  activityChoices: ModuleActivityQuestionChoice[]
+  activityMatchingPairs: ModuleActivityMatchingPair[]
+  activityAttempts: ModuleActivityAttempt[]
+  activityAnswers: ModuleActivityAnswer[]
   submissions: ModuleActivitySubmission[]
   progress: ModuleProgress[]
+  topicProgress: ModuleTopicProgress[]
   problems: ProgrammingProblem[]
   testCases: TestCase[]
   codeSubmissions: CodeSubmission[]
