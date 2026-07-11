@@ -383,6 +383,7 @@ export function LessonPresentationPage({ data }: { data: WorkspaceData }) {
     blankScreen,
     controlsPinned,
     data.problems,
+    data.lessonExamples,
     lessonMenuOpen,
     sectionDrawerOpen,
     sectionIndex,
