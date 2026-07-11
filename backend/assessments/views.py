@@ -7,7 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from learning_modules.models import Module, active_module_access_filter, user_has_module_access
+from learning_modules.models import Module, ModuleTopic, active_module_access_filter, user_has_module_access
 from subjects.models import active_subject_access_filter
 
 from .models import (
@@ -45,14 +45,7 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(is_published=True).filter(
-            (
-                Q(module__isnull=True)
-                & active_subject_access_filter(self.request.user, subject_prefix='subject__')
-            )
-            | (
-                Q(module__is_published=True)
-                & active_module_access_filter(self.request.user, prefix='module__')
-            )
+            assessment_access_filter(self.request.user),
         ).distinct()
 
     @action(detail=True, methods=['post'], url_path='start-mock')
@@ -73,11 +66,21 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        topics = list(
-            Module.objects.filter(id__in=selected_topic_ids, is_published=True).distinct()
+        module_topics = list(
+            ModuleTopic.objects.select_related('module').filter(
+                id__in=selected_topic_ids,
+                is_published=True,
+                module__is_published=True,
+            ).distinct()
         )
 
-        if len(topics) != len(set(selected_topic_ids)):
+        legacy_topics = []
+        if len(module_topics) != len(set(selected_topic_ids)):
+            legacy_topics = list(
+                Module.objects.filter(id__in=selected_topic_ids, is_published=True).distinct()
+            )
+
+        if not module_topics and len(legacy_topics) != len(set(selected_topic_ids)):
             return Response(
                 {'detail': 'One or more selected topics are not available.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -85,7 +88,12 @@ class AssessmentViewSet(viewsets.ModelViewSet):
 
         if not request.user.is_admin_teacher:
             unavailable_topics = [
-                topic for topic in topics if not user_has_module_access(request.user, topic)
+                topic for topic in module_topics
+                if not user_has_module_access(request.user, topic.module)
+            ]
+            unavailable_topics += [
+                topic for topic in legacy_topics
+                if not user_has_module_access(request.user, topic)
             ]
 
             if unavailable_topics:
@@ -105,11 +113,17 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        question_queryset = assessment.questions.filter(
+            question_type=Question.QuestionType.MULTIPLE_CHOICE,
+        )
+
+        if module_topics:
+            question_queryset = question_queryset.filter(module_topics__in=module_topics)
+        else:
+            question_queryset = question_queryset.filter(topics__in=legacy_topics)
+
         question_ids = list(
-            assessment.questions.filter(
-                question_type=Question.QuestionType.MULTIPLE_CHOICE,
-                topics__in=topics,
-            ).distinct().values_list('id', flat=True)
+            question_queryset.distinct().values_list('id', flat=True)
         )
 
         if not question_ids:
@@ -127,7 +141,10 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                 student=request.user,
                 attempt_number=existing_attempt_count + 1,
             )
-            attempt.selected_topics.set(topics)
+            if module_topics:
+                attempt.selected_module_topics.set(module_topics)
+            else:
+                attempt.selected_topics.set(legacy_topics)
             AssessmentAttemptQuestion.objects.bulk_create(
                 AssessmentAttemptQuestion(
                     attempt=attempt,
@@ -151,21 +168,9 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        access_filter = (
-            (
-                Q(assessment__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='assessment__subject__',
-                )
-            )
-            | (
-                Q(assessment__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='assessment__module__',
-                )
-            )
+        access_filter = assessment_access_filter(
+            self.request.user,
+            prefix='assessment__',
         )
 
         return queryset.filter(assessment__is_published=True).filter(
@@ -191,21 +196,9 @@ class ChoiceViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        access_filter = (
-            (
-                Q(question__assessment__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='question__assessment__subject__',
-                )
-            )
-            | (
-                Q(question__assessment__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='question__assessment__module__',
-                )
-            )
+        access_filter = assessment_access_filter(
+            self.request.user,
+            prefix='question__assessment__',
         )
 
         return queryset.filter(question__assessment__is_published=True).filter(
@@ -230,6 +223,7 @@ class AssessmentAttemptViewSet(viewsets.ModelViewSet):
             'assessment',
             'student',
         ).prefetch_related(
+            'selected_module_topics',
             'selected_topics',
             'selected_questions',
         )
@@ -238,20 +232,7 @@ class AssessmentAttemptViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(student=self.request.user).filter(
-            (
-                Q(assessment__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='assessment__subject__',
-                )
-            )
-            | (
-                Q(assessment__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='assessment__module__',
-                )
-            )
+            assessment_access_filter(self.request.user, prefix='assessment__'),
         ).distinct()
 
     def perform_create(self, serializer):
@@ -270,20 +251,10 @@ class AnswerViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(attempt__student=self.request.user).filter(
-            (
-                Q(attempt__assessment__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='attempt__assessment__subject__',
-                )
-            )
-            | (
-                Q(attempt__assessment__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='attempt__assessment__module__',
-                )
-            )
+            assessment_access_filter(
+                self.request.user,
+                prefix='attempt__assessment__',
+            ),
         ).distinct()
 
 
@@ -302,3 +273,28 @@ class AssessmentAttemptQuestionViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(attempt__student=self.request.user)
+
+
+def assessment_access_filter(user, prefix=''):
+    return (
+        (
+            Q(**{f'{prefix}module__isnull': True})
+            & Q(**{f'{prefix}subject__learning_module__isnull': True})
+            & active_subject_access_filter(
+                user,
+                subject_prefix=f'{prefix}subject__',
+            )
+        )
+        | (
+            Q(**{f'{prefix}module__isnull': True})
+            & Q(**{f'{prefix}subject__learning_module__is_published': True})
+            & active_module_access_filter(
+                user,
+                prefix=f'{prefix}subject__learning_module__',
+            )
+        )
+        | (
+            Q(**{f'{prefix}module__is_published': True})
+            & active_module_access_filter(user, prefix=f'{prefix}module__')
+        )
+    )

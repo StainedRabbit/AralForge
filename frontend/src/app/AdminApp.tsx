@@ -11,9 +11,13 @@ import { AdminCodingPage } from '../pages/admin/AdminCodingPage'
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage'
 import { AdminGradebookPage } from '../pages/admin/AdminGradebookPage'
 import { AdminGradesPage } from '../pages/admin/AdminGradesPage'
+import { AdminLessonEditorPage } from '../pages/admin/AdminLessonEditorPage'
 import { AdminModuleEditorPage } from '../pages/admin/AdminModuleEditorPage'
 import { AdminModulesPage } from '../pages/admin/AdminModulesPage'
 import { AdminStudentsPage } from '../pages/admin/AdminStudentsPage'
+import { AdminTopicEditorPage } from '../pages/admin/AdminTopicEditorPage'
+import { LessonPresentationPage } from '../pages/admin/LessonPresentationPage'
+import { ModuleProgressPage } from '../pages/admin/ModuleProgressPage'
 
 const adminNavItems: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' },
@@ -146,6 +150,54 @@ export function AdminApp({
                 refresh={workspace.refresh}
               />
             }
+          />
+          <Route
+            path="/admin/modules/:moduleId/topics/new"
+            element={
+              <AdminTopicEditorPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/:moduleId/topics/:topicId/edit"
+            element={
+              <AdminTopicEditorPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/:moduleId/topics/:topicId/lessons/new"
+            element={
+              <AdminLessonEditorPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/:moduleId/topics/:topicId/lessons/:lessonId/edit"
+            element={
+              <AdminLessonEditorPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
+          />
+          <Route
+            path="/admin/modules/:moduleId/present"
+            element={<LessonPresentationPage data={workspace} />}
+          />
+          <Route
+            path="/admin/modules/:moduleId/progress"
+            element={<ModuleProgressPage api={api} data={workspace} />}
           />
           <Route
             path="/admin/coding"

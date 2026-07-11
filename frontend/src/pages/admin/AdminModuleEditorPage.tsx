@@ -5,14 +5,11 @@ import type { AuthedRequest, WorkspaceData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
 import type { Module } from '../../types'
-import { resolveMediaUrl, toErrorMessage } from '../../utils/format'
+import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { subjectName } from '../../utils/modules'
 
 type ModuleDraft = {
-  content: string
   description: string
-  detailed_discussion: string
-  examples: string
   is_paid: boolean
   is_published: boolean
   learning_objectives: string
@@ -21,9 +18,8 @@ type ModuleDraft = {
   price: string
   resources: string
   slug: string
-  student_activities: string
+  subject: string
   subjects: string[]
-  teacher_notes: string
   title: string
 }
 
@@ -46,6 +42,9 @@ export function AdminModuleEditorPage({
     createModuleDraft(editingModule, selectedSubjectId),
   )
   const [message, setMessage] = useState('')
+  const [pdfMessage, setPdfMessage] = useState('')
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
   const subjectOptions = useMemo(
     () => data.subjects.map((subject) => ({
@@ -82,7 +81,7 @@ export function AdminModuleEditorPage({
         },
       )
       await refresh()
-      const subject = draft.subjects[0] ?? selectedSubjectId ?? ''
+      const subject = draft.subject || selectedSubjectId || ''
       const params = new URLSearchParams()
       if (subject) {
         params.set('subject', subject)
@@ -110,7 +109,70 @@ export function AdminModuleEditorPage({
     }))
   }
 
-  const primarySubject = draft.subjects[0] ? Number(draft.subjects[0]) : null
+  async function regeneratePdf() {
+    if (!editingModule) {
+      return
+    }
+
+    setPdfBusy(true)
+    setPdfMessage('')
+    try {
+      await api<Module>(`/modules/modules/${editingModule.id}/regenerate_pdf/`, {
+        method: 'POST',
+      })
+      await refresh()
+      setPdfMessage('Printable PDF generated.')
+    } catch (caughtError) {
+      setPdfMessage(toErrorMessage(caughtError))
+    } finally {
+      setPdfBusy(false)
+    }
+  }
+
+  async function downloadPdf() {
+    if (!editingModule) {
+      return
+    }
+
+    setPdfBusy(true)
+    setPdfMessage('')
+    try {
+      const blob = await api<Blob>(`/modules/modules/${editingModule.id}/download-pdf/`)
+      downloadBlob(blob, `${editingModule.slug || 'module'}.pdf`)
+    } catch (caughtError) {
+      setPdfMessage(toErrorMessage(caughtError))
+    } finally {
+      setPdfBusy(false)
+    }
+  }
+
+  async function deleteModule() {
+    if (!editingModule) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete "${editingModule.title}"? This will also delete its topics, lessons, activities, access, and progress records.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setDeleting(true)
+    setMessage('')
+    try {
+      await api(`/modules/modules/${editingModule.id}/`, { method: 'DELETE' })
+      await refresh()
+      const subject = draft.subject || selectedSubjectId || ''
+      navigate(`/admin/modules${subject ? `?subject=${subject}` : ''}`)
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const primarySubject = draft.subject ? Number(draft.subject) : null
 
   return (
     <Page>
@@ -128,8 +190,8 @@ export function AdminModuleEditorPage({
 
       <form className="lesson-editor section-block" onSubmit={submitForm}>
         <SectionHeading
-          subtitle="Structure the topic like teaching material."
-          title="Lesson Details"
+          subtitle="Define the complete subject-level learning package."
+          title="Module Details"
         />
 
         <div className="lesson-editor__grid">
@@ -154,17 +216,16 @@ export function AdminModuleEditorPage({
           </label>
 
           <label className="admin-field admin-field--wide">
-            <span>Subjects</span>
+            <span>Subject</span>
             <select
-              multiple
-              onChange={(event) =>
-                updateDraft(
-                  'subjects',
-                  Array.from(event.target.selectedOptions).map((option) => option.value),
-                )
-              }
-              value={draft.subjects}
+              onChange={(event) => {
+                updateDraft('subject', event.target.value)
+                updateDraft('subjects', event.target.value ? [event.target.value] : [])
+              }}
+              required
+              value={draft.subject}
             >
+              <option value="">Select subject</option>
               {subjectOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -192,53 +253,14 @@ export function AdminModuleEditorPage({
             value={draft.lesson_overview}
           />
           <TextArea
-            label="Detailed discussion"
-            onChange={(value) => updateDraft('detailed_discussion', value)}
-            rows={9}
-            value={draft.detailed_discussion}
-          />
-          <TextArea
-            label="Examples"
-            onChange={(value) => updateDraft('examples', value)}
-            rows={7}
-            value={draft.examples}
-          />
-          <TextArea
-            label="Teacher notes / guide"
-            onChange={(value) => updateDraft('teacher_notes', value)}
-            rows={5}
-            value={draft.teacher_notes}
-          />
-          <TextArea
-            label="Student activities"
-            onChange={(value) => updateDraft('student_activities', value)}
-            rows={5}
-            value={draft.student_activities}
-          />
-          <TextArea
             label="Resources / references"
             onChange={(value) => updateDraft('resources', value)}
             rows={5}
             value={draft.resources}
           />
-          <TextArea
-            label="Legacy content"
-            onChange={(value) => updateDraft('content', value)}
-            rows={4}
-            value={draft.content}
-          />
         </div>
 
         <section className="lesson-editor__meta">
-          <label className="admin-check">
-            <input
-              checked={draft.is_paid}
-              onChange={(event) => updateDraft('is_paid', event.target.checked)}
-              type="checkbox"
-            />
-            <span>Paid module</span>
-          </label>
-
           <label className="admin-field">
             <span>Price</span>
             <input
@@ -265,30 +287,73 @@ export function AdminModuleEditorPage({
             />
           </label>
 
-          {editingModule?.pdf_file ? (
-            <a
-              className="button button--secondary"
-              href={resolveMediaUrl(editingModule.pdf_file)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <Icon name="file" />
-              <span>Open current PDF</span>
-            </a>
+          {editingModule ? (
+            <div className="pdf-status-card">
+              <span className={`pdf-status-card__pill pdf-status-card__pill--${pdfStatusKind(editingModule)}`}>
+                {pdfStatusLabel(editingModule)}
+              </span>
+              {editingModule.pdf_generated_at ? (
+                <small>Generated {formatDateTime(editingModule.pdf_generated_at)}</small>
+              ) : (
+                <small>No generated printable PDF yet.</small>
+              )}
+              <div className="pdf-status-card__actions">
+                <button className="button button--secondary button--compact" disabled={pdfBusy} onClick={() => void regeneratePdf()} type="button">
+                  <Icon name="save" />
+                  <span>{editingModule.has_pdf ? 'Regenerate PDF' : 'Generate PDF'}</span>
+                </button>
+                {editingModule.has_pdf ? (
+                  <button className="button button--secondary button--compact" disabled={pdfBusy} onClick={() => void downloadPdf()} type="button">
+                    <Icon name="file" />
+                    <span>Download PDF</span>
+                  </button>
+                ) : null}
+              </div>
+              {pdfMessage ? <small>{pdfMessage}</small> : null}
+            </div>
           ) : null}
         </section>
 
         {message ? <p className="admin-message">{message}</p> : null}
 
         <div className="lesson-editor__actions">
+          {editingModule ? (
+            <button className="button button--secondary button--danger" disabled={deleting || saving} onClick={() => void deleteModule()} type="button">
+              <Icon name="trash" />
+              <span>{deleting ? 'Deleting...' : 'Delete module'}</span>
+            </button>
+          ) : null}
           <button className="button button--primary" disabled={saving} type="submit">
             <Icon name="save" />
-            <span>{saving ? 'Saving...' : 'Save lesson'}</span>
+            <span>{saving ? 'Saving...' : 'Save module'}</span>
           </button>
         </div>
       </form>
     </Page>
   )
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function pdfStatusLabel(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
+  if (!item.has_pdf && !item.pdf_generated_at) {
+    return 'Not generated'
+  }
+  return item.pdf_is_outdated ? 'Outdated' : 'Updated'
+}
+
+function pdfStatusKind(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
+  if (!item.has_pdf && !item.pdf_generated_at) {
+    return 'missing'
+  }
+  return item.pdf_is_outdated ? 'outdated' : 'updated'
 }
 
 function TextArea({
@@ -316,10 +381,7 @@ function TextArea({
 
 function createModuleDraft(module?: Module, selectedSubjectId?: string | null): ModuleDraft {
   return {
-    content: module?.content ?? '',
     description: module?.description ?? '',
-    detailed_discussion: module?.detailed_discussion ?? '',
-    examples: module?.examples ?? '',
     is_paid: module?.is_paid ?? true,
     is_published: module?.is_published ?? false,
     learning_objectives: module?.learning_objectives ?? '',
@@ -328,9 +390,8 @@ function createModuleDraft(module?: Module, selectedSubjectId?: string | null): 
     price: module?.price ?? '0.00',
     resources: module?.resources ?? '',
     slug: module?.slug ?? '',
-    student_activities: module?.student_activities ?? '',
+    subject: module?.subject ? String(module.subject) : selectedSubjectId ?? '',
     subjects: module?.subjects.map(String) ?? (selectedSubjectId ? [selectedSubjectId] : []),
-    teacher_notes: module?.teacher_notes ?? '',
     title: module?.title ?? '',
   }
 }
@@ -352,7 +413,7 @@ function buildModulePayload(draft: ModuleDraft) {
         return
       }
 
-      formData.append(key, String(value))
+      formData.append(key, key === 'is_paid' ? 'true' : String(value))
     })
 
     return formData
@@ -360,7 +421,9 @@ function buildModulePayload(draft: ModuleDraft) {
 
   return {
     ...draft,
+    is_paid: true,
     pdf_file: undefined,
+    subject: draft.subject ? Number(draft.subject) : null,
     subjects: draft.subjects.map(Number),
     price: draft.price || '0.00',
   }

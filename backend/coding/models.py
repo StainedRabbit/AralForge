@@ -28,6 +28,20 @@ class ProgrammingProblem(models.Model):
         null=True,
         blank=True,
     )
+    topic = models.ForeignKey(
+        'learning_modules.ModuleTopic',
+        on_delete=models.SET_NULL,
+        related_name='programming_problems',
+        null=True,
+        blank=True,
+    )
+    lesson = models.ForeignKey(
+        'learning_modules.ModuleLesson',
+        on_delete=models.SET_NULL,
+        related_name='programming_problems',
+        null=True,
+        blank=True,
+    )
     assessment_question = models.OneToOneField(
         'assessments.Question',
         on_delete=models.SET_NULL,

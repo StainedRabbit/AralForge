@@ -23,6 +23,8 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
         queryset = ProgrammingProblem.objects.select_related(
             'subject',
             'module',
+            'topic',
+            'lesson',
             'assessment_question',
         ).prefetch_related('test_cases', 'blanks')
 
@@ -30,14 +32,7 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(is_published=True).filter(
-            (
-                Q(module__isnull=True)
-                & active_subject_access_filter(self.request.user, subject_prefix='subject__')
-            )
-            | (
-                Q(module__is_published=True)
-                & active_module_access_filter(self.request.user, prefix='module__')
-            )
+            problem_access_filter(self.request.user)
         ).distinct()
 
 
@@ -52,20 +47,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(problem__is_published=True, is_hidden=False).filter(
-            (
-                Q(problem__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='problem__subject__',
-                )
-            )
-            | (
-                Q(problem__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='problem__module__',
-                )
-            )
+            problem_access_filter(self.request.user, prefix='problem__')
         ).distinct()
 
 
@@ -80,20 +62,7 @@ class CodeBlankViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(problem__is_published=True).filter(
-            (
-                Q(problem__module__isnull=True)
-                & active_subject_access_filter(
-                    self.request.user,
-                    subject_prefix='problem__subject__',
-                )
-            )
-            | (
-                Q(problem__module__is_published=True)
-                & active_module_access_filter(
-                    self.request.user,
-                    prefix='problem__module__',
-                )
-            )
+            problem_access_filter(self.request.user, prefix='problem__')
         ).distinct()
 
 
@@ -107,7 +76,11 @@ class CodeSubmissionViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(student=self.request.user)
+        return queryset.filter(
+            student=self.request.user,
+        ).filter(
+            problem_access_filter(self.request.user, prefix='problem__'),
+        ).distinct()
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
@@ -129,4 +102,49 @@ class CodeBlankAnswerViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(submission__student=self.request.user)
+        return queryset.filter(
+            submission__student=self.request.user,
+        ).filter(
+            problem_access_filter(
+                self.request.user,
+                prefix='blank__problem__',
+            ),
+        ).distinct()
+
+
+def problem_access_filter(user, prefix=''):
+    unlinked_filter = (
+        Q(**{f'{prefix}module__isnull': True})
+        & Q(**{f'{prefix}topic__isnull': True})
+        & Q(**{f'{prefix}lesson__isnull': True})
+    )
+    return (
+        (
+            unlinked_filter
+            & Q(**{f'{prefix}subject__learning_module__isnull': True})
+            & active_subject_access_filter(user, subject_prefix=f'{prefix}subject__')
+        )
+        | (
+            unlinked_filter
+            & Q(**{f'{prefix}subject__learning_module__is_published': True})
+            & active_module_access_filter(
+                user,
+                prefix=f'{prefix}subject__learning_module__',
+            )
+        )
+        | (
+            Q(**{f'{prefix}module__is_published': True})
+            & active_module_access_filter(user, prefix=f'{prefix}module__')
+        )
+        | (
+            Q(**{f'{prefix}topic__is_published': True})
+            & Q(**{f'{prefix}topic__module__is_published': True})
+            & active_module_access_filter(user, prefix=f'{prefix}topic__module__')
+        )
+        | (
+            Q(**{f'{prefix}lesson__is_published': True})
+            & Q(**{f'{prefix}lesson__topic__is_published': True})
+            & Q(**{f'{prefix}lesson__topic__module__is_published': True})
+            & active_module_access_filter(user, prefix=f'{prefix}lesson__topic__module__')
+        )
+    )

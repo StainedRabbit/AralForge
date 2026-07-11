@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
 import { Icon } from '../../components/Icon'
+import { ManageStudentModulesDialog } from '../../components/admin/ManageStudentModulesDialog'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   ApiPage,
   GradeCategory,
   GradeItem,
+  Module,
   ScheduleStudent,
   SchoolYearSemester,
   StudentGradeItemScore,
@@ -415,9 +417,11 @@ function ClassRoster({
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
 }) {
+  const location = useLocation()
   const [isAdding, setIsAdding] = useState(false)
   const [rosterQuery, setRosterQuery] = useState('')
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
+  const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
   const roster = selectedSchedule
     ? data.enrollments.filter(
         (enrollment) => enrollment.schedule === selectedSchedule.id,
@@ -426,6 +430,10 @@ function ClassRoster({
   const rosterRows = roster.map((enrollment) => getRosterRow(enrollment, data))
   const visibleRows = filterRosterRows(rosterRows, rosterQuery)
   const activeCount = roster.filter((enrollment) => enrollment.is_active).length
+  const classModules = selectedSchedule
+    ? modulesForSubject(data.modules, selectedSchedule.subject)
+    : []
+  const primaryClassModule = classModules[0] ?? null
   const rosterSubtitle = selectedSchedule
     ? `${selectedSchedule.subject_code} ${selectedSchedule.section || ''} - ${activeCount} active student${activeCount === 1 ? '' : 's'}`
     : 'Select a class'
@@ -453,6 +461,20 @@ function ClassRoster({
                 <span>Open Gradebook</span>
               </Link>
             ) : null}
+            {selectedSchedule && primaryClassModule ? (
+              <Link
+                className="button button--secondary"
+                to={`/admin/modules/${primaryClassModule.id}/progress?schedule=${selectedSchedule.id}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
+              >
+                <Icon name="module" />
+                <span>View Module Progress</span>
+              </Link>
+            ) : (
+              <button className="button button--secondary" disabled type="button">
+                <Icon name="module" />
+                <span>View Module Progress</span>
+              </button>
+            )}
             <button
               className="button button--primary"
               disabled={!selectedSchedule}
@@ -511,6 +533,7 @@ function ClassRoster({
                 row={row}
                 key={row.enrollment.id}
                 onOpenGrades={setGradeRow}
+                onOpenModules={setModuleRow}
                 refresh={refresh}
               />
             ))}
@@ -551,6 +574,19 @@ function ClassRoster({
           onClose={() => setGradeRow(null)}
         />
       ) : null}
+
+      {moduleRow ? (
+        <ManageStudentModulesDialog
+          api={api}
+          data={data}
+          defaultSubjectId={selectedSchedule?.subject}
+          onClose={() => setModuleRow(null)}
+          refresh={refresh}
+          studentId={moduleRow.enrollment.student}
+          studentName={moduleRow.studentName}
+        />
+      ) : null}
+
     </section>
   )
 }
@@ -558,11 +594,13 @@ function ClassRoster({
 function RosterRow({
   api,
   onOpenGrades,
+  onOpenModules,
   row,
   refresh,
 }: {
   api: AuthedRequest
   onOpenGrades: (row: RosterRowData) => void
+  onOpenModules: (row: RosterRowData) => void
   row: RosterRowData
   refresh: () => Promise<void>
 }) {
@@ -624,6 +662,15 @@ function RosterRow({
           >
             <Icon name="grade" />
             <span>Grades</span>
+          </button>
+          <button
+            className="button button--secondary button--compact"
+            disabled={saving || removing}
+            onClick={() => onOpenModules(row)}
+            type="button"
+          >
+            <Icon name="module" />
+            <span>Modules</span>
           </button>
           <Link
             className="button button--secondary button--compact"
@@ -1501,6 +1548,16 @@ function findProfileByStudentNumber(
 
 function normalizeStudentNumber(value: string) {
   return value.trim().toLowerCase()
+}
+
+function modulesForSubject(modules: Module[], subjectId: number) {
+  return modules
+    .filter(
+      (module) =>
+        module.is_published &&
+        (module.subject === subjectId || module.subjects.includes(subjectId)),
+    )
+    .sort((first, second) => first.title.localeCompare(second.title))
 }
 
 function parseStudentImport(text: string): StudentImportRow[] {

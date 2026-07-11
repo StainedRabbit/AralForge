@@ -2,6 +2,10 @@ import type { ReactNode } from 'react'
 
 export type IconName =
   | 'activity'
+  | 'arrow-left'
+  | 'arrow-right'
+  | 'arrow-up'
+  | 'arrow-down'
   | 'assessment'
   | 'award'
   | 'book'
@@ -17,11 +21,15 @@ export type IconName =
   | 'module'
   | 'profile'
   | 'edit'
+  | 'expand'
+  | 'eye-off'
+  | 'minus'
   | 'plus'
   | 'save'
   | 'search'
   | 'send'
   | 'shield'
+  | 'shrink'
   | 'spark'
   | 'trash'
   | 'upload'
@@ -31,6 +39,30 @@ const iconPaths: Record<IconName, ReactNode> = {
   activity: (
     <>
       <path d="M3 12h4l2-6 4 12 2-6h6" />
+    </>
+  ),
+  'arrow-left': (
+    <>
+      <path d="m15 18-6-6 6-6" />
+      <path d="M9 12h10" />
+    </>
+  ),
+  'arrow-right': (
+    <>
+      <path d="m9 18 6-6-6-6" />
+      <path d="M5 12h10" />
+    </>
+  ),
+  'arrow-up': (
+    <>
+      <path d="m18 15-6-6-6 6" />
+      <path d="M12 9v10" />
+    </>
+  ),
+  'arrow-down': (
+    <>
+      <path d="m6 9 6 6 6-6" />
+      <path d="M12 5v10" />
     </>
   ),
   assessment: (
@@ -139,6 +171,27 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
     </>
   ),
+  expand: (
+    <>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </>
+  ),
+  'eye-off': (
+    <>
+      <path d="m3 3 18 18" />
+      <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+      <path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c5.5 0 9 8 9 8a16.8 16.8 0 0 1-2.1 3.2" />
+      <path d="M6.6 6.6C4.4 8.1 3 12 3 12s3.5 8 9 8a9.7 9.7 0 0 0 4.1-.9" />
+    </>
+  ),
+  minus: (
+    <>
+      <path d="M5 12h14" />
+    </>
+  ),
   plus: (
     <>
       <path d="M12 5v14" />
@@ -167,6 +220,14 @@ const iconPaths: Record<IconName, ReactNode> = {
   shield: (
     <>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </>
+  ),
+  shrink: (
+    <>
+      <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+      <path d="M16 3v3a2 2 0 0 0 2 2h3" />
+      <path d="M8 21v-3a2 2 0 0 0-2-2H3" />
+      <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
     </>
   ),
   spark: (

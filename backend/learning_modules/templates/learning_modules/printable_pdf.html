@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 20mm;
+      @bottom-center {
+        color: #6b7280;
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 9pt;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      color: #1f2937;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      color: #111827;
+      font-size: 24pt;
+      line-height: 1.15;
+      margin-top: 6mm;
+    }
+
+    h2 {
+      border-bottom: 1px solid #d1d5db;
+      color: #111827;
+      font-size: 16pt;
+      margin: 11mm 0 4mm;
+      padding-bottom: 2mm;
+    }
+
+    h3 {
+      color: #111827;
+      font-size: 13pt;
+      margin: 6mm 0 2mm;
+    }
+
+    h4 {
+      color: #374151;
+      font-size: 11pt;
+      margin: 4mm 0 1.5mm;
+    }
+
+    p,
+    ul,
+    ol,
+    figure,
+    pre,
+    table {
+      margin: 0 0 3.5mm;
+    }
+
+    ul,
+    ol {
+      padding-left: 6mm;
+    }
+
+    a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    pre {
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 3mm;
+      font-size: 9pt;
+      overflow-wrap: anywhere;
+      padding: 3mm;
+      white-space: pre-wrap;
+    }
+
+    table {
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: 100%;
+      word-break: break-word;
+    }
+
+    img,
+    svg,
+    .lesson-content img,
+    .section-body img {
+      break-inside: avoid;
+      display: block;
+      height: auto;
+      margin: 12px auto;
+      max-height: 225mm;
+      max-width: 100%;
+      object-fit: contain;
+      page-break-inside: avoid;
+    }
+
+    figure {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      text-align: center;
+    }
+
+    figcaption {
+      color: #6b7280;
+      font-size: 9pt;
+      font-weight: 700;
+      margin-top: 1.5mm;
+    }
+
+    th,
+    td {
+      border: 1px solid #d1d5db;
+      padding: 2mm;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f3f4f6;
+      color: #111827;
+      font-weight: 700;
+    }
+
+    .cover {
+      border-bottom: 2px solid #111827;
+      margin-bottom: 8mm;
+      padding-bottom: 7mm;
+    }
+
+    .eyebrow {
+      color: #4b5563;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .generated {
+      color: #6b7280;
+      font-size: 9pt;
+      margin-top: 3mm;
+    }
+
+    .section {
+      break-inside: avoid;
+      margin-bottom: 5mm;
+    }
+
+    .lesson {
+      border-top: 1px solid #e5e7eb;
+      margin-top: 7mm;
+      padding-top: 4mm;
+    }
+
+    .lesson-meta,
+    .activity-meta {
+      color: #6b7280;
+      font-size: 9pt;
+      font-weight: 700;
+      margin-bottom: 2mm;
+      text-transform: uppercase;
+    }
+
+    .example,
+    .activity {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 3mm;
+      break-inside: avoid;
+      margin: 3mm 0;
+      padding: 3mm;
+    }
+
+    .activity-question {
+      border-top: 1px solid #e5e7eb;
+      margin-top: 3mm;
+      padding-top: 3mm;
+    }
+
+    .activity-question h4,
+    .activity-question p {
+      margin-bottom: 2mm;
+    }
+
+    .activity-question__type {
+      color: #6b7280;
+      font-size: 9pt;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .matching-print-table {
+      margin-top: 2mm;
+    }
+
+    .matching-print-table td {
+      height: 12mm;
+    }
+
+    .print-choice-list,
+    .print-ordering-list {
+      list-style: none;
+      margin: 2mm 0 0;
+      padding-left: 0;
+    }
+
+    .print-choice-list li,
+    .print-ordering-list li {
+      align-items: center;
+      display: flex;
+      gap: 2.5mm;
+      margin-bottom: 2mm;
+    }
+
+    .print-choice-box,
+    .print-rank-box {
+      border: 1px solid #6b7280;
+      display: inline-block;
+      flex: 0 0 auto;
+      height: 5mm;
+      width: 5mm;
+    }
+
+    .print-rank-box {
+      height: 7mm;
+      width: 10mm;
+    }
+
+    .print-choice-text {
+      flex: 1;
+    }
+
+    .answer-line {
+      border-bottom: 1px solid #9ca3af;
+      height: 9mm;
+      margin-top: 2mm;
+    }
+
+    .answer-lines {
+      margin-top: 2mm;
+    }
+
+    .answer-lines .answer-line {
+      height: 8mm;
+    }
+
+    .note {
+      border-left: 3px solid #9ca3af;
+      margin-top: 2.5mm;
+      padding-left: 3mm;
+    }
+
+    .section-body > * + * {
+      margin-top: 2mm;
+    }
+
+    .pdf-missing-media {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: 2mm;
+      color: #78350f;
+      font-size: 9pt;
+      padding: 2mm;
+    }
+  </style>
+</head>
+<body>
+  <header class="cover">
+    {% if context_label %}<p class="eyebrow">{{ context_label }}</p>{% endif %}
+    <h1>{{ title }}</h1>
+    <p class="generated">Generated {{ generated_at|date:"M j, Y g:i A" }}</p>
+  </header>
+
+  {% for section in sections %}
+    {% if section %}
+      <section class="section">
+        <h2>{{ section.title }}</h2>
+        <div class="section-body">{{ section.content|safe }}</div>
+      </section>
+    {% endif %}
+  {% endfor %}
+
+  {% if lesson %}
+    <article class="lesson">
+      {% for section in lesson.sections %}
+        <section class="section">
+          <h2>{{ section.title }}</h2>
+          {% if section.content %}<div class="section-body">{{ section.content|safe }}</div>{% endif %}
+          {% for example in section.examples %}
+            <article class="example">
+              <h3>{{ example.title }}</h3>
+              {% if example.image %}
+                {% if example.image.missing %}
+                  <p class="pdf-missing-media">Image unavailable: {{ example.image.name }}</p>
+                {% else %}
+                  <figure>
+                    <img alt="{{ example.image.alt_text }}" src="{{ example.image.src }}">
+                    {% if example.image.alt_text %}<figcaption>{{ example.image.alt_text }}</figcaption>{% endif %}
+                  </figure>
+                {% endif %}
+              {% endif %}
+              {% if example.body %}<div class="section-body">{{ example.body|safe }}</div>{% endif %}
+              {% if example.common_mistake %}
+                <div class="note">
+                  <h4>Common mistake</h4>
+                  <div class="section-body">{{ example.common_mistake|safe }}</div>
+                </div>
+              {% endif %}
+              {% if example.mini_check %}
+                <div class="note">
+                  <h4>Mini-check</h4>
+                  <div class="section-body">{{ example.mini_check|safe }}</div>
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </section>
+      {% endfor %}
+      {% if lesson.main_activity %}
+        <article class="activity">
+          <p class="activity-meta">Main Activity</p>
+          <h2>{{ lesson.main_activity.title }}</h2>
+          <div class="section-body">{{ lesson.main_activity.instructions|safe }}</div>
+          {% for question in lesson.main_activity.questions %}
+            <section class="activity-question">
+              <p class="activity-question__type">Question {{ forloop.counter }} / {{ question.question_type }}</p>
+              <div class="section-body">{{ question.prompt|safe }}</div>
+              {% if question.code_snippet %}<pre>{{ question.code_snippet }}</pre>{% endif %}
+              {% if question.choices %}
+                <ol class="{% if question.question_type == 'Ordering' %}print-ordering-list{% else %}print-choice-list{% endif %}">
+                  {% for choice in question.choices %}
+                    <li>
+                      {% if question.question_type == 'Ordering' %}
+                        <span class="print-rank-box"></span>
+                      {% else %}
+                        <span class="print-choice-box"></span>
+                      {% endif %}
+                      <span class="print-choice-text">{{ choice }}</span>
+                    </li>
+                  {% endfor %}
+                </ol>
+              {% elif question.matching_prompts %}
+                <table class="matching-print-table">
+                  <thead>
+                    <tr>
+                      <th>Prompt</th>
+                      <th>Match</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for prompt in question.matching_prompts %}
+                      <tr>
+                        <td>{{ prompt }}</td>
+                        <td></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                {% if question.matching_options %}
+                  <p><strong>Options:</strong> {{ question.matching_options|join:", " }}</p>
+                {% endif %}
+              {% else %}
+                <div class="answer-lines">
+                  <div class="answer-line"></div>
+                  <div class="answer-line"></div>
+                  {% if question.question_type == 'Code Output' %}
+                    <div class="answer-line"></div>
+                    <div class="answer-line"></div>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </section>
+          {% endfor %}
+        </article>
+      {% endif %}
+      {% if lesson.assessment_url %}
+        <section class="section">
+          <h2>Assessment</h2>
+          <p>{{ lesson.assessment_url }}</p>
+        </section>
+      {% endif %}
+    </article>
+  {% endif %}
+
+  {% for topic in topics %}
+    <section class="section">
+      {% if topic.meta %}<p class="eyebrow">{{ topic.meta }}</p>{% endif %}
+      <h2>{{ topic.title }}</h2>
+      {% for section in topic.sections %}
+        {% if section %}
+          <h3>{{ section.title }}</h3>
+          <div class="section-body">{{ section.content|safe }}</div>
+        {% endif %}
+      {% endfor %}
+
+      {% for lesson in topic.lessons %}
+        <article class="lesson">
+          <p class="lesson-meta">Lesson {{ lesson.order }}</p>
+          <h3>{{ lesson.title }}</h3>
+          {% for section in lesson.sections %}
+            <section class="section">
+              <h4>{{ section.title }}</h4>
+              {% if section.content %}<div class="section-body">{{ section.content|safe }}</div>{% endif %}
+              {% for example in section.examples %}
+                <article class="example">
+                  <h4>{{ example.title }}</h4>
+                  {% if example.image %}
+                    {% if example.image.missing %}
+                      <p class="pdf-missing-media">Image unavailable: {{ example.image.name }}</p>
+                    {% else %}
+                      <figure>
+                        <img alt="{{ example.image.alt_text }}" src="{{ example.image.src }}">
+                        {% if example.image.alt_text %}<figcaption>{{ example.image.alt_text }}</figcaption>{% endif %}
+                      </figure>
+                    {% endif %}
+                  {% endif %}
+                  {% if example.body %}<div class="section-body">{{ example.body|safe }}</div>{% endif %}
+                  {% if example.common_mistake %}
+                    <div class="note">
+                      <strong>Common mistake</strong>
+                      <div class="section-body">{{ example.common_mistake|safe }}</div>
+                    </div>
+                  {% endif %}
+                  {% if example.mini_check %}
+                    <div class="note">
+                      <strong>Mini-check</strong>
+                      <div class="section-body">{{ example.mini_check|safe }}</div>
+                    </div>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </section>
+          {% endfor %}
+          {% if lesson.main_activity %}
+            <article class="activity">
+              <p class="activity-meta">Main Activity</p>
+              <h4>{{ lesson.main_activity.title }}</h4>
+              <div class="section-body">{{ lesson.main_activity.instructions|safe }}</div>
+              {% for question in lesson.main_activity.questions %}
+                <section class="activity-question">
+                  <p class="activity-question__type">Question {{ forloop.counter }} / {{ question.question_type }}</p>
+                  <div class="section-body">{{ question.prompt|safe }}</div>
+                  {% if question.code_snippet %}<pre>{{ question.code_snippet }}</pre>{% endif %}
+                  {% if question.choices %}
+                    <ol class="{% if question.question_type == 'Ordering' %}print-ordering-list{% else %}print-choice-list{% endif %}">
+                      {% for choice in question.choices %}
+                        <li>
+                          {% if question.question_type == 'Ordering' %}
+                            <span class="print-rank-box"></span>
+                          {% else %}
+                            <span class="print-choice-box"></span>
+                          {% endif %}
+                          <span class="print-choice-text">{{ choice }}</span>
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  {% elif question.matching_prompts %}
+                    <table class="matching-print-table">
+                      <thead>
+                        <tr>
+                          <th>Prompt</th>
+                          <th>Match</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for prompt in question.matching_prompts %}
+                          <tr>
+                            <td>{{ prompt }}</td>
+                            <td></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                    {% if question.matching_options %}
+                      <p><strong>Options:</strong> {{ question.matching_options|join:", " }}</p>
+                    {% endif %}
+                  {% else %}
+                    <div class="answer-lines">
+                      <div class="answer-line"></div>
+                      <div class="answer-line"></div>
+                      {% if question.question_type == 'Code Output' %}
+                        <div class="answer-line"></div>
+                        <div class="answer-line"></div>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                </section>
+              {% endfor %}
+            </article>
+          {% endif %}
+        </article>
+      {% endfor %}
+
+      {% for activity in topic.activities %}
+        <article class="activity">
+          <p class="activity-meta">{{ activity.activity_type }}</p>
+          <h3>{{ activity.title }}</h3>
+          <div class="section-body">{{ activity.instructions|safe }}</div>
+        </article>
+      {% endfor %}
+    </section>
+  {% endfor %}
+
+  {% for activity in module_level_activities %}
+    <article class="activity">
+      <p class="activity-meta">{{ activity.activity_type }}</p>
+      <h2>{{ activity.title }}</h2>
+      <div class="section-body">{{ activity.instructions|safe }}</div>
+    </article>
+  {% endfor %}
+</body>
+</html>
