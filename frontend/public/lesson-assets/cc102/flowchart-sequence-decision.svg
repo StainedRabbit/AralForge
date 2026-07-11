@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="940" viewBox="0 0 1400 940" role="img" aria-labelledby="title desc">
+  <title id="title">Flowchart sequence and decision guide</title>
+  <desc id="desc">Two aligned examples: a top-to-bottom sequence flowchart for adding two numbers and a pass or try again decision flowchart.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="12" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,10 L13,5 z" fill="#2563eb"/>
+    </marker>
+    <filter id="panel-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  <rect width="1400" height="940" fill="#f8fafc"/>
+  <g font-family="Arial, sans-serif">
+    <text x="70" y="88" fill="#0f172a" font-size="42" font-weight="700">Flowchart Examples: Sequence And Decision</text>
+    <text x="70" y="132" fill="#475569" font-size="24">Trace each diagram from Start to End. Every symbol is centered on the path it belongs to.</text>
+    <g transform="translate(70 175)" filter="url(#panel-shadow)">
+      <rect width="580" height="690" rx="30" fill="#ffffff" stroke="#e2e8f0" stroke-width="3"/>
+      <text x="290" y="62" fill="#0f172a" font-size="29" font-weight="700" text-anchor="middle">Sequence: Add Two Numbers</text>
+      <rect x="190" y="100" width="200" height="68" rx="34" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="290" y="143" fill="#0f172a" font-size="24" font-weight="700" text-anchor="middle">Start</text>
+      <polygon points="210,220 410,220 370,288 170,288" fill="#fef3c7" stroke="#d97706" stroke-width="4"/>
+      <text x="290" y="262" fill="#0f172a" font-size="22" font-weight="700" text-anchor="middle">Input num1, num2</text>
+      <rect x="170" y="340" width="240" height="68" rx="10" fill="#ccfbf1" stroke="#0f766e" stroke-width="4"/>
+      <text x="290" y="383" fill="#0f172a" font-size="22" font-weight="700" text-anchor="middle">sum = num1 + num2</text>
+      <polygon points="210,460 410,460 370,528 170,528" fill="#fef3c7" stroke="#d97706" stroke-width="4"/>
+      <text x="290" y="502" fill="#0f172a" font-size="22" font-weight="700" text-anchor="middle">Display sum</text>
+      <rect x="190" y="580" width="200" height="68" rx="34" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="290" y="623" fill="#0f172a" font-size="24" font-weight="700" text-anchor="middle">End</text>
+      <g stroke="#2563eb" stroke-width="5" fill="none" stroke-linecap="round" marker-end="url(#arrow)">
+        <path d="M290 168 V216"/>
+        <path d="M290 288 V336"/>
+        <path d="M290 408 V456"/>
+        <path d="M290 528 V576"/>
+      </g>
+    </g>
+    <g transform="translate(750 175)" filter="url(#panel-shadow)">
+      <rect width="580" height="690" rx="30" fill="#ffffff" stroke="#e2e8f0" stroke-width="3"/>
+      <text x="290" y="62" fill="#0f172a" font-size="29" font-weight="700" text-anchor="middle">Decision: Pass Or Try Again</text>
+      <rect x="190" y="100" width="200" height="68" rx="34" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="290" y="143" fill="#0f172a" font-size="24" font-weight="700" text-anchor="middle">Start</text>
+      <polygon points="210,218 410,218 370,286 170,286" fill="#fef3c7" stroke="#d97706" stroke-width="4"/>
+      <text x="290" y="260" fill="#0f172a" font-size="22" font-weight="700" text-anchor="middle">Input grade</text>
+      <polygon points="290,338 430,408 290,478 150,408" fill="#fee2e2" stroke="#dc2626" stroke-width="4"/>
+      <text x="290" y="416" fill="#0f172a" font-size="22" font-weight="700" text-anchor="middle">grade &gt;= 75?</text>
+      <rect x="74" y="535" width="210" height="70" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="4"/>
+      <text x="179" y="578" fill="#0f172a" font-size="21" font-weight="700" text-anchor="middle">Display Passed</text>
+      <rect x="326" y="535" width="220" height="70" rx="10" fill="#fee2e2" stroke="#dc2626" stroke-width="4"/>
+      <text x="436" y="578" fill="#0f172a" font-size="21" font-weight="700" text-anchor="middle">Display Try Again</text>
+      <rect x="190" y="625" width="200" height="58" rx="29" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="290" y="663" fill="#0f172a" font-size="23" font-weight="700" text-anchor="middle">End</text>
+      <g stroke="#2563eb" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)">
+        <path d="M290 168 V214"/>
+        <path d="M290 286 V334"/>
+        <path d="M178 464 V518"/>
+        <path d="M402 464 V518"/>
+        <path d="M179 605 V654 H186"/>
+        <path d="M436 605 V654 H394"/>
+      </g>
+      <text x="142" y="501" fill="#166534" font-size="22" font-weight="700">Yes</text>
+      <text x="424" y="501" fill="#991b1b" font-size="22" font-weight="700">No</text>
+    </g>
+  </g>
+</svg>

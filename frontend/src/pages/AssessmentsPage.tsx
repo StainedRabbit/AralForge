@@ -14,7 +14,6 @@ import {
   getMockTopicModules,
   hasActiveAssessmentAccess,
   isMockAssessment,
-  moduleSubjectLabel,
 } from '../utils/student'
 
 export function AssessmentsPage({
@@ -476,7 +475,7 @@ function MockTopicPicker({
                 type="checkbox"
               />
               <span>
-                {topic.title} - {moduleSubjectLabel(data, topic)}
+                {topic.title} - {mockTopicParentLabel(data, topic.module)}
               </span>
             </label>
           ))}
@@ -500,4 +499,13 @@ function MockTopicPicker({
       </button>
     </div>
   )
+}
+
+function mockTopicParentLabel(data: WorkspaceData, moduleId: number) {
+  const module = data.modules.find((item) => item.id === moduleId)
+  const subject = module?.subject
+    ? data.subjects.find((item) => item.id === module.subject)
+    : null
+
+  return subject?.code ?? module?.title ?? 'Module'
 }

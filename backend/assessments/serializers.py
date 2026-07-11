@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
 from learning_modules.models import user_has_module_access
@@ -44,6 +45,7 @@ class QuestionSerializer(serializers.ModelSerializer):
             'order',
             'explanation',
             'topics',
+            'module_topics',
             'choices',
         )
         read_only_fields = ('id',)
@@ -108,6 +110,7 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
             'submitted_at',
             'is_submitted',
             'selected_topics',
+            'selected_module_topics',
             'selected_question_ids',
         )
         read_only_fields = ('id', 'started_at', 'selected_question_ids')
@@ -171,7 +174,10 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
             if (
                 assessment
                 and not assessment.module
-                and not user_has_active_subject_access(request.user, assessment.subject)
+                and not user_has_subject_content_access(
+                    request.user,
+                    assessment.subject,
+                )
             ):
                 raise serializers.ValidationError(
                     'This assessment is not available for your active classes.'
@@ -267,7 +273,7 @@ class AnswerSerializer(serializers.ModelSerializer):
             if (
                 attempt
                 and not attempt.assessment.module
-                and not user_has_active_subject_access(
+                and not user_has_subject_content_access(
                     request.user,
                     attempt.assessment.subject,
                 )
@@ -290,3 +296,17 @@ class AnswerSerializer(serializers.ModelSerializer):
                 )
 
         return attrs
+
+
+def user_has_subject_content_access(user, subject):
+    if not subject:
+        return True
+    try:
+        module = subject.learning_module
+    except ObjectDoesNotExist:
+        module = None
+    return (
+        user_has_module_access(user, module)
+        if module
+        else user_has_active_subject_access(user, subject)
+    )

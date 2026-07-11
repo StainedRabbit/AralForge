@@ -78,10 +78,19 @@ export function AuthenticatedApp({
             element={<DashboardPage data={workspace} refresh={workspace.refresh} />}
           />
           <Route path="/classes" element={<ClassesPage data={workspace} />} />
-          <Route path="/modules" element={<ModulesPage data={workspace} />} />
+          <Route
+            path="/modules"
+            element={<ModulesPage api={api} data={workspace} />}
+          />
           <Route
             path="/modules/:moduleId"
-            element={<ModuleDetailPage data={workspace} />}
+            element={
+              <ModuleDetailPage
+                api={api}
+                data={workspace}
+                refresh={workspace.refresh}
+              />
+            }
           />
           <Route
             path="/activities/:activityId"

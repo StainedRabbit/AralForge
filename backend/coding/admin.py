@@ -15,8 +15,8 @@ class CodeBlankInline(admin.TabularInline):
 
 @admin.register(ProgrammingProblem)
 class ProgrammingProblemAdmin(admin.ModelAdmin):
-    list_display = ('title', 'difficulty', 'subject', 'module', 'points_possible', 'is_published')
-    list_filter = ('difficulty', 'is_published', 'subject')
+    list_display = ('title', 'difficulty', 'subject', 'module', 'topic', 'lesson', 'points_possible', 'is_published')
+    list_filter = ('difficulty', 'is_published', 'subject', 'module', 'topic', 'lesson')
     search_fields = ('title', 'description')
     prepopulated_fields = {'slug': ('title',)}
     inlines = [TestCaseInline, CodeBlankInline]
