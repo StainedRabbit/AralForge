@@ -77,6 +77,12 @@ export type SubjectSchedule = {
   section: string
   room: string
   is_active: boolean
+  created_by: number | null
+  updated_by: number | null
+  archived_by: number | null
+  created_at: string
+  updated_at: string
+  archived_at: string | null
 }
 
 export type ScheduleStudent = {
@@ -93,6 +99,10 @@ export type ScheduleStudent = {
   term_name: string
   added_at: string
   is_active: boolean
+  added_by: number | null
+  deactivated_by: number | null
+  deactivated_at: string | null
+  updated_at: string
 }
 
 export type Module = {
@@ -552,8 +562,9 @@ export type Answer = {
 }
 
 export type AttendanceSession = {
-  id: number
-  subject: number
+    id: number
+    schedule: number | null
+    subject: number
   school_year_semester: number | null
   term_name: string
   title: string
@@ -578,8 +589,27 @@ export type GradingTemplate = {
   name: string
   description: string
   is_default: boolean
+  transmutation_base: string
+  transmutation_scale: string
+  prelim_weight: string
+  midterm_weight: string
+  prefinal_weight: string
+  final_weight: string
   created_at: string
   items: GradingTemplateItem[]
+}
+
+export type SubjectGradingPolicy = {
+  id: number
+  subject: number
+  source_template: number | null
+  transmutation_base: string
+  transmutation_scale: string
+  prelim_weight: string
+  midterm_weight: string
+  prefinal_weight: string
+  final_weight: string
+  updated_at: string
 }
 
 export type GradingTemplateItem = {
@@ -610,11 +640,13 @@ export type GradeItemSourceType =
 
 export type GradeItem = {
   id: number
+  schedule: number | null
   grade_category: number
   subject: number
   title: string
   points_possible: string
   order: number
+  is_required: boolean
   source_type: GradeItemSourceType
   assessment: number | null
   module_activity: number | null
@@ -628,24 +660,34 @@ export type GradeItem = {
 
 export type StudentCategoryGrade = {
   id: number
+  schedule: number | null
   subject: number
   student: number
   grade_category: number
-  raw_score: string
-  total_score: string
+  raw_score: string | null
+  total_score: string | null
   transmuted_grade: string | null
   weighted_score: string | null
   is_item_computed: boolean
+  completion_status: 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE'
+  required_item_count: number
+  resolved_item_count: number
+  pending_item_count: number
+  withheld_reason: string
   computed_at: string
 }
 
 export type StudentGradeItemScore = {
   id: number
+  schedule: number | null
   grade_item: number
   grade_category: number
   subject: number
   student: number
-  raw_score: string
+  raw_score: string | null
+  status: 'GRADED' | 'EXCUSED'
+  origin: 'MANUAL' | 'AUTOMATIC' | 'OVERRIDE'
+  override_reason: string
   total_score: string
   transmuted_grade: string | null
   remarks: string
@@ -654,16 +696,23 @@ export type StudentGradeItemScore = {
 
 export type PeriodGrade = {
   id: number
+  schedule: number | null
   subject: number
   student: number
   grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
   raw_score: string | null
   remarks: string
+  completion_status: 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE'
+  required_item_count: number
+  resolved_item_count: number
+  pending_item_count: number
+  withheld_reason: string
   computed_at: string
 }
 
 export type FinalGrade = {
   id: number
+  schedule: number | null
   subject: number
   student: number
   prelim_grade: string | null
@@ -672,6 +721,10 @@ export type FinalGrade = {
   final_period_grade: string | null
   final_grade: string | null
   remarks: string
+  completion_status: 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE'
+  completed_period_count: number
+  required_period_count: number
+  withheld_reason: string
   computed_at: string
 }
 

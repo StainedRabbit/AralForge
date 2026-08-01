@@ -1,12 +1,20 @@
+import { useSearchParams } from 'react-router-dom'
 import type { WorkspaceData } from '../app/types'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard } from '../components/ui'
 import { attendanceStatusLabel, attendanceSummary, hasActiveSubjectAccess, subjectLabel } from '../utils/student'
 import { formatDate, numeric } from '../utils/format'
 
 export function AttendancePage({ data }: { data: WorkspaceData }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedScheduleId = Number(searchParams.get('schedule')) || null
+  const selectedSchedule = requestedScheduleId
+    ? data.schedules.find((schedule) => schedule.id === requestedScheduleId) ?? null
+    : null
   const activeAttendanceRecords = data.attendanceRecords.filter((record) => {
     const session = data.attendanceSessions.find((item) => item.id === record.session)
-    return session ? hasActiveSubjectAccess(data, session.subject) : true
+    if (!session) return true
+    if (!hasActiveSubjectAccess(data, session.subject)) return false
+    return requestedScheduleId ? session.schedule === requestedScheduleId : true
   })
   const summary = attendanceSummary(activeAttendanceRecords)
   const totalAttendancePoints = activeAttendanceRecords.reduce(
@@ -21,6 +29,27 @@ export function AttendancePage({ data }: { data: WorkspaceData }) {
         title="Attendance"
         description="Review attendance status, earned points, remarks, and session notes by subject."
       />
+
+      {selectedSchedule ? (
+        <div className="inline-filter-banner">
+          <span>
+            Showing {selectedSchedule.subject_code} {selectedSchedule.section || ''} attendance
+          </span>
+          <button
+            className="button button--ghost button--compact"
+            onClick={() => {
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current)
+                next.delete('schedule')
+                return next
+              }, { replace: true })
+            }}
+            type="button"
+          >
+            Clear class filter
+          </button>
+        </div>
+      ) : null}
 
       <section className="stat-grid">
         <StatCard

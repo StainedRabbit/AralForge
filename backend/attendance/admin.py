@@ -5,9 +5,9 @@ from .models import AttendanceRecord, AttendanceSession
 
 @admin.register(AttendanceSession)
 class AttendanceSessionAdmin(admin.ModelAdmin):
-    list_display = ('subject', 'school_year_semester', 'title', 'date', 'points_possible')
-    list_filter = ('subject', 'school_year_semester', 'date')
-    search_fields = ('subject__code', 'subject__name', 'school_year_semester__school_year__start_year', 'title')
+    list_display = ('schedule', 'subject', 'school_year_semester', 'title', 'date', 'points_possible')
+    list_filter = ('schedule', 'subject', 'school_year_semester', 'date')
+    search_fields = ('schedule__section', 'subject__code', 'subject__name', 'school_year_semester__school_year__start_year', 'title')
 
 
 @admin.register(AttendanceRecord)

@@ -46,7 +46,11 @@ export function AdminGradebookPage({
   const selectedCategory =
     categories.find((category) => category.id === Number(categoryId)) ?? categories[0] ?? null
   const items = data.gradeItems
-    .filter((item) => selectedCategory && item.grade_category === selectedCategory.id)
+    .filter((item) =>
+      selectedCategory &&
+      item.grade_category === selectedCategory.id &&
+      item.schedule === selectedSchedule?.id,
+    )
     .sort((left, right) => left.order - right.order || left.id - right.id)
   const [itemId, setItemId] = useState('')
   const selectedItem = items.find((item) => item.id === Number(itemId)) ?? items[0] ?? null
@@ -79,6 +83,7 @@ export function AdminGradebookPage({
   const sourceOptions = getSourceOptions(
     data,
     selectedSchedule?.subject ?? null,
+    selectedSchedule?.id ?? null,
     itemDraft.sourceType,
   )
   const visibleRoster = filterScoreRoster({
@@ -109,6 +114,7 @@ export function AdminGradebookPage({
         body: JSON.stringify({
           ...sourcePayload,
           grade_category: selectedCategory.id,
+          schedule: selectedSchedule?.id,
           order: Number(itemDraft.order || 0),
           points_possible: itemDraft.sourceType === 'MANUAL' ? itemDraft.points : source?.points ?? itemDraft.points,
           source_type: itemDraft.sourceType,
@@ -140,6 +146,68 @@ export function AdminGradebookPage({
     }
 
     await saveScoreCells([selectedItem], visibleRoster)
+  }
+
+  async function excuseScore(item: GradeItem, student: number) {
+    const reason = window.prompt('Reason for excusing this required item:')?.trim()
+    if (!reason) return
+    setSaving(true)
+    try {
+      await api('/grades/item-scores/excuse/', {
+        body: JSON.stringify({ grade_item: item.id, student, reason }), method: 'POST',
+      })
+      setMessage('Student excused from this item.')
+      await refresh()
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function overrideScore(scoreId: number, maximum: string) {
+    const rawScore = window.prompt(`Override score (0-${numeric(maximum)}):`)
+    if (rawScore === null) return
+    const reason = window.prompt('Reason for overriding the synchronized score:')?.trim()
+    if (!reason) return
+    setSaving(true)
+    try {
+      await api(`/grades/item-scores/${scoreId}/override/`, {
+        body: JSON.stringify({ raw_score: rawScore, reason }), method: 'POST',
+      })
+      setMessage('Automatic score overridden.')
+      await refresh()
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearOverride(scoreId: number) {
+    setSaving(true)
+    try {
+      await api(`/grades/item-scores/${scoreId}/clear-override/`, { method: 'POST' })
+      setMessage('Override cleared and source score resynchronized.')
+      await refresh()
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function resyncItem(item: GradeItem) {
+    setSaving(true)
+    try {
+      await api(`/grades/items/${item.id}/resync/`, { method: 'POST' })
+      setMessage('Linked scores resynchronized.')
+      await refresh()
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function saveMatrixScores() {
@@ -533,15 +601,22 @@ export function AdminGradebookPage({
             <div className="gradebook-panel">
               <SectionHeading
                 action={selectedItem ? (
-                  <button
-                    className="button button--secondary roster-remove-button"
-                    disabled={saving}
-                    onClick={() => void deleteItem(selectedItem)}
-                    type="button"
-                  >
-                    <Icon name="trash" />
-                    <span>Remove item</span>
-                  </button>
+                  <div className="admin-actions">
+                    {selectedItem.source_type !== 'MANUAL' ? (
+                      <button className="button button--secondary" disabled={saving} onClick={() => resyncItem(selectedItem)} type="button">
+                        <span>Resync</span>
+                      </button>
+                    ) : null}
+                    <button
+                      className="button button--secondary roster-remove-button"
+                      disabled={saving}
+                      onClick={() => void deleteItem(selectedItem)}
+                      type="button"
+                    >
+                      <Icon name="trash" />
+                      <span>Remove item</span>
+                    </button>
+                  </div>
                 ) : null}
                 subtitle={selectedItem ? `${numeric(selectedItem.points_possible).toFixed(2)} points possible` : 'Select or create an item'}
                 title={selectedItem ? selectedItem.source_title || selectedItem.title : 'Scores'}
@@ -593,7 +668,7 @@ export function AdminGradebookPage({
                           <th>Student</th>
                           <th>Score</th>
                           <th>Transmuted</th>
-                          <th>Remarks</th>
+                          <th>Status / Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -620,6 +695,7 @@ export function AdminGradebookPage({
                                   className="gradebook-score-input"
                                   max={numeric(selectedItem.points_possible)}
                                   min="0"
+                                  disabled={score?.origin === 'AUTOMATIC' || score?.status === 'EXCUSED'}
                                   onChange={(event) =>
                                     setScoreDraft((current) => ({
                                       ...current,
@@ -636,6 +712,7 @@ export function AdminGradebookPage({
                               </td>
                               <td>{displayScore(score?.transmuted_grade ?? null)}</td>
                               <td>
+                                <small>{score ? `${score.status} · ${score.origin}` : 'PENDING'}</small>
                                 <input
                                   className="gradebook-remarks-input"
                                   onChange={(event) =>
@@ -649,6 +726,17 @@ export function AdminGradebookPage({
                                   }
                                   value={draft.remarks}
                                 />
+                                <div className="admin-actions admin-actions--compact">
+                                  {score?.origin === 'AUTOMATIC' ? (
+                                    <button disabled={saving} onClick={() => overrideScore(score.id, selectedItem.points_possible)} type="button">Override</button>
+                                  ) : null}
+                                  {score?.origin === 'OVERRIDE' ? (
+                                    <button disabled={saving} onClick={() => clearOverride(score.id)} type="button">Clear override</button>
+                                  ) : null}
+                                  {score?.status !== 'EXCUSED' ? (
+                                    <button disabled={saving} onClick={() => excuseScore(selectedItem, enrollment.student)} type="button">Excuse</button>
+                                  ) : null}
+                                </div>
                               </td>
                             </tr>
                           )
@@ -689,6 +777,7 @@ export function AdminGradebookPage({
                   saving={saving}
                   scoreDraft={scoreDraft}
                   selectedCategoryId={selectedCategory.id}
+                  selectedScheduleId={selectedSchedule?.id ?? 0}
                   setNeedsManualOnly={setNeedsManualOnly}
                   setScoreDraft={setScoreDraft}
                   setStudentQuery={setStudentQuery}
@@ -720,6 +809,7 @@ function MatrixScorePanel({
   saving,
   scoreDraft,
   selectedCategoryId,
+  selectedScheduleId,
   setNeedsManualOnly,
   setScoreDraft,
   setStudentQuery,
@@ -739,6 +829,7 @@ function MatrixScorePanel({
   saving: boolean
   scoreDraft: ScoreDraft
   selectedCategoryId: number
+  selectedScheduleId: number
   setNeedsManualOnly: (value: boolean) => void
   setScoreDraft: Dispatch<SetStateAction<ScoreDraft>>
   setStudentQuery: (value: string) => void
@@ -792,6 +883,7 @@ function MatrixScorePanel({
                 data,
                 selectedCategoryId,
                 enrollment.student,
+                selectedScheduleId,
               )
 
               return (
@@ -814,6 +906,7 @@ function MatrixScorePanel({
                           className="gradebook-score-input gradebook-score-input--matrix"
                           max={numeric(item.points_possible)}
                           min="0"
+                          disabled={item.source_type !== 'MANUAL' || score?.status === 'EXCUSED'}
                           onChange={(event) =>
                             setScoreDraft((current) => ({
                               ...current,
@@ -831,12 +924,12 @@ function MatrixScorePanel({
                     )
                   })}
                   <td>
-                    {categoryGrade
+                    {categoryGrade?.completion_status === 'COMPLETE'
                       ? `${numeric(categoryGrade.raw_score).toFixed(2)} / ${numeric(categoryGrade.total_score).toFixed(2)}`
-                      : '-'}
+                      : categoryGrade ? `Pending (${categoryGrade.pending_item_count})` : '-'}
                   </td>
                   <td>
-                    {categoryGrade
+                    {categoryGrade?.completion_status === 'COMPLETE'
                       ? `${displayScore(categoryGrade.transmuted_grade)} / ${displayScore(categoryGrade.weighted_score)}`
                       : '-'}
                   </td>
@@ -959,11 +1052,13 @@ function findCategoryGrade(
   data: WorkspaceData,
   categoryId: number,
   studentId: number,
+  scheduleId: number,
 ) {
   return data.categoryGrades.find(
     (grade) =>
       grade.grade_category === categoryId &&
-      grade.student === studentId,
+      grade.student === studentId &&
+      grade.schedule === scheduleId,
   )
 }
 
@@ -974,6 +1069,7 @@ function scoreDraftKey(itemId: number, studentId: number) {
 function getSourceOptions(
   data: WorkspaceData,
   subjectId: number | null,
+  scheduleId: number | null,
   sourceType: GradeItemSourceType,
 ) {
   if (!subjectId) {
@@ -1008,7 +1104,7 @@ function getSourceOptions(
 
   if (sourceType === 'ATTENDANCE') {
     return data.attendanceSessions
-      .filter((session) => session.subject === subjectId)
+      .filter((session) => session.subject === subjectId && session.schedule === scheduleId)
       .map((session) => ({
         label: session.title || formatDate(session.date),
         points: session.points_possible,

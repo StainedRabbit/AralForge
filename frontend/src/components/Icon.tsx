@@ -7,6 +7,7 @@ export type IconName =
   | 'arrow-up'
   | 'arrow-down'
   | 'assessment'
+  | 'archive'
   | 'award'
   | 'book'
   | 'calendar'
@@ -18,6 +19,7 @@ export type IconName =
   | 'grade'
   | 'logout'
   | 'menu'
+  | 'more'
   | 'module'
   | 'profile'
   | 'edit'
@@ -150,6 +152,21 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M4 6h16" />
       <path d="M4 12h16" />
       <path d="M4 18h16" />
+    </>
+  ),
+  archive: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M5 6v14h14V6" />
+      <path d="M9 10h6" />
+      <path d="M4 3h16v3H4z" />
+    </>
+  ),
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
     </>
   ),
   module: (

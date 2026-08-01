@@ -142,12 +142,19 @@ class AssessmentAttempt(models.Model):
         return f'{self.student} - {self.assessment} attempt {self.attempt_number}'
 
     def score_multiple_choice_answers(self):
-        answers = self.answers.select_related('question', 'selected_choice').prefetch_related(
+        answers = list(self.answers.select_related('question', 'selected_choice').prefetch_related(
             'question__choices',
+        ))
+        answers_by_question = {answer.question_id: answer for answer in answers}
+        question_ids = list(
+            self.selected_questions.values_list('question_id', flat=True)
+            if self.selected_questions.exists()
+            else self.assessment.questions.values_list('id', flat=True)
         )
-        total_score = 0
 
         for answer in answers:
+            if answer.question_id not in question_ids:
+                continue
             if answer.question.question_type not in {
                 Question.QuestionType.MULTIPLE_CHOICE,
                 Question.QuestionType.TRUE_FALSE,
@@ -167,14 +174,32 @@ class AssessmentAttempt(models.Model):
             answer.points_earned = answer.question.points if is_correct else 0
             answer.save(update_fields=['is_correct', 'points_earned'])
 
-            if is_correct:
-                total_score += answer.question.points
-
-        self.score = total_score
         if not self.submitted_at:
             self.submitted_at = timezone.now()
         self.is_submitted = True
+        self.score = self.completed_score(question_ids, answers_by_question)
         self.save(update_fields=['score', 'submitted_at', 'is_submitted'])
+
+    def completed_score(self, question_ids=None, answers_by_question=None):
+        question_ids = question_ids or list(
+            self.selected_questions.values_list('question_id', flat=True)
+            if self.selected_questions.exists()
+            else self.assessment.questions.values_list('id', flat=True)
+        )
+        answers_by_question = answers_by_question or {
+            answer.question_id: answer for answer in self.answers.all()
+        }
+        if any(
+            question_id not in answers_by_question
+            or answers_by_question[question_id].points_earned is None
+            for question_id in question_ids
+        ):
+            return None
+        return sum((answers_by_question[question_id].points_earned for question_id in question_ids), 0)
+
+    def recompute_completed_score(self):
+        self.score = self.completed_score()
+        self.save(update_fields=['score'])
 
 
 class AssessmentAttemptQuestion(models.Model):
@@ -237,3 +262,8 @@ class Answer(models.Model):
 
     def __str__(self):
         return f'{self.attempt} - {self.question}'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.attempt.is_submitted:
+            self.attempt.recompute_completed_score()
