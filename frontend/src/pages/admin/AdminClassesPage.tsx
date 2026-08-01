@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import { asArray } from '../../api'
 import { Icon } from '../../components/Icon'
+import { ClassAttendanceDialog } from '../../components/admin/ClassAttendanceDialog'
 import { ManageStudentModulesDialog } from '../../components/admin/ManageStudentModulesDialog'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   ApiPage,
+  ApiList,
   GradeCategory,
   GradeItem,
   Module,
   ScheduleStudent,
   SchoolYearSemester,
   StudentGradeItemScore,
-  StudentProfile,
   SubjectSchedule,
   User,
 } from '../../types'
@@ -22,6 +26,15 @@ import { formatTime, numeric, toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
 
 const STUDENT_PAGE_SIZE = 50
+const weekdays = [
+  { code: 'MO', label: 'Monday', short: 'Mon' },
+  { code: 'TU', label: 'Tuesday', short: 'Tue' },
+  { code: 'WE', label: 'Wednesday', short: 'Wed' },
+  { code: 'TH', label: 'Thursday', short: 'Thu' },
+  { code: 'FR', label: 'Friday', short: 'Fri' },
+  { code: 'SA', label: 'Saturday', short: 'Sat' },
+  { code: 'SU', label: 'Sunday', short: 'Sun' },
+] as const
 const gradingPeriods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
 const gradingPeriodLabels: Record<(typeof gradingPeriods)[number], string> = {
   FINAL: 'Final',
@@ -38,6 +51,36 @@ type StudentImportRow = {
   studentNumber: string
   username: string
   yearLevel: number | null
+}
+
+type ImportPreview = {
+  valid: boolean
+  row_count: number
+  ready_count: number
+  rows: Array<{
+    row: number
+    student_number?: string
+    student_name?: string
+    status: 'ready' | 'error'
+    error?: string
+  }>
+  added_count?: number
+  reactivated_count?: number
+  already_active_count?: number
+}
+
+type RosterApiItem = ScheduleStudent & {
+  email: string
+  grade_summary: Partial<Record<
+    'prelim' | 'midterm' | 'prefinal' | 'final' | 'overall' | 'remarks',
+    string | number | null
+  >>
+}
+
+type RosterApiPage = ApiPage<RosterApiItem> & {
+  total_count: number
+  active_count: number
+  inactive_count: number
 }
 
 type RosterRowData = {
@@ -66,16 +109,110 @@ export function AdminClassesPage({
   data: WorkspaceData
   refresh: () => Promise<void>
 }) {
-  const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pendingScheduleIdRef = useRef<number | null>(null)
   const activeTerm = getActiveTerm(data.terms)
   const [selectedTermId, setSelectedTermId] = useState(
-    activeTerm?.id.toString() ?? '',
+    searchParams.get('term') ?? activeTerm?.id.toString() ?? '',
   )
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(searchParams.get('q') ?? '')
+  const requestedScheduleId = Number(searchParams.get('schedule'))
+  const requestedWorkspaceSchedule = data.schedules.find(
+    (schedule) => schedule.id === requestedScheduleId,
+  )
+  const queryTermId = requestedWorkspaceSchedule
+    ? String(requestedWorkspaceSchedule.school_year_semester)
+    : selectedTermId
+  const queryClient = useQueryClient()
+  const scheduleListQuery = useQuery({
+    queryKey: ['classes', queryTermId, query],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '100', status: 'all' })
+      if (queryTermId) params.set('term', queryTermId)
+      if (query.trim()) params.set('search', query.trim())
+      return api<ApiList<SubjectSchedule>>(
+        `/subjects/subject-schedules/?${params.toString()}`,
+      )
+    },
+  })
+  const routeSchedules = scheduleListQuery.data
+    ? asArray(scheduleListQuery.data)
+    : data.schedules
   const selectedSchedule =
-    data.schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null
-  const visibleSchedules = filterSchedules(data.schedules, query, selectedTermId)
+    routeSchedules.find((schedule) => schedule.id === requestedScheduleId)
+    ?? requestedWorkspaceSchedule
+    ?? null
+  const effectiveTermId = selectedSchedule
+    ? String(selectedSchedule.school_year_semester)
+    : selectedTermId
+  const visibleSchedules = filterSchedules(
+    routeSchedules,
+    query,
+    effectiveTermId,
+  )
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
+
+  const refreshClasses = useCallback(async () => {
+    await refresh()
+    await queryClient.invalidateQueries({ queryKey: ['classes'] })
+  }, [queryClient, refresh])
+
+  const selectSchedule = useCallback((value: number | null) => {
+    pendingScheduleIdRef.current = value
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set('schedule', String(value))
+      else next.delete('schedule')
+      return next
+    })
+  }, [setSearchParams])
+
+  const selectTerm = useCallback((value: string) => {
+    setSelectedTermId(value)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set('term', value)
+      else next.delete('term')
+      return next
+    }, { replace: true })
+    if (value && selectedSchedule && selectedSchedule.school_year_semester !== Number(value)) {
+      selectSchedule(null)
+    }
+  }, [selectSchedule, selectedSchedule, setSearchParams])
+
+  const updateQuery = useCallback((value: string) => {
+    setQuery(value)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value.trim()) next.set('q', value)
+      else next.delete('q')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
+  useEffect(() => {
+    if (!selectedTermId && !searchParams.has('term') && activeTerm) {
+      queueMicrotask(() => setSelectedTermId(String(activeTerm.id)))
+    }
+  }, [activeTerm, searchParams, selectedTermId])
+
+  useEffect(() => {
+    if (data.loading) return
+    if (selectedSchedule) {
+      if (pendingScheduleIdRef.current === selectedSchedule.id) {
+        pendingScheduleIdRef.current = null
+      }
+      return
+    }
+    if (requestedScheduleId && pendingScheduleIdRef.current === requestedScheduleId) return
+    if (searchParams.has('schedule') && !selectedSchedule) {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.delete('schedule')
+        return next
+      }, { replace: true })
+    }
+  }, [data.loading, requestedScheduleId, searchParams, selectedSchedule, setSearchParams])
 
   return (
     <Page>
@@ -95,10 +232,10 @@ export function AdminClassesPage({
             query={query}
             schedules={visibleSchedules}
             selectedSchedule={selectedSchedule}
-            selectedTermId={selectedTermId}
-            setQuery={setQuery}
-            setSelectedScheduleId={setSelectedScheduleId}
-            setSelectedTermId={setSelectedTermId}
+            selectedTermId={effectiveTermId}
+            setQuery={updateQuery}
+            setSelectedScheduleId={selectSchedule}
+            setSelectedTermId={selectTerm}
             termOptions={termOptions}
           />
         </div>
@@ -111,10 +248,11 @@ export function AdminClassesPage({
           <ScheduleForm
             api={api}
             data={data}
+            defaultTermId={activeTerm?.id ?? null}
             key={selectedSchedule?.id ?? 'new'}
-            refresh={refresh}
+            refresh={refreshClasses}
             selectedSchedule={selectedSchedule}
-            setSelectedScheduleId={setSelectedScheduleId}
+            setSelectedScheduleId={selectSchedule}
           />
         </div>
       </section>
@@ -122,7 +260,7 @@ export function AdminClassesPage({
       <ClassRoster
         api={api}
         data={data}
-        refresh={refresh}
+        refresh={refreshClasses}
         selectedSchedule={selectedSchedule}
       />
     </Page>
@@ -157,7 +295,9 @@ function ClassFinder({
             onChange={(event) => setSelectedTermId(event.target.value)}
             value={selectedTermId}
           >
-            <option value="">All terms</option>
+            {!termOptions.length ? (
+              <option value="">No terms available</option>
+            ) : null}
             {termOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -196,6 +336,7 @@ function ClassFinder({
             <span>{schedule.subject_name}</span>
             <small>
               {schedule.term_name} {schedule.room ? `- ${schedule.room}` : ''}
+              {!schedule.is_active ? ' - Archived' : ''}
             </small>
           </button>
         ))}
@@ -210,17 +351,24 @@ function ClassFinder({
 function ScheduleForm({
   api,
   data,
+  defaultTermId,
   refresh,
   selectedSchedule,
   setSelectedScheduleId,
 }: {
   api: AuthedRequest
   data: WorkspaceData
+  defaultTermId: number | null
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
   setSelectedScheduleId: (value: number | null) => void
 }) {
-  const [draft, setDraft] = useState(() => scheduleDraft(selectedSchedule))
+  const [initialDraft, setInitialDraft] = useState(() =>
+    scheduleDraft(selectedSchedule, defaultTermId),
+  )
+  const [draft, setDraft] = useState(() => scheduleDraft(selectedSchedule, defaultTermId))
+  const [changingStatus, setChangingStatus] = useState(false)
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const subjectOptions = toOptions(
@@ -229,9 +377,23 @@ function ScheduleForm({
     (subject) => `${subject.code} ${subject.name}`,
   )
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(initialDraft)
+
+  useEffect(() => {
+    if (!isDirty) return
+    function preventAccidentalExit(event: BeforeUnloadEvent) {
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', preventAccidentalExit)
+    return () => window.removeEventListener('beforeunload', preventAccidentalExit)
+  }, [isDirty])
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!draft.days) {
+      setMessage('Select at least one meeting day.')
+      return
+    }
     setSaving(true)
     setMessage('')
 
@@ -254,6 +416,9 @@ function ScheduleForm({
           method: selectedSchedule ? 'PATCH' : 'POST',
         },
       )
+      const savedDraft = scheduleDraft(schedule, defaultTermId)
+      setInitialDraft(savedDraft)
+      setDraft(savedDraft)
       setSelectedScheduleId(schedule.id)
       setMessage('Schedule saved.')
       await refresh()
@@ -264,16 +429,39 @@ function ScheduleForm({
     }
   }
 
+  async function changeClassStatus() {
+    if (!selectedSchedule) {
+      return
+    }
+    setChangingStatus(true)
+    setMessage('')
+
+    try {
+      await api(`/subjects/subject-schedules/${selectedSchedule.id}/${selectedSchedule.is_active ? 'archive' : 'restore'}/`, {
+        method: 'POST',
+      })
+      setMessage(selectedSchedule.is_active ? 'Class archived.' : 'Class restored.')
+      setShowArchiveConfirm(false)
+      await refresh()
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    } finally {
+      setChangingStatus(false)
+    }
+  }
+
   return (
+    <>
     <form className="class-form" onSubmit={submitForm}>
       <div className="class-form__header">
         <strong>{selectedSchedule ? 'Edit schedule' : 'New schedule'}</strong>
         {selectedSchedule ? (
           <button
             className="button button--ghost"
+            disabled={changingStatus || saving}
             onClick={() => {
               setSelectedScheduleId(null)
-              setDraft(scheduleDraft(null))
+              setDraft(scheduleDraft(null, defaultTermId))
             }}
             type="button"
           >
@@ -347,18 +535,31 @@ function ScheduleForm({
         </label>
       </div>
 
-      <label className="admin-field">
-        <span>Days</span>
-        <input
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, days: event.target.value }))
-          }
-          placeholder="MWF"
-          required
-          type="text"
-          value={draft.days}
-        />
-      </label>
+      <fieldset className="admin-field class-days-field">
+        <legend>Days</legend>
+        <div className="class-day-options">
+          {weekdays.map((day) => {
+            const selected = parseClassDays(draft.days).has(day.code)
+            return (
+              <label className={selected ? 'class-day-option active' : 'class-day-option'} key={day.code}>
+                <input
+                  aria-label={day.label}
+                  checked={selected}
+                  onChange={() => {
+                    setDraft((current) => ({
+                      ...current,
+                      days: toggleClassDay(current.days, day.code),
+                    }))
+                    setMessage('')
+                  }}
+                  type="checkbox"
+                />
+                <span>{day.short}</span>
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
 
       <div className="class-form__split">
         <label className="admin-field">
@@ -385,24 +586,55 @@ function ScheduleForm({
         </label>
       </div>
 
-      <label className="admin-check">
-        <input
-          checked={draft.is_active}
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, is_active: event.target.checked }))
-          }
-          type="checkbox"
-        />
-        <span>Active schedule</span>
-      </label>
+      {selectedSchedule ? (
+        <p className="admin-status-line">
+          Status: <strong>{selectedSchedule.is_active ? 'Active' : 'Archived'}</strong>
+        </p>
+      ) : null}
 
-      {message ? <p className="admin-message">{message}</p> : null}
+      {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
 
-      <button className="button button--primary class-save-button" disabled={saving} type="submit">
-        <Icon name="save" />
-        <span>{saving ? 'Saving...' : 'Save schedule'}</span>
-      </button>
+      <div className="class-form__actions">
+        <button
+          className="button button--primary class-save-button"
+          disabled={changingStatus || saving}
+          type="submit"
+        >
+          <Icon name="save" />
+          <span>{saving ? 'Saving...' : 'Save schedule'}</span>
+        </button>
+        {selectedSchedule ? (
+          <button
+            className={selectedSchedule.is_active
+              ? 'button button--secondary button--danger class-delete-button'
+              : 'button button--secondary class-delete-button'}
+            disabled={changingStatus || saving}
+            onClick={() => {
+              if (selectedSchedule.is_active) setShowArchiveConfirm(true)
+              else void changeClassStatus()
+            }}
+            type="button"
+          >
+            <Icon name={selectedSchedule.is_active ? 'archive' : 'check'} />
+            <span>
+              {changingStatus
+                ? 'Saving...'
+                : selectedSchedule.is_active ? 'Archive class' : 'Restore class'}
+            </span>
+          </button>
+        ) : null}
+      </div>
     </form>
+    {selectedSchedule && showArchiveConfirm ? (
+      <ConfirmDialog
+        confirmLabel="Archive class"
+        description={`Archive ${selectedSchedule.subject_code} ${selectedSchedule.section || ''}? Its roster, attendance, and grades will be preserved.`}
+        onCancel={() => setShowArchiveConfirm(false)}
+        onConfirm={() => void changeClassStatus()}
+        title="Archive this class?"
+      />
+    ) : null}
+    </>
   )
 }
 
@@ -418,22 +650,79 @@ function ClassRoster({
   selectedSchedule: SubjectSchedule | null
 }) {
   const location = useLocation()
+  const queryClient = useQueryClient()
   const [isAdding, setIsAdding] = useState(false)
+  const [isAttendanceOpen, setIsAttendanceOpen] = useState(false)
   const [rosterQuery, setRosterQuery] = useState('')
+  const [rosterStatus, setRosterStatus] = useState<'active' | 'inactive' | 'all'>('active')
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [rosterMessage, setRosterMessage] = useState('')
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
-  const roster = selectedSchedule
+  const localRoster = selectedSchedule
     ? data.enrollments.filter(
         (enrollment) => enrollment.schedule === selectedSchedule.id,
       )
     : []
-  const rosterRows = roster.map((enrollment) => getRosterRow(enrollment, data))
-  const visibleRows = filterRosterRows(rosterRows, rosterQuery)
-  const activeCount = roster.filter((enrollment) => enrollment.is_active).length
+  const rosterPageQuery = useQuery({
+    enabled: Boolean(selectedSchedule),
+    queryKey: ['class-roster', selectedSchedule?.id, rosterQuery, rosterStatus],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '100', status: rosterStatus })
+      if (rosterQuery.trim()) params.set('search', rosterQuery.trim())
+      return api<RosterApiPage>(
+        `/subjects/subject-schedules/${selectedSchedule!.id}/roster/?${params.toString()}`,
+      )
+    },
+  })
+  const rosterRows = rosterPageQuery.data
+    ? rosterPageQuery.data.results.map(apiRosterRow)
+    : localRoster.map((enrollment) => getRosterRow(enrollment, data))
+  const visibleRows = rosterPageQuery.data
+    ? rosterRows
+    : filterRosterRows(rosterRows, rosterQuery, rosterStatus)
+  const activeCount = rosterPageQuery.data?.active_count
+    ?? localRoster.filter((enrollment) => enrollment.is_active).length
+  const inactiveCount = rosterPageQuery.data?.inactive_count
+    ?? localRoster.length - activeCount
+  const totalCount = rosterPageQuery.data?.total_count ?? localRoster.length
+  const refreshClassRoster = useCallback(async () => {
+    await refresh()
+    await queryClient.invalidateQueries({
+      queryKey: ['class-roster', selectedSchedule?.id],
+    })
+  }, [queryClient, refresh, selectedSchedule?.id])
+
+  async function updateVisibleEnrollmentStatus(isActive: boolean) {
+    if (!selectedSchedule || !visibleRows.length) return
+    setBulkSaving(true)
+    setRosterMessage('')
+    try {
+      const result = await api<{ changed_count: number }>(
+        `/subjects/subject-schedules/${selectedSchedule.id}/update-enrollments/`,
+        {
+          body: JSON.stringify({
+            enrollment_ids: visibleRows.map((row) => row.enrollment.id),
+            is_active: isActive,
+          }),
+          method: 'POST',
+        },
+      )
+      setRosterMessage(`${result.changed_count} enrollment${result.changed_count === 1 ? '' : 's'} updated.`)
+      await refreshClassRoster()
+    } catch (caughtError) {
+      setRosterMessage(toErrorMessage(caughtError))
+    } finally {
+      setBulkSaving(false)
+    }
+  }
   const classModules = selectedSchedule
     ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
   const primaryClassModule = classModules[0] ?? null
+  const moduleProgressUrl = selectedSchedule && primaryClassModule
+    ? `/admin/modules/${primaryClassModule.id}/progress?schedule=${selectedSchedule.id}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`
+    : null
   const rosterSubtitle = selectedSchedule
     ? `${selectedSchedule.subject_code} ${selectedSchedule.section || ''} - ${activeCount} active student${activeCount === 1 ? '' : 's'}`
     : 'Select a class'
@@ -444,39 +733,16 @@ function ClassRoster({
         action={
           <div className="class-roster-actions">
             <button
-              className="button button--secondary"
-              disabled={!selectedSchedule || !visibleRows.length}
-              onClick={() => exportRosterCsv(selectedSchedule, visibleRows)}
+              className="button button--primary"
+              disabled={!selectedSchedule?.is_active || !activeCount}
+              onClick={() => setIsAttendanceOpen(true)}
               type="button"
             >
-              <Icon name="file" />
-              <span>Export CSV</span>
+              <Icon name="check" />
+              <span>Attendance</span>
             </button>
-            {selectedSchedule ? (
-              <Link
-                className="button button--secondary"
-                to={gradebookUrl(selectedSchedule.id)}
-              >
-                <Icon name="grade" />
-                <span>Open Gradebook</span>
-              </Link>
-            ) : null}
-            {selectedSchedule && primaryClassModule ? (
-              <Link
-                className="button button--secondary"
-                to={`/admin/modules/${primaryClassModule.id}/progress?schedule=${selectedSchedule.id}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
-              >
-                <Icon name="module" />
-                <span>View Module Progress</span>
-              </Link>
-            ) : (
-              <button className="button button--secondary" disabled type="button">
-                <Icon name="module" />
-                <span>View Module Progress</span>
-              </button>
-            )}
             <button
-              className="button button--primary"
+              className="button button--secondary"
               disabled={!selectedSchedule}
               onClick={() => setIsAdding(true)}
               type="button"
@@ -484,6 +750,15 @@ function ClassRoster({
               <Icon name="plus" />
               <span>Add students</span>
             </button>
+            <RosterActionsMenu
+              attendanceReportsTo={selectedSchedule ? `/admin/attendance?schedule=${selectedSchedule.id}` : null}
+              exportDisabled={!selectedSchedule || !visibleRows.length}
+              gradebookTo={selectedSchedule ? gradebookUrl(selectedSchedule.id) : null}
+              moduleProgressTo={moduleProgressUrl}
+              onExport={() => {
+                if (selectedSchedule) exportRosterCsv(selectedSchedule, visibleRows)
+              }}
+            />
           </div>
         }
         subtitle={rosterSubtitle}
@@ -497,6 +772,43 @@ function ClassRoster({
               <strong>{activeCount}</strong>
               Active students
             </span>
+            <span>
+              <strong>{inactiveCount}</strong>
+              Inactive students
+            </span>
+          </div>
+          <label className="admin-field class-roster-status-filter">
+            <span>Roster status</span>
+            <select
+              onChange={(event) => setRosterStatus(event.target.value as 'active' | 'inactive' | 'all')}
+              value={rosterStatus}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="all">All students</option>
+            </select>
+          </label>
+          <div className="class-roster-bulk-actions">
+            {rosterStatus !== 'active' ? (
+              <button
+                className="button button--secondary button--compact"
+                disabled={bulkSaving || !visibleRows.length}
+                onClick={() => void updateVisibleEnrollmentStatus(true)}
+                type="button"
+              >
+                Activate shown
+              </button>
+            ) : null}
+            {rosterStatus !== 'inactive' ? (
+              <button
+                className="button button--secondary button--compact"
+                disabled={bulkSaving || !visibleRows.length}
+                onClick={() => void updateVisibleEnrollmentStatus(false)}
+                type="button"
+              >
+                Deactivate shown
+              </button>
+            ) : null}
           </div>
           <label className="admin-search class-roster-search">
             <Icon name="search" />
@@ -508,6 +820,10 @@ function ClassRoster({
             />
           </label>
         </div>
+      ) : null}
+
+      {rosterMessage ? (
+        <p aria-live="polite" className="admin-message">{rosterMessage}</p>
       ) : null}
 
       <div className="table-wrap">
@@ -534,7 +850,8 @@ function ClassRoster({
                 key={row.enrollment.id}
                 onOpenGrades={setGradeRow}
                 onOpenModules={setModuleRow}
-                refresh={refresh}
+                refresh={refreshClassRoster}
+                schedule={selectedSchedule!}
               />
             ))}
             {!selectedSchedule ? (
@@ -542,12 +859,12 @@ function ClassRoster({
                 <td colSpan={10}>Select a class to view and manage enrolled students.</td>
               </tr>
             ) : null}
-            {selectedSchedule && !roster.length ? (
+            {selectedSchedule && !totalCount ? (
               <tr>
                 <td colSpan={10}>No active students in this class yet. Add students to build the roster.</td>
               </tr>
             ) : null}
-            {selectedSchedule && roster.length && !visibleRows.length ? (
+            {selectedSchedule && totalCount && !visibleRows.length ? (
               <tr>
                 <td colSpan={10}>No roster matches found for this search.</td>
               </tr>
@@ -560,9 +877,21 @@ function ClassRoster({
         <AddStudentsModal
           api={api}
           data={data}
-          refresh={refresh}
+          refresh={refreshClassRoster}
           schedule={selectedSchedule}
           onClose={() => setIsAdding(false)}
+        />
+      ) : null}
+
+      {selectedSchedule && isAttendanceOpen ? (
+        <ClassAttendanceDialog
+          api={api}
+          data={data}
+          initialTab="take"
+          key={selectedSchedule.id}
+          refresh={refreshClassRoster}
+          schedule={selectedSchedule}
+          onClose={() => setIsAttendanceOpen(false)}
         />
       ) : null}
 
@@ -581,7 +910,7 @@ function ClassRoster({
           data={data}
           defaultSubjectId={selectedSchedule?.subject}
           onClose={() => setModuleRow(null)}
-          refresh={refresh}
+          refresh={refreshClassRoster}
           studentId={moduleRow.enrollment.student}
           studentName={moduleRow.studentName}
         />
@@ -591,25 +920,235 @@ function ClassRoster({
   )
 }
 
+function ConfirmDialog({
+  confirmLabel,
+  description,
+  onCancel,
+  onConfirm,
+  title,
+}: {
+  confirmLabel: string
+  description: string
+  onCancel: () => void
+  onConfirm: () => void
+  title: string
+}) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    cancelRef.current?.focus()
+    return () => previouslyFocused?.focus()
+  }, [])
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onCancel()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [],
+    )
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  return (
+    <div
+      aria-labelledby="class-confirm-title"
+      aria-describedby="class-confirm-description"
+      aria-modal="true"
+      className="attendance-modal"
+      onKeyDown={handleKeyDown}
+      role="dialog"
+    >
+      <button
+        aria-label="Dismiss confirmation"
+        className="attendance-modal__backdrop"
+        onClick={onCancel}
+        type="button"
+      />
+      <div className="attendance-modal__panel class-confirm-dialog" ref={panelRef}>
+        <div>
+          <strong id="class-confirm-title">{title}</strong>
+          <p id="class-confirm-description">{description}</p>
+        </div>
+        <div className="class-modal-actions">
+          <button className="button button--secondary" onClick={onCancel} ref={cancelRef} type="button">
+            Cancel
+          </button>
+          <button className="button button--danger" onClick={onConfirm} type="button">
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RosterActionsMenu({
+  attendanceReportsTo,
+  exportDisabled,
+  gradebookTo,
+  moduleProgressTo,
+  onExport,
+}: {
+  attendanceReportsTo: string | null
+  exportDisabled: boolean
+  gradebookTo: string | null
+  moduleProgressTo: string | null
+  onExport: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    menuRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
+      ?.focus()
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  function closeMenu() {
+    setOpen(false)
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [],
+    )
+    if (!items.length) return
+
+    event.preventDefault()
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement)
+    if (event.key === 'Home') items[0].focus()
+    else if (event.key === 'End') items[items.length - 1].focus()
+    else if (event.key === 'ArrowDown') items[(currentIndex + 1) % items.length].focus()
+    else items[(currentIndex - 1 + items.length) % items.length].focus()
+  }
+
+  return (
+    <div className="roster-actions-menu" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="button button--secondary"
+        disabled={!gradebookTo}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+        onClick={() => setOpen((current) => !current)}
+        ref={buttonRef}
+        type="button"
+      >
+        <Icon name="more" />
+        <span>More actions</span>
+      </button>
+      {open ? (
+        <div className="roster-actions-menu__popover" onKeyDown={handleMenuKeyDown} ref={menuRef} role="menu">
+          <button
+            disabled={exportDisabled}
+            onClick={() => {
+              onExport()
+              closeMenu()
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Icon name="file" />
+            <span>Export roster CSV</span>
+          </button>
+          {gradebookTo ? (
+            <Link onClick={closeMenu} role="menuitem" to={gradebookTo}>
+              <Icon name="grade" />
+              <span>Open Gradebook</span>
+            </Link>
+          ) : null}
+          {attendanceReportsTo ? (
+            <Link onClick={closeMenu} role="menuitem" to={attendanceReportsTo}>
+              <Icon name="calendar" />
+              <span>Attendance reports</span>
+            </Link>
+          ) : null}
+          {moduleProgressTo ? (
+            <Link onClick={closeMenu} role="menuitem" to={moduleProgressTo}>
+              <Icon name="module" />
+              <span>View Module Progress</span>
+            </Link>
+          ) : (
+            <button disabled role="menuitem" type="button">
+              <Icon name="module" />
+              <span>Module Progress unavailable</span>
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function RosterRow({
   api,
   onOpenGrades,
   onOpenModules,
   row,
   refresh,
+  schedule,
 }: {
   api: AuthedRequest
   onOpenGrades: (row: RosterRowData) => void
   onOpenModules: (row: RosterRowData) => void
   row: RosterRowData
   refresh: () => Promise<void>
+  schedule: SubjectSchedule
 }) {
   const [saving, setSaving] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
+  const [message, setMessage] = useState('')
   const { enrollment } = row
 
   async function toggleEnrollment() {
     setSaving(true)
+    setMessage('')
 
     try {
       await api(`/subjects/schedule-students/${enrollment.id}/`, {
@@ -617,6 +1156,8 @@ function RosterRow({
         method: 'PATCH',
       })
       await refresh()
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
     } finally {
       setSaving(false)
     }
@@ -624,18 +1165,23 @@ function RosterRow({
 
   async function removeEnrollment() {
     setRemoving(true)
+    setShowRemoveConfirm(false)
+    setMessage('')
 
     try {
       await api(`/subjects/schedule-students/${enrollment.id}/`, {
         method: 'DELETE',
       })
       await refresh()
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
     } finally {
       setRemoving(false)
     }
   }
 
   return (
+    <>
     <tr>
       <td>
         <strong>{row.studentName}</strong>
@@ -663,49 +1209,29 @@ function RosterRow({
             <Icon name="grade" />
             <span>Grades</span>
           </button>
-          <button
-            className="button button--secondary button--compact"
-            disabled={saving || removing}
-            onClick={() => onOpenModules(row)}
-            type="button"
-          >
-            <Icon name="module" />
-            <span>Modules</span>
-          </button>
-          <Link
-            className="button button--secondary button--compact"
-            to={gradebookUrl(enrollment.schedule, enrollment.student)}
-          >
-            <Icon name="edit" />
-            <span>Record Score</span>
-          </Link>
-          <button
-            className="button button--secondary button--compact"
-            disabled={saving || removing}
-            onClick={() => void toggleEnrollment()}
-            type="button"
-          >
-            <Icon name={enrollment.is_active ? 'close' : 'check'} />
-            <span>
-              {saving
-                ? 'Saving...'
-                : enrollment.is_active
-                  ? 'Deactivate'
-                  : 'Activate'}
-            </span>
-          </button>
-          <button
-            className="button button--secondary button--compact roster-remove-button"
-            disabled={saving || removing}
-            onClick={() => void removeEnrollment()}
-            type="button"
-          >
-            <Icon name="trash" />
-            <span>{removing ? 'Removing...' : 'Remove'}</span>
-          </button>
+          <RosterRowMenu
+            busy={saving || removing}
+            enrollment={enrollment}
+            onOpenModules={() => onOpenModules(row)}
+            onRemove={() => setShowRemoveConfirm(true)}
+            onToggle={() => void toggleEnrollment()}
+            studentName={row.studentName}
+          />
         </div>
+        {message ? <span className="roster-row-error" role="alert">{message}</span> : null}
       </td>
     </tr>
+    {showRemoveConfirm ? createPortal(
+      <ConfirmDialog
+        confirmLabel="Remove from active roster"
+        description={`Deactivate ${row.studentName} in ${schedule.subject_code} ${schedule.section || ''}? Existing grades and attendance will be preserved.`}
+        onCancel={() => setShowRemoveConfirm(false)}
+        onConfirm={() => void removeEnrollment()}
+        title="Remove this student?"
+      />,
+      document.body,
+    ) : null}
+    </>
   )
 }
 
@@ -728,18 +1254,20 @@ function GradeDetailsModal({
   row: RosterRowData
   schedule: SubjectSchedule
 }) {
-  const finalGrade = findFinalGrade(data, schedule.subject, row.enrollment.student)
+  const finalGrade = findFinalGrade(data, schedule.id, row.enrollment.student)
   const categories = data.gradeCategories.filter(
     (category) => category.subject === schedule.subject,
   )
   const categoryGrades = data.categoryGrades.filter(
     (grade) =>
       grade.subject === schedule.subject &&
+      grade.schedule === schedule.id &&
       grade.student === row.enrollment.student,
   )
   const itemScores = data.gradeItemScores.filter(
     (score) =>
       score.subject === schedule.subject &&
+      score.schedule === schedule.id &&
       score.student === row.enrollment.student,
   )
 
@@ -829,7 +1357,7 @@ function GradeDetailsModal({
                             (candidate) => candidate.grade_category === category.id,
                           )
                           const gradeItems = data.gradeItems
-                            .filter((item) => item.grade_category === category.id)
+                            .filter((item) => item.grade_category === category.id && item.schedule === schedule.id)
                             .sort((left, right) => left.order - right.order || left.id - right.id)
                           const rows = gradeItems
                             .map((item) => ({
@@ -870,8 +1398,8 @@ function GradeCategoryBreakdownRows({
 }: {
   category: GradeCategory
   grade: {
-    raw_score: string
-    total_score: string
+    raw_score: string | null
+    total_score: string | null
     transmuted_grade: string | null
     weighted_score: string | null
   } | null
@@ -941,6 +1469,7 @@ function AddStudentsModal({
 }) {
   const [query, setQuery] = useState('')
   const [importRows, setImportRows] = useState<StudentImportRow[]>([])
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -949,7 +1478,39 @@ function AddStudentsModal({
   const [nextStudentOffset, setNextStudentOffset] = useState<number | null>(0)
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [studentError, setStudentError] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const hasMoreStudents = nextStudentOffset !== null
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    searchInputRef.current?.focus()
+    return () => previouslyFocused?.focus()
+  }, [])
+
+  function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape' && !saving) {
+      event.preventDefault()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href]',
+      ) ?? [],
+    )
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   const loadAvailableStudents = useCallback(async function loadAvailableStudents({
     offset,
@@ -1004,31 +1565,17 @@ function AddStudentsModal({
     setMessage('')
 
     try {
-      await Promise.all(
-        selectedIds.map((studentId) => {
-          const existingEnrollment = data.enrollments.find(
-            (enrollment) =>
-              enrollment.schedule === schedule.id && enrollment.student === studentId,
-          )
-
-          if (existingEnrollment) {
-            return api(`/subjects/schedule-students/${existingEnrollment.id}/`, {
-              body: JSON.stringify({ is_active: true }),
-              method: 'PATCH',
-            })
-          }
-
-          return api('/subjects/schedule-students/', {
-            body: JSON.stringify({
-              is_active: true,
-              schedule: schedule.id,
-              student: studentId,
-            }),
-            method: 'POST',
-          })
-        }),
+      const result = await api<{
+        added_count: number
+        reactivated_count: number
+        already_active_count: number
+      }>(`/subjects/subject-schedules/${schedule.id}/enroll-students/`, {
+        body: JSON.stringify({ student_ids: selectedIds }),
+        method: 'POST',
+      })
+      setMessage(
+        `${result.added_count} added, ${result.reactivated_count} reactivated, ${result.already_active_count} already active.`,
       )
-      setMessage('Students added.')
       setSelectedIds([])
       await refresh()
       await loadAvailableStudents({ offset: 0, reset: true })
@@ -1048,81 +1595,20 @@ function AddStudentsModal({
     setMessage('')
 
     try {
-      let createdCount = 0
-      let existingCount = 0
-      let enrolledCount = 0
-      let skippedCount = 0
-
-      for (const row of importRows) {
-        const existingProfile = findProfileByStudentNumber(
-          data.profiles,
-          row.studentNumber,
-        )
-        let studentId = existingProfile?.user ?? null
-
-        if (studentId) {
-          existingCount += 1
-        } else {
-          const user = await api<User>('/accounts/users/', {
-            body: JSON.stringify({
-              email: row.email,
-              first_name: row.firstName,
-              is_active: true,
-              last_name: row.lastName,
-              password: row.studentNumber,
-              role: 'STUDENT',
-              username: row.studentNumber,
-            }),
-            method: 'POST',
-          })
-
-          studentId = user.id
-          createdCount += 1
-
-          await api<StudentProfile>('/accounts/students/', {
-            body: JSON.stringify({
-              is_active: true,
-              section: row.section || schedule.section,
-              student_number: row.studentNumber,
-              user: user.id,
-              year_level: row.yearLevel,
-            }),
-            method: 'POST',
-          })
-        }
-
-        const existingEnrollment = data.enrollments.find(
-          (enrollment) =>
-            enrollment.schedule === schedule.id && enrollment.student === studentId,
-        )
-
-        if (existingEnrollment?.is_active) {
-          skippedCount += 1
-          continue
-        }
-
-        if (existingEnrollment) {
-          await api(`/subjects/schedule-students/${existingEnrollment.id}/`, {
-            body: JSON.stringify({ is_active: true }),
-            method: 'PATCH',
-          })
-        } else {
-          await api('/subjects/schedule-students/', {
-            body: JSON.stringify({
-              is_active: true,
-              schedule: schedule.id,
-              student: studentId,
-            }),
-            method: 'POST',
-          })
-        }
-
-        enrolledCount += 1
-      }
+      const result = await api<ImportPreview>(
+        `/subjects/subject-schedules/${schedule.id}/import-roster/`,
+        {
+          body: JSON.stringify({
+            rows: importRows.map((row) => ({ student_number: row.studentNumber })),
+          }),
+          method: 'POST',
+        },
+      )
 
       setImportRows([])
+      setImportPreview(null)
       setMessage(
-        `Imported ${enrolledCount} enrollment${enrolledCount === 1 ? '' : 's'}. ${createdCount} new, ${existingCount} existing, ${skippedCount} already enrolled.`,
+        `${result.added_count ?? 0} added, ${result.reactivated_count ?? 0} reactivated, ${result.already_active_count ?? 0} already active.`,
       )
       await refresh()
     } catch (caughtError) {
@@ -1140,10 +1626,26 @@ function AddStudentsModal({
     try {
       const text = await file.text()
       const rows = parseStudentImport(text)
+      const preview = await api<ImportPreview>(
+        `/subjects/subject-schedules/${schedule.id}/import-roster/`,
+        {
+          body: JSON.stringify({
+            dry_run: true,
+            rows: rows.map((row) => ({ student_number: row.studentNumber })),
+          }),
+          method: 'POST',
+        },
+      )
       setImportRows(rows)
-      setMessage(`${rows.length} student${rows.length === 1 ? '' : 's'} ready to import.`)
+      setImportPreview(preview)
+      setMessage(
+        preview.valid
+          ? `${preview.ready_count} student${preview.ready_count === 1 ? '' : 's'} ready to import.`
+          : 'Fix the roster file errors before importing.',
+      )
     } catch (caughtError) {
       setImportRows([])
+      setImportPreview(null)
       setMessage(toErrorMessage(caughtError))
     }
   }
@@ -1153,10 +1655,16 @@ function AddStudentsModal({
       aria-labelledby="add-students-title"
       aria-modal="true"
       className="attendance-modal"
+      onKeyDown={handleDialogKeyDown}
       role="dialog"
     >
-      <div className="attendance-modal__backdrop" onClick={onClose} />
-      <div className="attendance-modal__panel attendance-modal__panel--wide">
+      <button
+        aria-label="Close add students dialog"
+        className="attendance-modal__backdrop"
+        onClick={onClose}
+        type="button"
+      />
+      <div className="attendance-modal__panel attendance-modal__panel--wide" ref={dialogRef}>
         <div className="attendance-modal__header">
           <div>
             <strong id="add-students-title">Add students</strong>
@@ -1172,6 +1680,7 @@ function AddStudentsModal({
           <input
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Name or username"
+            ref={searchInputRef}
             type="search"
             value={query}
           />
@@ -1181,8 +1690,7 @@ function AddStudentsModal({
           <div>
             <strong>Import roster</strong>
             <span>
-              CSV columns: student_number, first_name, last_name, email, section,
-              year_level, username.
+              Existing accounts are matched by student_number. Other CSV columns are ignored.
             </span>
           </div>
           <label className="admin-field">
@@ -1196,7 +1704,7 @@ function AddStudentsModal({
           {importRows.length ? (
             <button
               className="button button--secondary"
-              disabled={saving}
+              disabled={saving || !importPreview?.valid}
               onClick={() => void importStudents()}
               type="button"
             >
@@ -1207,6 +1715,23 @@ function AddStudentsModal({
             </button>
           ) : null}
         </div>
+
+        {importPreview ? (
+          <div className="class-import-preview" aria-label="Roster import preview">
+            <strong>
+              {importPreview.ready_count} of {importPreview.row_count} rows ready
+            </strong>
+            {importPreview.rows.some((row) => row.status === 'error') ? (
+              <ul>
+                {importPreview.rows.filter((row) => row.status === 'error').map((row) => (
+                  <li key={`${row.row}-${row.student_number ?? 'missing'}`}>
+                    Row {row.row}{row.student_number ? ` (${row.student_number})` : ''}: {row.error}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         {studentError ? <p className="admin-message">{studentError}</p> : null}
 
@@ -1262,7 +1787,7 @@ function AddStudentsModal({
           ) : null}
         </div>
 
-        {message ? <p className="admin-message">{message}</p> : null}
+        {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
 
         <div className="class-modal-actions">
           <button className="button button--secondary" onClick={onClose} type="button">
@@ -1283,15 +1808,15 @@ function AddStudentsModal({
   )
 }
 
-function scheduleDraft(schedule: SubjectSchedule | null) {
+function scheduleDraft(schedule: SubjectSchedule | null, defaultTermId: number | null) {
   return {
-    days: schedule?.days ?? '',
+    days: schedule ? normalizeClassDays(schedule.days) : '',
     end_time: schedule?.end_time ?? '',
     is_active: schedule?.is_active ?? true,
     room: schedule?.room ?? '',
     school_year_semester: schedule?.school_year_semester
       ? String(schedule.school_year_semester)
-      : '',
+      : defaultTermId?.toString() ?? '',
     section: schedule?.section ?? '',
     start_time: schedule?.start_time ?? '',
     subject: schedule?.subject ? String(schedule.subject) : '',
@@ -1324,11 +1849,172 @@ function filterSchedules(
 function classScheduleSummary(schedule: SubjectSchedule) {
   return [
     schedule.section,
-    schedule.days,
+    formatClassDays(schedule.days),
     `${formatTime(schedule.start_time)} - ${formatTime(schedule.end_time)}`,
   ]
     .filter(Boolean)
     .join(' ')
+}
+
+function RosterRowMenu({
+  busy,
+  enrollment,
+  onOpenModules,
+  onRemove,
+  onToggle,
+  studentName,
+}: {
+  busy: boolean
+  enrollment: ScheduleStudent
+  onOpenModules: () => void
+  onRemove: () => void
+  onToggle: () => void
+  studentName: string
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  function closeAndRun(action: () => void) {
+    setOpen(false)
+    action()
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])
+    if (!items.length) return
+    event.preventDefault()
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement)
+    if (event.key === 'Home') items[0].focus()
+    else if (event.key === 'End') items[items.length - 1].focus()
+    else if (event.key === 'ArrowDown') items[(currentIndex + 1) % items.length].focus()
+    else items[(currentIndex - 1 + items.length) % items.length].focus()
+  }
+
+  return (
+    <div className="roster-actions-menu roster-row-menu" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`More actions for ${studentName}`}
+        className="button button--secondary button--compact"
+        disabled={busy}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+        ref={buttonRef}
+        type="button"
+      >
+        <Icon name="more" />
+        <span>More</span>
+      </button>
+      {open ? (
+        <div className="roster-actions-menu__popover roster-row-menu__popover" onKeyDown={handleMenuKeyDown} ref={menuRef} role="menu">
+          <Link onClick={() => setOpen(false)} role="menuitem" to={gradebookUrl(enrollment.schedule, enrollment.student)}>
+            <Icon name="edit" />
+            <span>Record score</span>
+          </Link>
+          <button onClick={() => closeAndRun(onOpenModules)} role="menuitem" type="button">
+            <Icon name="module" />
+            <span>Modules</span>
+          </button>
+          <button onClick={() => closeAndRun(onToggle)} role="menuitem" type="button">
+            <Icon name={enrollment.is_active ? 'close' : 'check'} />
+            <span>{enrollment.is_active ? 'Deactivate' : 'Activate'}</span>
+          </button>
+          <button className="roster-menu-danger" onClick={() => closeAndRun(onRemove)} role="menuitem" type="button">
+            <Icon name="trash" />
+            <span>Remove from roster</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function parseClassDays(value: string) {
+  const normalized = value.trim().toUpperCase()
+  const selected = new Set<string>()
+  if (!normalized) return selected
+
+  if (/[\s,;/|-]/.test(normalized)) {
+    normalized.split(/[\s,;/|-]+/).filter(Boolean).forEach((token) => {
+      const match = weekdayAlias(token)
+      if (match) selected.add(match)
+    })
+    return selected
+  }
+
+  let index = 0
+  while (index < normalized.length) {
+    const pair = normalized.slice(index, index + 2)
+    if (weekdays.some((day) => day.code === pair)) {
+      selected.add(pair)
+      index += 2
+      continue
+    }
+    const match = weekdayAlias(normalized[index])
+    if (match) selected.add(match)
+    index += 1
+  }
+  return selected
+}
+
+function weekdayAlias(value: string) {
+  const aliases: Record<string, string> = {
+    F: 'FR', FR: 'FR', FRI: 'FR', FRIDAY: 'FR',
+    M: 'MO', MO: 'MO', MON: 'MO', MONDAY: 'MO',
+    R: 'TH', TH: 'TH', THU: 'TH', THURSDAY: 'TH',
+    S: 'SA', SA: 'SA', SAT: 'SA', SATURDAY: 'SA',
+    SU: 'SU', SUN: 'SU', SUNDAY: 'SU',
+    T: 'TU', TU: 'TU', TUE: 'TU', TUESDAY: 'TU',
+    W: 'WE', WE: 'WE', WED: 'WE', WEDNESDAY: 'WE',
+  }
+  return aliases[value] ?? null
+}
+
+function normalizeClassDays(value: string) {
+  const selected = parseClassDays(value)
+  return weekdays.filter((day) => selected.has(day.code)).map((day) => day.code).join(',')
+}
+
+function toggleClassDay(value: string, code: string) {
+  const selected = parseClassDays(value)
+  if (selected.has(code)) selected.delete(code)
+  else selected.add(code)
+  return weekdays.filter((day) => selected.has(day.code)).map((day) => day.code).join(',')
+}
+
+function formatClassDays(value: string) {
+  const selected = parseClassDays(value)
+  return weekdays.filter((day) => selected.has(day.code)).map((day) => day.short).join(' / ')
 }
 
 function buildAvailableStudentsPath(
@@ -1372,7 +2058,7 @@ function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterR
   return {
     email: user?.email || 'None',
     enrollment,
-    grades: getPrimaryGradeSummary(data, enrollment.subject, enrollment.student),
+    grades: getPrimaryGradeSummary(data, enrollment.schedule, enrollment.student),
     studentName: enrollment.student_name || fullName(user ?? null),
     studentNumber: enrollment.student_number || profile?.student_number || 'None',
   }
@@ -1380,44 +2066,44 @@ function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterR
 
 function getPrimaryGradeSummary(
   data: WorkspaceData,
-  subjectId: number,
+  scheduleId: number,
   studentId: number,
 ): PrimaryGradeSummary {
-  const finalGrade = findFinalGrade(data, subjectId, studentId)
+  const finalGrade = findFinalGrade(data, scheduleId, studentId)
 
   return {
     finalPeriod: gradeValue(
-      finalGrade?.final_period_grade ?? findPeriodGrade(data, subjectId, studentId, 'FINAL'),
+      finalGrade?.final_period_grade ?? findPeriodGrade(data, scheduleId, studentId, 'FINAL'),
     ),
     midterm: gradeValue(
-      finalGrade?.midterm_grade ?? findPeriodGrade(data, subjectId, studentId, 'MIDTERM'),
+      finalGrade?.midterm_grade ?? findPeriodGrade(data, scheduleId, studentId, 'MIDTERM'),
     ),
     overall: gradeValue(finalGrade?.final_grade ?? null),
     prefinal: gradeValue(
-      finalGrade?.prefinal_grade ?? findPeriodGrade(data, subjectId, studentId, 'PREFINAL'),
+      finalGrade?.prefinal_grade ?? findPeriodGrade(data, scheduleId, studentId, 'PREFINAL'),
     ),
     prelim: gradeValue(
-      finalGrade?.prelim_grade ?? findPeriodGrade(data, subjectId, studentId, 'PRELIM'),
+      finalGrade?.prelim_grade ?? findPeriodGrade(data, scheduleId, studentId, 'PRELIM'),
     ),
     remarks: finalGrade?.remarks || '',
   }
 }
 
-function findFinalGrade(data: WorkspaceData, subjectId: number, studentId: number) {
+function findFinalGrade(data: WorkspaceData, scheduleId: number, studentId: number) {
   return data.finalGrades.find(
-    (grade) => grade.subject === subjectId && grade.student === studentId,
+    (grade) => grade.schedule === scheduleId && grade.student === studentId,
   )
 }
 
 function findPeriodGrade(
   data: WorkspaceData,
-  subjectId: number,
+  scheduleId: number,
   studentId: number,
   period: (typeof gradingPeriods)[number],
 ) {
   return data.periodGrades.find(
     (grade) =>
-      grade.subject === subjectId &&
+      grade.schedule === scheduleId &&
       grade.student === studentId &&
       grade.grading_period === period,
   )?.raw_score ?? null
@@ -1427,7 +2113,8 @@ function gradeValue(value: string | null) {
   return value ? formatGradeValue(value) : '-'
 }
 
-function formatGradeValue(value: string | number) {
+function formatGradeValue(value: string | number | null) {
+  if (value === null) return '-'
   return numeric(value).toFixed(2)
 }
 
@@ -1452,14 +2139,23 @@ function hasAnyPeriodGrade(grades: PrimaryGradeSummary) {
   ].some((value) => value !== '-')
 }
 
-function filterRosterRows(rows: RosterRowData[], query: string) {
+function filterRosterRows(
+  rows: RosterRowData[],
+  query: string,
+  status: 'active' | 'inactive' | 'all',
+) {
   const normalizedQuery = query.trim().toLowerCase()
+  const statusRows = status === 'all'
+    ? rows
+    : rows.filter((row) =>
+        status === 'active' ? row.enrollment.is_active : !row.enrollment.is_active,
+      )
 
   if (!normalizedQuery) {
-    return rows
+    return statusRows
   }
 
-  return rows.filter((row) =>
+  return statusRows.filter((row) =>
     `${row.studentName} ${row.studentNumber}`.toLowerCase().includes(normalizedQuery),
   )
 }
@@ -1508,11 +2204,34 @@ function exportRosterCsv(
 }
 
 function csvEscape(value: string) {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`
+  const safeValue = /^\s*[=+\-@]/.test(value) ? `'${value}` : value
+  if (/[",\n\r]/.test(safeValue)) {
+    return `"${safeValue.replace(/"/g, '""')}"`
   }
 
-  return value
+  return safeValue
+}
+
+function apiRosterRow(enrollment: RosterApiItem): RosterRowData {
+  const summary = enrollment.grade_summary
+  return {
+    email: enrollment.email || 'None',
+    enrollment,
+    grades: {
+      finalPeriod: apiGradeValue(summary.final),
+      midterm: apiGradeValue(summary.midterm),
+      overall: apiGradeValue(summary.overall),
+      prefinal: apiGradeValue(summary.prefinal),
+      prelim: apiGradeValue(summary.prelim),
+      remarks: typeof summary.remarks === 'string' ? summary.remarks : '',
+    },
+    studentName: enrollment.student_name,
+    studentNumber: enrollment.student_number || 'None',
+  }
+}
+
+function apiGradeValue(value: string | number | null | undefined) {
+  return value === null || value === undefined ? '-' : formatGradeValue(value)
 }
 
 function gradebookUrl(scheduleId: number, studentId?: number) {
@@ -1534,20 +2253,6 @@ function isAbortError(caughtError: unknown) {
 
 function getActiveTerm(terms: SchoolYearSemester[]) {
   return terms.find((term) => term.is_active) ?? terms[0] ?? null
-}
-
-function findProfileByStudentNumber(
-  profiles: StudentProfile[],
-  studentNumber: string,
-) {
-  const normalizedNumber = normalizeStudentNumber(studentNumber)
-  return profiles.find(
-    (profile) => normalizeStudentNumber(profile.student_number) === normalizedNumber,
-  )
-}
-
-function normalizeStudentNumber(value: string) {
-  return value.trim().toLowerCase()
 }
 
 function modulesForSubject(modules: Module[], subjectId: number) {
@@ -1595,18 +2300,7 @@ function parseStudentImport(text: string): StudentImportRow[] {
     }
   })
 
-  const seenNumbers = new Set<string>()
-
-  return parsedRows.filter((row) => {
-    const number = normalizeStudentNumber(row.studentNumber)
-
-    if (seenNumbers.has(number)) {
-      return false
-    }
-
-    seenNumbers.add(number)
-    return true
-  })
+  return parsedRows
 }
 
 function normalizeImportHeader(value: string) {

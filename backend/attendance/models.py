@@ -1,8 +1,17 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 
 class AttendanceSession(models.Model):
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.SET_NULL,
+        related_name='attendance_sessions',
+        null=True,
+        blank=True,
+    )
     subject = models.ForeignKey(
         'subjects.Subject',
         on_delete=models.CASCADE,
@@ -24,11 +33,21 @@ class AttendanceSession(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['subject', 'school_year_semester', 'date', 'title'],
-                name='unique_attendance_session_term',
+                fields=['schedule', 'date', 'title'],
+                condition=Q(schedule__isnull=False),
+                name='unique_attendance_session_schedule',
             ),
         ]
         ordering = ['-date']
+
+    def clean(self):
+        super().clean()
+
+        if self.schedule_id:
+            if self.subject_id != self.schedule.subject_id:
+                raise ValidationError('Attendance subject must match the selected class.')
+            if self.school_year_semester_id != self.schedule.school_year_semester_id:
+                raise ValidationError('Attendance term must match the selected class.')
 
     def __str__(self):
         term = f' - {self.school_year_semester}' if self.school_year_semester_id else ''

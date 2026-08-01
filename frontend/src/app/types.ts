@@ -44,6 +44,7 @@ import type {
   StudentGradeItemScore,
   StudentProfile,
   Subject,
+  SubjectGradingPolicy,
   SubjectSchedule,
   TestCase,
   User,
@@ -93,6 +94,7 @@ export type WorkspaceData = {
   attendanceSessions: AttendanceSession[]
   attendanceRecords: AttendanceRecord[]
   gradingTemplates: GradingTemplate[]
+  subjectGradingPolicies: SubjectGradingPolicy[]
   gradingTemplateItems: GradingTemplateItem[]
   gradeCategories: GradeCategory[]
   gradeItems: GradeItem[]

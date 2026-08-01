@@ -282,8 +282,71 @@
 }
 
 .class-list {
-  max-height: clamp(260px, 42vh, 420px);
+  max-height: none;
+  overflow: visible;
   padding-right: 2px;
+}
+
+@media (max-width: 640px) {
+  .class-roster-table,
+  .class-roster-table tbody,
+  .class-roster-table tr,
+  .class-roster-table td {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .class-roster-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .class-roster-table tbody {
+    display: grid;
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .class-roster-table tr {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  .class-roster-table td {
+    display: grid;
+    grid-template-columns: minmax(100px, 0.45fr) minmax(0, 1fr);
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .class-roster-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .class-roster-table td::before {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .class-roster-table td:nth-child(1)::before { content: 'Student'; }
+  .class-roster-table td:nth-child(2)::before { content: 'Student number'; }
+  .class-roster-table td:nth-child(3)::before { content: 'Email'; }
+  .class-roster-table td:nth-child(4)::before { content: 'Prelim'; }
+  .class-roster-table td:nth-child(5)::before { content: 'Midterm'; }
+  .class-roster-table td:nth-child(6)::before { content: 'Prefinal'; }
+  .class-roster-table td:nth-child(7)::before { content: 'Final'; }
+  .class-roster-table td:nth-child(8)::before { content: 'Overall'; }
+  .class-roster-table td:nth-child(9)::before { content: 'Status'; }
+  .class-roster-table td:nth-child(10)::before { content: 'Actions'; }
 }
 
 .class-list__item {
@@ -376,6 +439,57 @@
   gap: 12px;
 }
 
+.class-days-field {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.class-days-field legend {
+  margin-bottom: 6px;
+}
+
+.class-day-options {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.class-day-option {
+  cursor: pointer;
+  position: relative;
+}
+
+.class-day-option input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.class-day-option span {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 38px;
+}
+
+.class-day-option input:focus-visible + span {
+  outline: 3px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  outline-offset: 2px;
+}
+
+.class-day-option.active span {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
 .class-form__subform {
   padding: 12px;
   border: 1px solid var(--border);
@@ -420,7 +534,19 @@
 }
 
 .class-save-button {
-  width: 100%;
+  flex: 1 1 220px;
+  min-height: 46px;
+  justify-content: center;
+}
+
+.class-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.class-delete-button {
+  flex: 0 1 auto;
   min-height: 46px;
   justify-content: center;
 }
@@ -437,6 +563,58 @@
   justify-content: flex-end;
 }
 
+.roster-actions-menu {
+  position: relative;
+}
+
+.roster-actions-menu__popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 230px;
+  overflow: hidden;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.roster-actions-menu__popover a,
+.roster-actions-menu__popover button {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.roster-actions-menu__popover a:hover,
+.roster-actions-menu__popover a:focus-visible,
+.roster-actions-menu__popover button:hover:not(:disabled),
+.roster-actions-menu__popover button:focus-visible {
+  background: var(--surface-muted);
+}
+
+.roster-actions-menu__popover button:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .class-roster-tools {
   align-items: center;
   justify-content: space-between;
@@ -445,6 +623,16 @@
 
 .class-roster-summary {
   flex: 1 1 260px;
+}
+
+.class-roster-status-filter {
+  min-width: 180px;
+}
+
+.class-roster-bulk-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
 }
 
 .class-roster-summary span {
@@ -529,9 +717,27 @@
 }
 
 .roster-row-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.roster-row-menu__popover {
+  min-width: 205px;
+}
+
+.roster-actions-menu__popover .roster-menu-danger {
+  color: #b91c1c;
+}
+
+.roster-row-error {
+  color: #b91c1c;
+  display: block;
+  font-size: 12px;
+  font-weight: 750;
+  margin-top: 6px;
+  max-width: 260px;
 }
 
 .roster-remove-button {
@@ -857,6 +1063,29 @@
   font-size: 13px;
 }
 
+.class-import-preview {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.class-import-preview ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.admin-status-line {
+  margin: 0;
+  color: var(--text-muted);
+}
+
 .student-picker-list__item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
@@ -1024,6 +1253,9 @@
 .attendance-modal__backdrop {
   position: absolute;
   inset: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
   background: rgba(15, 23, 42, 0.58);
 }
 
@@ -1044,6 +1276,106 @@
 
 .attendance-modal__panel--wide {
   width: min(920px, 100%);
+}
+
+.class-confirm-dialog {
+  width: min(520px, 100%);
+}
+
+.class-confirm-dialog p {
+  margin-bottom: 0;
+}
+
+.attendance-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.class-attendance-dialog {
+  gap: 16px;
+}
+
+.class-attendance-dialog__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.class-attendance-dialog__tabs button {
+  min-height: 40px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--text-muted);
+  background: transparent;
+  font-weight: 850;
+}
+
+.class-attendance-dialog__tabs button.active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.class-attendance-dialog__setup {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.class-attendance-dialog__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.class-attendance-dialog__summary span {
+  color: var(--text-muted);
+}
+
+.class-attendance-dialog__table-wrap {
+  max-height: min(52vh, 520px);
+}
+
+.class-attendance-dialog__table select,
+.class-attendance-dialog__table input {
+  min-width: 150px;
+}
+
+.class-attendance-history,
+.class-attendance-history__details {
+  display: grid;
+  gap: 14px;
+}
+
+.class-attendance-history__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.class-attendance-history__heading div,
+.class-attendance-history__heading strong,
+.class-attendance-history__heading span {
+  display: block;
+}
+
+.class-attendance-history__heading div {
+  text-align: right;
+}
+
+.class-attendance-history__heading span {
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .attendance-modal__header {
@@ -3406,6 +3738,7 @@
   .admin-quick-grid,
   .admin-form__fields,
   .admin-inline-form,
+  .attendance-history-filters,
   .gradebook-controls,
   .gradebook-item-form,
   .main-activity-tools,
@@ -3438,18 +3771,32 @@
     width: 100%;
   }
 
+  .roster-actions-menu {
+    width: 100%;
+  }
+
+  .roster-actions-menu__popover {
+    width: 100%;
+    min-width: 0;
+  }
+
   .class-form__split,
   .class-finder__filters,
   .class-modal-actions {
     grid-template-columns: 1fr;
   }
 
-  .class-setup {
-    min-height: auto;
+  .class-attendance-history__heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .class-list {
-    max-height: clamp(260px, 42vh, 360px);
+  .class-attendance-history__heading div {
+    text-align: left;
+  }
+
+  .class-setup {
+    min-height: auto;
   }
 
   .class-list__top {

@@ -11,6 +11,7 @@ import type {
   Badge,
   FinalGrade,
   GradeCategory,
+  GradeItem,
   GradingTemplate,
   GradingTemplateItem,
   LevelRule,
@@ -18,6 +19,7 @@ import type {
   PointLedger,
   StudentBadge,
   StudentCategoryGrade,
+  SubjectGradingPolicy,
 } from '../../types'
 import {
   badgeName,
@@ -28,6 +30,7 @@ import {
   gradingPeriodOptions,
   gradingTemplateName,
   pointSourceOptions,
+  scheduleName,
   studentUsers,
   subjectName,
   templateItemName,
@@ -68,6 +71,11 @@ export function AdminGradesPage({
     (category) => gradeCategoryName(data.gradeCategories, data.subjects, category.id),
   )
   const badgeOptions = toOptions(data.badges, (badge) => badge.id, (badge) => badge.name)
+  const scheduleOptions = toOptions(
+    data.schedules,
+    (schedule) => schedule.id,
+    (schedule) => scheduleName(data.schedules, data.subjects, schedule.id),
+  )
 
   return (
     <Page>
@@ -84,6 +92,8 @@ export function AdminGradesPage({
         templateOptions={templateOptions}
       />
 
+      <LegacyGradeItemsPanel api={api} data={data} onRefresh={refresh} />
+
       <AdminResourcePanel<GradingTemplate>
         api={api}
         columns={[
@@ -98,6 +108,22 @@ export function AdminGradesPage({
         noun="Template"
         onRefresh={refresh}
         title="Grading Templates"
+      />
+
+      <AdminResourcePanel<SubjectGradingPolicy>
+        api={api}
+        columns={[
+          { header: 'Subject', render: (policy) => subjectName(data.subjects, policy.subject) },
+          { header: 'Formula', render: (policy) => `${policy.transmutation_base} + raw × ${policy.transmutation_scale}` },
+          { header: 'Period weights', render: (policy) => `${policy.prelim_weight}/${policy.midterm_weight}/${policy.prefinal_weight}/${policy.final_weight}` },
+        ]}
+        endpoint="/grades/subject-policies/"
+        fields={subjectPolicyFields(subjectOptions, templateOptions)}
+        getSearchText={(policy) => subjectName(data.subjects, policy.subject)}
+        items={data.subjectGradingPolicies}
+        noun="Subject grading policy"
+        onRefresh={refresh}
+        title="Subject Grading Policies"
       />
 
       <AdminResourcePanel<GradingTemplateItem>
@@ -140,13 +166,14 @@ export function AdminGradesPage({
         api={api}
         columns={[
           { header: 'Student', render: (grade) => userName(data.users, grade.student) },
+          { header: 'Class', render: (grade) => scheduleName(data.schedules, data.subjects, grade.schedule) },
           { header: 'Category', render: (grade) => gradeCategoryName(data.gradeCategories, data.subjects, grade.grade_category) },
           { header: 'Raw', render: (grade) => `${numeric(grade.raw_score)}/${numeric(grade.total_score)}` },
           { header: 'Transmuted', render: (grade) => displayScore(grade.transmuted_grade) },
           { header: 'Weighted', render: (grade) => displayScore(grade.weighted_score) },
         ]}
         endpoint="/grades/student-categories/"
-        fields={studentCategoryGradeFields(subjectOptions, studentOptions, gradeCategoryOptionsList)}
+        fields={studentCategoryGradeFields(scheduleOptions, subjectOptions, studentOptions, gradeCategoryOptionsList)}
         getSearchText={(grade) =>
           `${userName(data.users, grade.student)} ${gradeCategoryName(data.gradeCategories, data.subjects, grade.grade_category)}`
         }
@@ -160,13 +187,14 @@ export function AdminGradesPage({
         api={api}
         columns={[
           { header: 'Student', render: (grade) => userName(data.users, grade.student) },
+          { header: 'Class', render: (grade) => scheduleName(data.schedules, data.subjects, grade.schedule) },
           { header: 'Subject', render: (grade) => subjectName(data.subjects, grade.subject) },
           { header: 'Period', render: (grade) => grade.grading_period },
           { header: 'Raw score', render: (grade) => displayScore(grade.raw_score) },
           { header: 'Computed', render: (grade) => compactDateTime(grade.computed_at) },
         ]}
         endpoint="/grades/periods/"
-        fields={periodGradeFields(subjectOptions, studentOptions)}
+        fields={periodGradeFields(scheduleOptions, subjectOptions, studentOptions)}
         getSearchText={(grade) =>
           `${userName(data.users, grade.student)} ${subjectName(data.subjects, grade.subject)} ${grade.grading_period}`
         }
@@ -180,12 +208,13 @@ export function AdminGradesPage({
         api={api}
         columns={[
           { header: 'Student', render: (grade) => userName(data.users, grade.student) },
+          { header: 'Class', render: (grade) => scheduleName(data.schedules, data.subjects, grade.schedule) },
           { header: 'Subject', render: (grade) => subjectName(data.subjects, grade.subject) },
           { header: 'Final', render: (grade) => displayScore(grade.final_grade) },
           { header: 'Remarks', render: (grade) => grade.remarks || 'None' },
         ]}
         endpoint="/grades/finals/"
-        fields={finalGradeFields(subjectOptions, studentOptions)}
+        fields={finalGradeFields(scheduleOptions, subjectOptions, studentOptions)}
         getSearchText={(grade) =>
           `${userName(data.users, grade.student)} ${subjectName(data.subjects, grade.subject)} ${grade.remarks}`
         }
@@ -262,6 +291,87 @@ export function AdminGradesPage({
         title="Level Rules"
       />
     </Page>
+  )
+}
+
+function LegacyGradeItemsPanel({ api, data, onRefresh }: {
+  api: AuthedRequest
+  data: WorkspaceData
+  onRefresh: () => Promise<void>
+}) {
+  const items = data.gradeItems.filter((item) => item.schedule === null)
+  const [selections, setSelections] = useState<Record<number, string>>({})
+  const [savingId, setSavingId] = useState<number | null>(null)
+  const [message, setMessage] = useState('')
+
+  async function assign(item: GradeItem) {
+    const scheduleId = Number(selections[item.id])
+    if (!scheduleId) return
+    setSavingId(item.id)
+    setMessage('')
+    try {
+      await api(`/grades/items/${item.id}/`, {
+        body: JSON.stringify({ schedule: scheduleId }),
+        method: 'PATCH',
+      })
+      setMessage('Legacy grade item assigned.')
+      await onRefresh()
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  if (!items.length) return null
+
+  return (
+    <section className="admin-resource section-block">
+      <SectionHeading
+        subtitle="Assign imported or historical items before they can appear in a class gradebook."
+        title="Unassigned Grade Items"
+      />
+
+      <div className="table-wrap">
+        <table className="admin-table">
+          <thead><tr><th>Item</th><th>Subject</th><th>Class</th><th>Action</th></tr></thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td>{item.source_title || item.title}</td>
+                <td>{subjectName(data.subjects, item.subject)}</td>
+                <td>
+                  <select
+                    aria-label={`Class for ${item.title}`}
+                    onChange={(event) => setSelections((current) => ({ ...current, [item.id]: event.target.value }))}
+                    value={selections[item.id] ?? ''}
+                  >
+                    <option value="">Select class</option>
+                    {data.schedules.filter((schedule) => schedule.subject === item.subject).map((schedule) => (
+                      <option key={schedule.id} value={schedule.id}>
+                        {scheduleName(data.schedules, data.subjects, schedule.id)} · {schedule.term_name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <button
+                    className="button button--secondary button--compact"
+                    disabled={savingId !== null || !selections[item.id]}
+                    onClick={() => void assign(item)}
+                    type="button"
+                  >
+                    <Icon name="save" />
+                    <span>{savingId === item.id ? 'Assigning...' : 'Assign'}</span>
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {message ? <p className="admin-message">{message}</p> : null}
+    </section>
   )
 }
 
@@ -348,7 +458,29 @@ const templateFields: AdminField<GradingTemplate>[] = [
   { label: 'Name', name: 'name', required: true, type: 'text' },
   { label: 'Description', name: 'description', rows: 3, type: 'textarea' },
   { defaultValue: false, label: 'Default', name: 'is_default', type: 'checkbox' },
+  { defaultValue: '60.00', label: 'Transmutation base', name: 'transmutation_base', required: true, type: 'number' },
+  { defaultValue: '40.00', label: 'Transmutation scale', name: 'transmutation_scale', required: true, type: 'number' },
+  { defaultValue: '25.00', label: 'Prelim weight', name: 'prelim_weight', required: true, type: 'number' },
+  { defaultValue: '25.00', label: 'Midterm weight', name: 'midterm_weight', required: true, type: 'number' },
+  { defaultValue: '25.00', label: 'Prefinal weight', name: 'prefinal_weight', required: true, type: 'number' },
+  { defaultValue: '25.00', label: 'Final weight', name: 'final_weight', required: true, type: 'number' },
 ]
+
+function subjectPolicyFields(
+  subjectOptions: { label: string; value: number | string }[],
+  templateOptions: { label: string; value: number | string }[],
+) {
+  return [
+    { label: 'Subject', name: 'subject', options: subjectOptions, parse: Number, required: true, type: 'select' },
+    { label: 'Source template', name: 'source_template', options: templateOptions, nullable: true, parse: (value) => value ? Number(value) : null, type: 'select' },
+    { defaultValue: '60.00', label: 'Transmutation base', name: 'transmutation_base', required: true, type: 'number' },
+    { defaultValue: '40.00', label: 'Transmutation scale', name: 'transmutation_scale', required: true, type: 'number' },
+    { defaultValue: '25.00', label: 'Prelim weight', name: 'prelim_weight', required: true, type: 'number' },
+    { defaultValue: '25.00', label: 'Midterm weight', name: 'midterm_weight', required: true, type: 'number' },
+    { defaultValue: '25.00', label: 'Prefinal weight', name: 'prefinal_weight', required: true, type: 'number' },
+    { defaultValue: '25.00', label: 'Final weight', name: 'final_weight', required: true, type: 'number' },
+  ] satisfies AdminField<SubjectGradingPolicy>[]
+}
 
 function templateItemFields(templateOptions: { label: string; value: number | string }[]) {
   return [
@@ -389,11 +521,13 @@ function gradeCategoryFields(
 }
 
 function studentCategoryGradeFields(
+  scheduleOptions: { label: string; value: number | string }[],
   subjectOptions: { label: string; value: number | string }[],
   studentOptions: { label: string; value: number | string }[],
   categoryOptions: { label: string; value: number | string }[],
 ) {
   return [
+    { label: 'Class', name: 'schedule', options: scheduleOptions, parse: Number, required: true, type: 'select' },
     { label: 'Subject', name: 'subject', options: subjectOptions, parse: Number, required: true, type: 'select' },
     { label: 'Student', name: 'student', options: studentOptions, parse: Number, required: true, type: 'select' },
     { label: 'Grade category', name: 'grade_category', options: categoryOptions, parse: Number, required: true, type: 'select' },
@@ -403,10 +537,12 @@ function studentCategoryGradeFields(
 }
 
 function periodGradeFields(
+  scheduleOptions: { label: string; value: number | string }[],
   subjectOptions: { label: string; value: number | string }[],
   studentOptions: { label: string; value: number | string }[],
 ) {
   return [
+    { label: 'Class', name: 'schedule', options: scheduleOptions, parse: Number, required: true, type: 'select' },
     { label: 'Subject', name: 'subject', options: subjectOptions, parse: Number, required: true, type: 'select' },
     { label: 'Student', name: 'student', options: studentOptions, parse: Number, required: true, type: 'select' },
     { defaultValue: 'PRELIM', label: 'Period', name: 'grading_period', options: gradingPeriodOptions, required: true, type: 'select' },
@@ -415,10 +551,12 @@ function periodGradeFields(
 }
 
 function finalGradeFields(
+  scheduleOptions: { label: string; value: number | string }[],
   subjectOptions: { label: string; value: number | string }[],
   studentOptions: { label: string; value: number | string }[],
 ) {
   return [
+    { label: 'Class', name: 'schedule', options: scheduleOptions, parse: Number, required: true, type: 'select' },
     { label: 'Subject', name: 'subject', options: subjectOptions, parse: Number, required: true, type: 'select' },
     { label: 'Student', name: 'student', options: studentOptions, parse: Number, required: true, type: 'select' },
     { label: 'Prelim', name: 'prelim_grade', nullable: true, type: 'number' },

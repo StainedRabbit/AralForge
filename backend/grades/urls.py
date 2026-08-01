@@ -10,6 +10,7 @@ from .views import (
     PeriodGradeViewSet,
     StudentCategoryGradeViewSet,
     StudentGradeItemScoreViewSet,
+    SubjectGradingPolicyViewSet,
 )
 
 app_name = 'grades'
@@ -17,6 +18,7 @@ app_name = 'grades'
 router = DefaultRouter()
 router.register('templates', GradingTemplateViewSet, basename='grading-template')
 router.register('template-items', GradingTemplateItemViewSet, basename='grading-template-item')
+router.register('subject-policies', SubjectGradingPolicyViewSet, basename='subject-grading-policy')
 router.register('categories', GradeCategoryViewSet, basename='grade-category')
 router.register('items', GradeItemViewSet, basename='grade-item')
 router.register('item-scores', StudentGradeItemScoreViewSet, basename='student-grade-item-score')

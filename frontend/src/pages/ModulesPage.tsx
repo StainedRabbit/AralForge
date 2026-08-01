@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { RichLessonText } from '../components/RichLessonText'
@@ -30,14 +30,16 @@ export function ModulesPage({
   data: WorkspaceData
 }) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const activeSubjectIds = useMemo(() => getStudentModuleSubjectIds(data), [data])
   const visibleSubjects = useMemo(
     () => data.subjects.filter((subject) => activeSubjectIds.has(subject.id)),
     [activeSubjectIds, data.subjects],
   )
+  const requestedSubjectId = Number(searchParams.get('subject')) || null
   const [subjectId, setSubjectId] = useState<number | null>(
-    visibleSubjects[0]?.id ?? null,
+    requestedSubjectId ?? visibleSubjects[0]?.id ?? null,
   )
   const [topicId, setTopicId] = useState<number | null>(null)
 
@@ -45,8 +47,13 @@ export function ModulesPage({
     if (subjectId && visibleSubjects.some((subject) => subject.id === subjectId)) {
       return
     }
-    queueMicrotask(() => setSubjectId(visibleSubjects[0]?.id ?? null))
-  }, [subjectId, visibleSubjects])
+    const nextSubjectId = requestedSubjectId && visibleSubjects.some(
+      (subject) => subject.id === requestedSubjectId,
+    )
+      ? requestedSubjectId
+      : visibleSubjects[0]?.id ?? null
+    queueMicrotask(() => setSubjectId(nextSubjectId))
+  }, [requestedSubjectId, subjectId, visibleSubjects])
 
   const selectedModule = useMemo(
     () =>
@@ -138,7 +145,14 @@ export function ModulesPage({
               <span>Subject</span>
               <select
                 onChange={(event) => {
-                  setSubjectId(Number(event.target.value) || null)
+                  const nextSubjectId = Number(event.target.value) || null
+                  setSubjectId(nextSubjectId)
+                  setSearchParams((current) => {
+                    const next = new URLSearchParams(current)
+                    if (nextSubjectId) next.set('subject', String(nextSubjectId))
+                    else next.delete('subject')
+                    return next
+                  }, { replace: true })
                   setTopicId(null)
                   setQuery('')
                 }}

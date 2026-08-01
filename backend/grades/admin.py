@@ -9,7 +9,10 @@ from .models import (
     PeriodGrade,
     StudentCategoryGrade,
     StudentGradeItemScore,
+    SubjectGradingPolicy,
 )
+
+admin.site.register(SubjectGradingPolicy)
 
 
 class GradingTemplateItemInline(admin.TabularInline):
@@ -54,7 +57,7 @@ class GradeCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(GradeItem)
 class GradeItemAdmin(admin.ModelAdmin):
-    list_display = ('grade_category', 'title', 'source_type', 'points_possible', 'order')
+    list_display = ('grade_category', 'schedule', 'title', 'source_type', 'points_possible', 'order')
     list_filter = ('grade_category__subject', 'grade_category__grading_period', 'source_type')
     search_fields = ('title', 'grade_category__subject__code', 'grade_category__name')
 
@@ -70,6 +73,7 @@ class StudentGradeItemScoreAdmin(admin.ModelAdmin):
 class StudentCategoryGradeAdmin(admin.ModelAdmin):
     list_display = (
         'subject',
+        'schedule',
         'student',
         'grade_category',
         'raw_score',
@@ -83,7 +87,7 @@ class StudentCategoryGradeAdmin(admin.ModelAdmin):
 
 @admin.register(PeriodGrade)
 class PeriodGradeAdmin(admin.ModelAdmin):
-    list_display = ('subject', 'student', 'grading_period', 'raw_score', 'computed_at')
+    list_display = ('subject', 'schedule', 'student', 'grading_period', 'raw_score', 'computed_at')
     list_filter = ('subject', 'grading_period')
     search_fields = ('student__username', 'subject__code')
 
@@ -92,6 +96,7 @@ class PeriodGradeAdmin(admin.ModelAdmin):
 class FinalGradeAdmin(admin.ModelAdmin):
     list_display = (
         'subject',
+        'schedule',
         'student',
         'prelim_grade',
         'midterm_grade',

@@ -1,12 +1,12 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceDataWithRefresh } from './types'
 import { MobileHeader, MobileTabbar, Sidebar } from '../components/navigation'
 import type { NavItem } from '../components/navigation'
-import { StatusBanner } from '../components/ui'
+import { SkeletonList, StatusBanner } from '../components/ui'
 import { AdminAcademicSetupPage } from '../pages/admin/AdminAcademicSetupPage'
 import { AdminAssessmentsPage } from '../pages/admin/AdminAssessmentsPage'
 import { AdminAttendancePage } from '../pages/admin/AdminAttendancePage'
-import { AdminClassesPage } from '../pages/admin/AdminClassesPage'
 import { AdminCodingPage } from '../pages/admin/AdminCodingPage'
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage'
 import { AdminGradebookPage } from '../pages/admin/AdminGradebookPage'
@@ -19,6 +19,12 @@ import { AdminTopicEditorPage } from '../pages/admin/AdminTopicEditorPage'
 import { LessonPresentationPage } from '../pages/admin/LessonPresentationPage'
 import { ModuleProgressPage } from '../pages/admin/ModuleProgressPage'
 
+const AdminClassesPage = lazy(() =>
+  import('../pages/admin/AdminClassesPage').then((module) => ({
+    default: module.AdminClassesPage,
+  })),
+)
+
 const adminNavItems: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' },
   { to: '/admin/students', label: 'Students', icon: 'users' },
@@ -27,7 +33,6 @@ const adminNavItems: NavItem[] = [
   { to: '/admin/modules', label: 'Modules', icon: 'module' },
   { to: '/admin/coding', label: 'Coding', icon: 'code' },
   { to: '/admin/assessments', label: 'Assessments', icon: 'assessment' },
-  { to: '/admin/attendance', label: 'Attendance', icon: 'check' },
   { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' },
   { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]
@@ -104,11 +109,13 @@ export function AdminApp({
           <Route
             path="/admin/classes"
             element={
-              <AdminClassesPage
-                api={api}
-                data={workspace}
-                refresh={workspace.refresh}
-              />
+              <Suspense fallback={<SkeletonList count={4} />}>
+                <AdminClassesPage
+                  api={api}
+                  data={workspace}
+                  refresh={workspace.refresh}
+                />
+              </Suspense>
             }
           />
           <Route

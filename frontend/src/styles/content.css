@@ -61,6 +61,65 @@
   margin-top: auto;
 }
 
+.student-class-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.student-class-section-heading,
+.inline-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.student-class-section-heading {
+  margin-bottom: 12px;
+}
+
+.student-class-section-heading h2,
+.student-class-section-heading p {
+  margin: 0;
+}
+
+.student-class-section-heading > span,
+.student-past-classes summary small {
+  color: var(--text-muted);
+  font-weight: 750;
+}
+
+.class-card--past {
+  min-height: auto;
+  opacity: 0.78;
+}
+
+.status-pill--today {
+  color: #166534;
+  background: var(--success-soft);
+}
+
+.student-past-classes summary {
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 850;
+}
+
+.student-past-classes[open] summary {
+  margin-bottom: 16px;
+}
+
+.inline-filter-banner {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--text);
+  font-weight: 750;
+}
+
 .module-card h2,
 .problem-card h2,
 .class-card h2,
