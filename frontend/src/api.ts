@@ -14,6 +14,11 @@ export class ApiError extends Error {
 }
 
 export type Session = TokenPair
+export type PasswordSetupChallenge = {
+  must_change_password: true
+  password_setup_token: string
+}
+export type LoginResponse = Session | PasswordSetupChallenge
 
 export type RequestOptions = Omit<RequestInit, 'headers'> & {
   headers?: HeadersInit
@@ -28,9 +33,24 @@ export function asArray<T>(payload: ApiList<T>): T[] {
 }
 
 export async function login(username: string, password: string) {
-  return request<TokenPair>('/auth/token/', {
+  return request<LoginResponse>('/auth/token/', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function completePasswordSetup(
+  passwordSetupToken: string,
+  newPassword: string,
+  confirmPassword: string,
+) {
+  return request<Session>('/auth/complete-password-setup/', {
+    method: 'POST',
+    body: JSON.stringify({
+      password_setup_token: passwordSetupToken,
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    }),
   })
 }
 

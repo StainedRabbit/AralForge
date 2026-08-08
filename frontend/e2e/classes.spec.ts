@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
 test.describe.configure({ mode: 'serial' })
@@ -19,7 +20,8 @@ async function selectClass(page: Page, code: string) {
 
 async function startNewSchedule(page: Page) {
   const newButton = page.locator('.class-form').getByRole('button', { name: 'New' })
-  if (await newButton.isVisible()) {
+  if (/schedule=/.test(page.url())) {
+    await expect(newButton).toBeVisible()
     await newButton.click()
     await expect(page.locator('.class-form')).toContainText('New schedule')
     await expect(page).not.toHaveURL(/schedule=/)
@@ -35,11 +37,11 @@ async function fillSchedule(page: Page, options: {
   term: string
 }) {
   const form = page.locator('.class-form')
-  const subjectValue = await form.getByLabel('Subject').locator('option').filter({ hasText: options.subject }).getAttribute('value')
-  const termValue = await form.getByLabel('Term').locator('option').filter({ hasText: options.term }).getAttribute('value')
+  const subjectValue = await form.getByLabel('Subject', { exact: true }).locator('option').filter({ hasText: options.subject }).getAttribute('value')
+  const termValue = await form.getByLabel('Term', { exact: true }).locator('option').filter({ hasText: options.term }).getAttribute('value')
   if (!subjectValue || !termValue) throw new Error('The requested subject or term option is unavailable.')
-  await form.getByLabel('Subject').selectOption(subjectValue)
-  await form.getByLabel('Term').selectOption(termValue)
+  await form.getByLabel('Subject', { exact: true }).selectOption(subjectValue)
+  await form.getByLabel('Term', { exact: true }).selectOption(termValue)
   await form.getByLabel('Section').fill(options.section)
   for (const day of ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']) {
     await form.getByLabel(day).uncheck()
@@ -56,8 +58,31 @@ test('persists class selection and keeps class links scoped', async ({ page }) =
 
   await page.reload()
   await expect(page).toHaveURL(selectedUrl)
-  await expect(page.locator('.class-form').getByLabel('Subject')).toHaveValue(/\d+/)
+  await expect(page.locator('.class-form').getByLabel('Subject', { exact: true })).toHaveValue(/\d+/)
   await expect(page.getByRole('heading', { name: 'Roster' })).toBeVisible()
+  const rosterTotals = page.getByRole('group', { name: 'Filter roster by status' })
+  await expect(rosterTotals).toContainText('2Active')
+  await expect(rosterTotals).toContainText('0Inactive')
+  await expect(rosterTotals.locator('.class-roster-summary__item')).toHaveCount(2)
+  const activeFilter = rosterTotals.getByRole('button', { name: '2 Active' })
+  const inactiveFilter = rosterTotals.getByRole('button', { name: '0 Inactive' })
+  await expect(activeFilter).toHaveAttribute('aria-pressed', 'true')
+  await expect(inactiveFilter).toHaveAttribute('aria-pressed', 'false')
+
+  const rosterSearch = page.getByPlaceholder('Search roster by name or student number')
+  await rosterSearch.fill('Alex')
+  await expect(page.getByRole('row').filter({ hasText: 'Alex Rivera' })).toBeVisible()
+  await inactiveFilter.focus()
+  await inactiveFilter.press('Enter')
+  await expect(inactiveFilter).toHaveAttribute('aria-pressed', 'true')
+  await expect(activeFilter).toHaveAttribute('aria-pressed', 'false')
+  await expect(rosterSearch).toHaveValue('Alex')
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await rosterSearch.clear()
+  await expect(page.getByText('No inactive students in this class.')).toBeVisible()
+  await activeFilter.click()
+  await expect(activeFilter).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('row').filter({ hasText: 'Alex Rivera' })).toBeVisible()
 
   await page.getByRole('button', { name: 'More actions', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: 'Open Gradebook' })).toHaveAttribute('href', /schedule=\d+/)
@@ -67,6 +92,167 @@ test('persists class selection and keeps class links scoped', async ({ page }) =
   await page.getByRole('button', { name: 'Attendance' }).click()
   await expect(page.getByRole('dialog')).toContainText('E2E101')
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const chip of await rosterTotals.locator('.class-roster-summary__item').all()) {
+    const box = await chip.boundingBox()
+    expect(box?.height).toBeLessThanOrEqual(40)
+    expect(box?.width).toBeLessThan(100)
+  }
+})
+
+test('loads the roster ten students at a time and exports the complete filtered list', async ({ page }) => {
+  const rosterRequests: Array<{ limit: number; offset: number; search: string; status: string }> = []
+  const students = Array.from({ length: 12 }, (_, index) => ({
+    email: `paged-${index + 1}@example.test`,
+    grade_summary: {},
+    student_name: `Paged Student ${String(index + 1).padStart(2, '0')}`,
+    student_number: `PAGE-${String(index + 1).padStart(3, '0')}`,
+  }))
+
+  await page.route(/\/subjects\/subject-schedules\/\d+\/roster\/.*/, async (route) => {
+    const url = new URL(route.request().url())
+    const limit = Number(url.searchParams.get('limit') ?? 50)
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    const search = url.searchParams.get('search') ?? ''
+    const rosterStatus = url.searchParams.get('status') ?? ''
+    const scheduleId = Number(url.pathname.match(/subject-schedules\/(\d+)/)?.[1])
+    const normalizedSearch = search.toLowerCase()
+    const filteredStudents = students.filter((student) =>
+      `${student.student_name} ${student.student_number}`.toLowerCase().includes(normalizedSearch),
+    )
+    const pageStudents = filteredStudents.slice(offset, offset + limit)
+    rosterRequests.push({ limit, offset, search, status: rosterStatus })
+
+    await route.fulfill({
+      body: JSON.stringify({
+        active_count: students.length,
+        count: filteredStudents.length,
+        inactive_count: 0,
+        next: offset + limit < filteredStudents.length ? offset + limit : null,
+        previous: offset ? Math.max(offset - limit, 0) : null,
+        results: pageStudents.map((student, index) => ({
+          ...student,
+          added_at: '2026-08-04T00:00:00Z',
+          added_by: null,
+          deactivated_at: null,
+          deactivated_by: null,
+          id: 1000 + offset + index,
+          is_active: true,
+          schedule: scheduleId,
+          schedule_display: 'E2E101 A',
+          school_year_semester: 1,
+          student: 2000 + offset + index,
+          subject: 1,
+          subject_code: 'E2E101',
+          subject_name: 'Programming Fundamentals',
+          term_name: 'First Semester',
+          updated_at: '2026-08-04T00:00:00Z',
+        })),
+        total_count: students.length,
+      }),
+      contentType: 'application/json',
+      status: 200,
+    })
+  })
+
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+
+  const rosterScroller = page.locator('.class-roster-scroll')
+  const pagination = page.locator('.class-roster-pagination')
+  const rosterRows = page.locator('.class-roster-table tbody').getByRole('row')
+  await expect(pagination).toContainText('Showing 10 of 12 students')
+  await expect(rosterRows).toHaveCount(10)
+  await expect(pagination.getByRole('button', { name: 'Load more' })).toBeEnabled()
+  expect(rosterRequests[0]).toMatchObject({ limit: 10, offset: 0, status: 'active' })
+
+  const desktopScrollMetrics = await rosterScroller.evaluate((element) => {
+    const styles = window.getComputedStyle(element)
+    return {
+      clientHeight: element.clientHeight,
+      maxHeight: styles.maxHeight,
+      overflowY: styles.overflowY,
+      scrollHeight: element.scrollHeight,
+    }
+  })
+  expect(desktopScrollMetrics.maxHeight).not.toBe('none')
+  expect(desktopScrollMetrics.overflowY).toBe('auto')
+  expect(desktopScrollMetrics.clientHeight).toBeLessThanOrEqual(680)
+  expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
+  await expect(page.locator('.class-roster-table thead th').first()).toHaveCSS('position', 'sticky')
+  await expect(pagination).toHaveCSS('position', 'sticky')
+
+  await rosterScroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect(pagination).toContainText('Showing 12 of 12 students')
+  await expect(rosterRows).toHaveCount(12)
+  expect(rosterRequests.filter((request) => request.limit === 10).map((request) => request.offset)).toEqual([0, 10])
+
+  await page.getByPlaceholder('Search roster by name or student number').fill('Paged Student 12')
+  await expect(pagination).toContainText('Showing 1 of 1 student')
+  expect(rosterRequests.at(-1)).toMatchObject({ limit: 10, offset: 0, search: 'Paged Student 12' })
+
+  await page.getByPlaceholder('Search roster by name or student number').clear()
+  await expect(pagination).toContainText(/Showing (10|12) of 12 students/)
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('menuitem', { name: 'Export roster CSV' }).click()
+  const download = await downloadPromise
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const csv = await readFile(downloadPath!, 'utf8')
+  expect(csv.trim().split('\n')).toHaveLength(13)
+  expect(rosterRequests).toContainEqual({ limit: 100, offset: 0, search: '', status: 'active' })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileScrollMetrics = await rosterScroller.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    maxHeight: window.getComputedStyle(element).maxHeight,
+    scrollHeight: element.scrollHeight,
+  }))
+  expect(mobileScrollMetrics.maxHeight).toBe('none')
+  expect(mobileScrollMetrics.scrollHeight).toBe(mobileScrollMetrics.clientHeight)
+})
+
+test('creates and reopens an attendance-style class score sheet', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+
+  const scoresButton = page.getByRole('button', { name: 'Scores', exact: true })
+  await expect(scoresButton).toBeVisible()
+  await scoresButton.click()
+  const dialog = page.getByRole('dialog', { name: 'Class scores' })
+  await expect(dialog.getByRole('tab', { name: 'Enter scores' })).toHaveAttribute('aria-selected', 'true')
+  await dialog.getByLabel('Title').fill('Quiz 1')
+  await dialog.getByLabel('Maximum score').fill('10')
+  await dialog.getByRole('button', { name: 'Start score sheet' }).click()
+
+  await dialog.getByLabel('Score for Alex Rivera').fill('8.5')
+  await expect(dialog.getByLabel('Score for Jamie Santos')).toHaveValue('')
+  await expect(dialog).toContainText('2 Completed')
+  await expect(dialog).toContainText('1 Zero on save')
+  await expect(dialog).toContainText('Blank scores will be recorded as zero')
+
+  await dialog.getByRole('button', { name: 'Close scores' }).click()
+  const discard = dialog.getByRole('alertdialog', { name: 'Discard unsaved scores?' })
+  await expect(discard).toBeVisible()
+  await discard.getByRole('button', { name: 'Keep editing' }).click()
+  await dialog.getByRole('button', { name: 'Save scores' }).click()
+  await expect(dialog.getByText(/Scores saved: 2 graded, 1 zero, 0 excused/)).toBeVisible()
+
+  await dialog.getByRole('tab', { name: 'Score sheets' }).click()
+  await dialog.getByRole('button', { name: /Quiz 1/ }).click()
+  await expect(dialog.getByLabel('Score for Alex Rivera')).toHaveValue('8.50')
+  await expect(dialog.getByLabel('Score for Jamie Santos')).toHaveValue('0.00')
+  await dialog.getByRole('button', { name: 'Close scores' }).click()
+  await expect(scoresButton).toBeFocused()
+
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Open Gradebook' }).click()
+  await expect(page.getByRole('heading', { name: 'Gradebook' })).toBeVisible()
+  await expect(page.getByText('Quiz 1', { exact: true }).first()).toBeVisible()
 })
 
 test('creates allowed schedules and rejects a shared-day overlap', async ({ page }) => {
@@ -96,9 +282,9 @@ test('creates allowed schedules and rejects a shared-day overlap', async ({ page
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
   await expect(page.locator('.class-form')).toContainText('Conflicts with E2E101 E2E-A')
 
-  const secondTerm = await page.locator('.class-form').getByLabel('Term').locator('option').filter({ hasText: '2nd Semester' }).getAttribute('value')
+  const secondTerm = await page.locator('.class-form').getByLabel('Term', { exact: true }).locator('option').filter({ hasText: '2nd Semester' }).getAttribute('value')
   if (!secondTerm) throw new Error('The second term option is unavailable.')
-  await page.locator('.class-form').getByLabel('Term').selectOption(secondTerm)
+  await page.locator('.class-form').getByLabel('Term', { exact: true }).selectOption(secondTerm)
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
   await expect(page.locator('.class-form')).toContainText('Schedule saved.')
 })
@@ -149,6 +335,103 @@ test('supports keyboard row actions and safe roster removal', async ({ page }) =
   await expect(jamieRow).toHaveCount(0)
 })
 
+test('searches, selects, and reactivates students with the streamlined picker', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  await page.getByRole('button', { name: 'Add students' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Add students' })
+  const chooseTab = dialog.getByRole('tab', { name: 'Choose students' })
+  const importTab = dialog.getByRole('tab', { name: 'Import CSV' })
+  await expect(chooseTab).toHaveAttribute('aria-selected', 'true')
+  await chooseTab.focus()
+  await chooseTab.press('ArrowRight')
+  await expect(importTab).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog.getByLabel('Student list CSV')).toBeVisible()
+  const downloadPromise = page.waitForEvent('download')
+  await dialog.getByRole('button', { name: 'Download CSV template' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('student-roster-template.csv')
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  expect(await readFile(downloadPath!, 'utf8')).toBe('Student Number,Last Name,First Name,Middle Name\r\n')
+  await chooseTab.click()
+
+  const search = dialog.getByRole('combobox', { name: 'Find a student' })
+  await expect(search).toBeFocused()
+  await search.fill('Jamie')
+  const jamieOption = dialog.getByRole('option').filter({ hasText: 'Jamie Santos' })
+  await expect(jamieOption).toContainText('E2E-002')
+  await expect(jamieOption).toContainText('Will reactivate')
+  await search.press('ArrowDown')
+  await search.press('Enter')
+
+  const selection = dialog.getByRole('region', { name: 'Selected students' })
+  await expect(selection).toContainText('Selected (1)')
+  await expect(selection).toContainText('Jamie Santos')
+  await search.fill('Morgan')
+  await dialog.getByRole('option').filter({ hasText: 'Morgan Lee' }).click()
+  await expect(selection).toContainText('Selected (2)')
+  await selection.getByRole('button', { name: 'Remove Morgan Lee' }).click()
+  await expect(selection).toContainText('Selected (1)')
+  await search.fill('zz')
+  await expect(selection).toContainText('Jamie Santos')
+  await search.press('Escape')
+  await expect(search).toHaveValue('')
+  await expect(dialog).toBeVisible()
+
+  await importTab.click()
+  await expect(dialog.getByLabel('Student list CSV')).toBeVisible()
+  await chooseTab.click()
+  await expect(selection).toContainText('Jamie Santos')
+  await selection.getByRole('button', { name: 'Clear all' }).click()
+  await expect(selection).toContainText('Selected (0)')
+
+  await search.fill('E2E-002')
+  await expect(dialog.getByRole('option').filter({ hasText: 'Jamie Santos' })).toBeVisible()
+  await search.press('Enter')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(selection.locator('li')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add 1' }).click()
+  await expect(dialog).toContainText('0 added, 1 reactivated, 0 already active.')
+  await dialog.getByTitle('Close').click()
+  await expect(page.getByRole('row').filter({ hasText: 'Jamie Santos' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Add students' }).click()
+  const importDialog = page.getByRole('dialog', { name: 'Add students' })
+  await importDialog.getByRole('tab', { name: 'Import CSV' }).click()
+  await importDialog.getByLabel('Student list CSV').setInputFiles({
+    name: 'new-student.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from("Student Number,Last Name,First Name,Middle Name,Email,Section\r\nE2E-NEW-01,young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n"),
+  })
+  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Create account')
+  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Robin Mae Ann-Marie Young')
+  const credentialsDownloadPromise = page.waitForEvent('download')
+  await importDialog.getByRole('button', { name: 'Import 1 students' }).click()
+  const credentialsDownload = await credentialsDownloadPromise
+  expect(credentialsDownload.suggestedFilename()).toBe('new-student-credentials.csv')
+  const credentialsPath = await credentialsDownload.path()
+  expect(credentialsPath).not.toBeNull()
+  const credentialsCsv = await readFile(credentialsPath!, 'utf8')
+  const temporaryPassword = credentialsCsv.trim().split(/\r?\n/)[1].split(',')[1]
+  expect(temporaryPassword).toBeTruthy()
+  await expect(importDialog).toContainText('1 accounts created, 1 enrolled, 0 reactivated.')
+  await expect(importDialog.getByRole('button', { name: 'Download credentials again' })).toBeVisible()
+  await importDialog.getByTitle('Close').click()
+
+  await page.getByTitle('Sign out').last().click()
+  await page.getByLabel('Username or student number').fill('E2E-NEW-01')
+  await page.getByLabel('Password').fill(temporaryPassword)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('heading', { name: 'Create your password' })).toBeVisible()
+  await page.getByLabel('New password', { exact: true }).fill('StudentSecurePass!482')
+  await page.getByLabel('Confirm new password').fill('StudentSecurePass!482')
+  await page.getByRole('button', { name: 'Set password and continue' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('heading', { name: 'Welcome back, Robin Mae Ann-Marie.' })).toBeVisible()
+})
+
 test('archives and restores a class without deleting it', async ({ page }) => {
   await openClasses(page)
   await startNewSchedule(page)
@@ -173,4 +456,79 @@ test('archives and restores a class without deleting it', async ({ page }) => {
 
   await page.locator('.class-form').getByRole('button', { name: 'Restore class' }).click()
   await expect(page.locator('.class-form')).toContainText('Status: Active')
+})
+
+test('creates subjects and manages terms without leaving Schedule Setup', async ({ page }) => {
+  await openClasses(page)
+  await startNewSchedule(page)
+
+  const form = page.locator('.class-form')
+  const subjectSelect = form.getByLabel('Subject', { exact: true })
+  const termSelect = form.getByLabel('Term', { exact: true })
+  const createSubjectButton = form.getByRole('button', { name: 'Create subject' })
+  const manageTermsButton = form.getByRole('button', { name: 'Manage terms' })
+  await expect(createSubjectButton).toBeVisible()
+  await expect(manageTermsButton).toBeVisible()
+  await form.getByLabel('Section').fill('UNSAVED-DRAFT')
+
+  await createSubjectButton.click()
+  let dialog = page.getByRole('dialog', { name: 'Create subject' })
+  await expect(dialog.getByLabel('Code')).toBeFocused()
+  const dialogPanel = dialog.locator('.academic-setup-dialog')
+  await dialogPanel.getByRole('button', { name: 'Close Create subject' }).focus()
+  await dialogPanel.getByRole('button', { name: 'Close Create subject' }).press('Shift+Tab')
+  await expect(dialogPanel.getByRole('button', { name: 'Create subject', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(createSubjectButton).toBeFocused()
+
+  await createSubjectButton.click()
+  dialog = page.getByRole('dialog', { name: 'Create subject' })
+  await dialog.getByLabel('Code').fill('E2E101')
+  await dialog.getByLabel('Name').fill('Computer Networks')
+  await dialog.getByLabel('Description').fill('Created from Schedule Setup.')
+  await dialog.getByRole('button', { name: 'Create subject', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toBeVisible()
+  await expect(dialog.getByLabel('Code')).toHaveValue('E2E101')
+  await expect(dialog.getByLabel('Name')).toHaveValue('Computer Networks')
+  await dialog.getByLabel('Code').fill('E2E103')
+  await dialog.getByRole('button', { name: 'Create subject', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(subjectSelect.locator('option:checked')).toHaveText('E2E103 Computer Networks')
+  await expect(form.getByLabel('Section')).toHaveValue('UNSAVED-DRAFT')
+  await expect(createSubjectButton).toBeFocused()
+
+  await manageTermsButton.click()
+  dialog = page.getByRole('dialog', { name: 'Manage terms' })
+  await expect(dialog.getByLabel('School year')).toBeFocused()
+  await dialog.getByRole('button', { name: 'New school year' }).click()
+  await dialog.getByLabel('Start year').fill('2032')
+  await expect(dialog.getByLabel('End year')).toHaveValue('2033')
+  await dialog.getByRole('button', { name: 'Create school year' }).click()
+  await expect(dialog).toContainText('2032-2033 created and selected.')
+  await expect(dialog.getByLabel('School year')).toHaveValue(/\d+/)
+  await dialog.getByLabel('Semester', { exact: true }).selectOption('SUMMER')
+  await dialog.getByRole('button', { name: 'Create term' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(termSelect.locator('option:checked')).toHaveText('Summer 2032-2033')
+  await expect(form.getByLabel('Section')).toHaveValue('UNSAVED-DRAFT')
+  await expect(manageTermsButton).toBeFocused()
+
+  await manageTermsButton.click()
+  dialog = page.getByRole('dialog', { name: 'Manage terms' })
+  await dialog.getByRole('radio', { name: /1st Semester 2030-2031/ }).click()
+  await expect(dialog).toContainText('1st Semester 2030-2031 is now the active default and is selected.')
+  await dialog.getByRole('button', { name: 'Done' }).click()
+  await expect(termSelect.locator('option:checked')).toHaveText('1st Semester 2030-2031')
+  await expect(manageTermsButton).toBeFocused()
+
+  await manageTermsButton.click()
+  dialog = page.getByRole('dialog', { name: 'Manage terms' })
+  await dialog.locator('.attendance-modal__backdrop').click({ position: { x: 5, y: 5 } })
+  await expect(dialog).toHaveCount(0)
+  await expect(manageTermsButton).toBeFocused()
+
+  await page.goto('/admin/academic-setup')
+  await expect(page).toHaveURL(/\/admin\/classes$/)
+  await expect(page.getByRole('link', { name: 'Academic Setup' })).toHaveCount(0)
 })

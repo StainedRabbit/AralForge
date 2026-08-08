@@ -9,21 +9,9 @@ def bullets(items):
     return '\n'.join(f'- {item}' for item in items)
 
 
-def numbered(items):
-    return '\n'.join(f'{index + 1}. {item}' for index, item in enumerate(items))
-
-
 def java(code):
     return f'```java\n{code.strip()}\n```'
 
-
-COMMON_RUBRIC = """Criteria - 20 points total
-- Correctness (5): Output or answer follows the required concept and instructions.
-- Completeness (4): All required parts are present.
-- Logic and sequence (4): Steps, code, diagram, or pseudocode follow a clear order.
-- Explanation (3): Student can explain what the work does and why it is correct.
-- Neatness/readability (2): Work is easy to read, label, and check.
-- Effort and revision (2): Student improves the work after feedback."""
 
 HELLO_WORLD = java(
     """
@@ -177,8 +165,6 @@ def detailed_discussion(item):
         *rules_for_topic(topic, title),
         'Common mistakes we will watch for:',
         *mistake_points(topic, title),
-        'Mini-check before practice:',
-        *mini_check_points(topic, title),
         (
             "When we move to practice, our goal is not only to get an answer. "
             'Our goal is to explain the thinking: what information we used, what step happened next, '
@@ -186,19 +172,6 @@ def detailed_discussion(item):
         ),
     ]
     return '\n'.join(discussion)
-
-
-def lesson_evidence(item):
-    return (
-        'Evidence we will use to check learning:\n'
-        + bullets(
-            [
-                *item['expected'],
-                'Completed guided-practice work with visible corrections or annotations.',
-                'A short explanation connecting the output to the lesson target.',
-            ]
-        )
-    )
 
 
 def lesson_remediation(item):
@@ -474,55 +447,11 @@ def mistake_points(topic, title):
     ]
 
 
-def mini_check_points(topic, title):
-    if topic == 'flowcharts':
-        return [
-            '- Which shape do we use for Start and End?',
-            '- Which shape do we use when the program asks a yes/no question?',
-            '- What should be written on the two arrows leaving a decision diamond?',
-            '- Can we trace the diagram from Start to End without getting stuck?',
-        ]
-    if topic == 'pseudocode':
-        return [
-            '- What keyword shows that we receive data?',
-            '- What keyword shows that we display a result?',
-            '- Where should the steps inside an IF decision be placed?',
-            '- Can we trace the pseudocode using sample values?',
-        ]
-    if topic == 'operators':
-        return [
-            '- What data type fits this value?',
-            '- Are we assigning a value or comparing two values?',
-            '- Which operation happens first?',
-            '- Does the final expression produce a number or true/false?',
-        ]
-    if topic == 'io':
-        return [
-            '- What prompt will the user see?',
-            '- What variable stores the input?',
-            '- What output should appear?',
-            '- If a file is used, where is it saved or read from?',
-        ]
-    if topic == 'algorithms':
-        return [
-            '- What is our input?',
-            '- What process happens to the input?',
-            '- What output should appear?',
-            '- Are the steps clear enough for a classmate to follow?',
-        ]
-    return [
-        '- What part of the Java program is the container?',
-        '- Where does the program start running?',
-        '- What line displays output?',
-        '- What syntax rule should we check before running?',
-    ]
-
-
 def guided_examples_for(item):
     if item['title'] == 'Lesson 9: Flowchart Symbols And Program Logic':
         return '\n'.join(
             [
-                "Let's look at five beginner-friendly flowchart examples. Read each scenario, trace the arrows, and answer the mini-check.",
+                "Let's look at five beginner-friendly flowchart examples. Read each scenario and trace the arrows from start to end.",
                 'After the examples, choose one model and explain it using this sentence: This flowchart works because _____. If we change _____, the path becomes _____.',
             ]
         )
@@ -624,11 +553,11 @@ def lesson_examples_for(item):
         return []
 
     return [
-        {'order': 1, 'title': 'Example 1: Sequence - Display a Welcome Message', 'alt_text': 'Sequence flowchart for displaying a welcome message', 'body': 'A simple program displays a welcome message to the user. This example shows a straight sequence from Start to End.', 'common_mistake': 'Do not use a diamond here because the program is not asking a Yes/No question.', 'mini_check': 'Which shape is used for displaying the message?', 'filename': 'cc102-flowchart-example-1-sequence.svg', 'steps': ['Start', 'message = "Welcome"', 'Display message', 'End']},
-        {'order': 2, 'title': 'Example 2: Input and Output - Greet the User', 'alt_text': 'Input and output flowchart for greeting a user', 'body': "The program asks for the user's name, then displays a greeting using that name.", 'common_mistake': "Do not place 'Input name' inside a rectangle. Input and output steps should use a parallelogram.", 'mini_check': "Why is 'Input name' written inside a parallelogram?", 'filename': 'cc102-flowchart-example-2-input-output.svg', 'steps': ['Start', 'Input name', 'greeting = "Hello, " + name', 'Display greeting', 'End']},
-        {'order': 3, 'title': 'Example 3: Process - Add Two Numbers', 'alt_text': 'Process flowchart for adding two numbers', 'body': 'The program receives two numbers, computes their sum, and displays the result.', 'common_mistake': "Do not use a parallelogram for 'sum = num1 + num2' because it is not receiving or displaying data. It is calculating a value.", 'mini_check': 'Which step creates a new value?', 'filename': 'cc102-flowchart-example-3-process.svg', 'steps': ['Start', 'Input num1', 'Input num2', 'sum = num1 + num2', 'Display sum', 'End']},
-        {'order': 4, 'title': 'Example 4: Decision - Check if a Student Passed', 'alt_text': 'Decision flowchart for checking if a student passed', 'body': 'The program receives a grade. If the grade is 75 or higher, it displays Passed. Otherwise, it displays Try Again.', 'common_mistake': 'Do not forget to label the two arrows from the diamond. Without Yes and No labels, the reader may not know which path to follow.', 'mini_check': "What are the two possible answers to the decision 'grade >= 75?'", 'filename': 'cc102-flowchart-example-4-decision.svg', 'steps': ['Start', 'Input grade', 'grade >= 75?', 'Yes: Display Passed', 'No: Display Try Again', 'End']},
-        {'order': 5, 'title': 'Example 5: Complete Logic - Compute Average and Check Result', 'alt_text': 'Complete flowchart for computing average and checking pass or fail', 'body': 'The program receives quiz, exam, and activity scores. It computes the average, then checks if the average is passing.', 'common_mistake': "Do not check 'average >= 75?' before computing the average. The value must be created first before it can be tested.", 'mini_check': 'Why should the average be computed before the decision diamond?', 'filename': 'cc102-flowchart-example-5-complete.svg', 'steps': ['Start', 'Input quiz, exam, activity', 'average = total / 3', 'average >= 75?', 'Yes: Display Passed', 'No: Display Failed', 'End']},
+        {'order': 1, 'title': 'Example 1: Sequence - Display a Welcome Message', 'alt_text': 'Sequence flowchart for displaying a welcome message', 'body': 'A simple program displays a welcome message to the user. This example shows a straight sequence from Start to End.', 'common_mistake': 'Do not use a diamond here because the program is not asking a Yes/No question.', 'filename': 'cc102-flowchart-example-1-sequence.svg', 'steps': ['Start', 'message = "Welcome"', 'Display message', 'End']},
+        {'order': 2, 'title': 'Example 2: Input and Output - Greet the User', 'alt_text': 'Input and output flowchart for greeting a user', 'body': "The program asks for the user's name, then displays a greeting using that name.", 'common_mistake': "Do not place 'Input name' inside a rectangle. Input and output steps should use a parallelogram.", 'filename': 'cc102-flowchart-example-2-input-output.svg', 'steps': ['Start', 'Input name', 'greeting = "Hello, " + name', 'Display greeting', 'End']},
+        {'order': 3, 'title': 'Example 3: Process - Add Two Numbers', 'alt_text': 'Process flowchart for adding two numbers', 'body': 'The program receives two numbers, computes their sum, and displays the result.', 'common_mistake': "Do not use a parallelogram for 'sum = num1 + num2' because it is not receiving or displaying data. It is calculating a value.", 'filename': 'cc102-flowchart-example-3-process.svg', 'steps': ['Start', 'Input num1', 'Input num2', 'sum = num1 + num2', 'Display sum', 'End']},
+        {'order': 4, 'title': 'Example 4: Decision - Check if a Student Passed', 'alt_text': 'Decision flowchart for checking if a student passed', 'body': 'The program receives a grade. If the grade is 75 or higher, it displays Passed. Otherwise, it displays Try Again.', 'common_mistake': 'Do not forget to label the two arrows from the diamond. Without Yes and No labels, the reader may not know which path to follow.', 'filename': 'cc102-flowchart-example-4-decision.svg', 'steps': ['Start', 'Input grade', 'grade >= 75?', 'Yes: Display Passed', 'No: Display Try Again', 'End']},
+        {'order': 5, 'title': 'Example 5: Complete Logic - Compute Average and Check Result', 'alt_text': 'Complete flowchart for computing average and checking pass or fail', 'body': 'The program receives quiz, exam, and activity scores. It computes the average, then checks if the average is passing.', 'common_mistake': "Do not check 'average >= 75?' before computing the average. The value must be created first before it can be tested.", 'filename': 'cc102-flowchart-example-5-complete.svg', 'steps': ['Start', 'Input quiz, exam, activity', 'average = total / 3', 'average >= 75?', 'Yes: Display Passed', 'No: Display Failed', 'End']},
     ]
 
 
@@ -2076,7 +2005,6 @@ class Command(BaseCommand):
                     'alt_text': example['alt_text'],
                     'body': example['body'],
                     'common_mistake': example['common_mistake'],
-                    'mini_check': example['mini_check'],
                     'is_published': True,
                 },
             )
@@ -2095,30 +2023,15 @@ class Command(BaseCommand):
             'order': item['order'],
             'learning_targets': 'By the end of this lesson, we can:\n'
             + bullets(item['targets']),
-            'key_terms': bullets(item['terms']),
             'before_you_start': item['before'],
             'short_discussion': detailed_discussion(item),
             'guided_examples': guided_examples_for(item),
             'lets_practice': detailed_practice_for(item),
-            'apply_what_you_learned': 'Now we apply it through these tasks:\n'
-            + numbered(item['apply']),
             'challenge_task': item['challenge'],
-            'rubric': COMMON_RUBRIC,
-            'reflection': "Let's reflect:\n"
-            + bullets(
-                [
-                    'What concept from this lesson is clearest to you now?',
-                    'What mistake did you notice or correct during practice?',
-                    'Which activity helped you understand the lesson best?',
-                    'How can this skill help you design or write a Java program?',
-                    'What do you still need to practice before the next lesson?',
-                ]
-            ),
-            'evidence_of_learning': lesson_evidence(item),
             'objectives': bullets(item['targets']),
             'overview': (
                 f'This lesson develops beginner understanding of {item["focus"]} through examples, '
-                'practice, application, and reflection.'
+                'practice, application, and challenge.'
             ),
             'subtopics': bullets(item['subtopics']),
             'acquisition': (

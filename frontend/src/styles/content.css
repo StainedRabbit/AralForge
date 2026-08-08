@@ -912,6 +912,12 @@
   gap: 8px;
 }
 
+.student-module-browser__actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
 .student-module-browser__meta span,
 .student-module-browser__meta a {
   min-height: 28px;
@@ -927,6 +933,31 @@
 
 .student-module-browser__meta a {
   color: var(--primary-dark);
+}
+
+.lesson-resume-action {
+  max-width: min(100%, 360px);
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.lesson-resume-action__copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.lesson-resume-action__copy strong,
+.lesson-resume-action__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lesson-resume-action__copy small {
+  opacity: 0.82;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .student-learning-results {
@@ -1763,6 +1794,14 @@
 
   .student-module-browser__meta {
     justify-content: flex-start;
+  }
+
+  .student-module-browser__actions {
+    justify-items: stretch;
+  }
+
+  .student-module-browser__actions .lesson-resume-action {
+    width: 100%;
   }
 
   .student-topic-chapter {

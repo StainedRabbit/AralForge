@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
 import { asArray } from '../../api'
 import { Icon } from '../../components/Icon'
+import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
 import { ClassAttendanceDialog } from '../../components/admin/ClassAttendanceDialog'
+import { ClassScoresDialog } from '../../components/admin/ClassScoresDialog'
 import { ManageStudentModulesDialog } from '../../components/admin/ManageStudentModulesDialog'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
@@ -19,13 +21,15 @@ import type {
   SchoolYearSemester,
   StudentGradeItemScore,
   SubjectSchedule,
-  User,
 } from '../../types'
 import { toOptions } from '../../admin/adminHelpers'
 import { formatTime, numeric, toErrorMessage } from '../../utils/format'
+import { cleanImportedPersonName } from '../../utils/importCleaning'
 import { fullName } from '../../utils/student'
 
-const STUDENT_PAGE_SIZE = 50
+const AVAILABLE_STUDENT_LIMIT = 8
+const ROSTER_PAGE_SIZE = 10
+const ROSTER_EXPORT_PAGE_SIZE = 100
 const weekdays = [
   { code: 'MO', label: 'Monday', short: 'Mon' },
   { code: 'TU', label: 'Tuesday', short: 'Tue' },
@@ -44,13 +48,10 @@ const gradingPeriodLabels: Record<(typeof gradingPeriods)[number], string> = {
 }
 
 type StudentImportRow = {
-  email: string
   firstName: string
   lastName: string
-  section: string
+  middleName: string
   studentNumber: string
-  username: string
-  yearLevel: number | null
 }
 
 type ImportPreview = {
@@ -61,12 +62,26 @@ type ImportPreview = {
     row: number
     student_number?: string
     student_name?: string
-    status: 'ready' | 'error'
+    status: 'create' | 'enroll' | 'reactivate' | 'already_enrolled' | 'error'
     error?: string
   }>
+  create_count?: number
+  enroll_count?: number
+  reactivate_count?: number
   added_count?: number
   reactivated_count?: number
   already_active_count?: number
+  created_count?: number
+  credentials?: Array<{ student_number: string; temporary_password: string }>
+}
+
+type AvailableStudent = {
+  id: number
+  display_name: string
+  student_number: string
+  section: string
+  year_level: number | null
+  enrollment_status: 'not_enrolled' | 'inactive'
 }
 
 type RosterApiItem = ScheduleStudent & {
@@ -369,6 +384,8 @@ function ScheduleForm({
   const [draft, setDraft] = useState(() => scheduleDraft(selectedSchedule, defaultTermId))
   const [changingStatus, setChangingStatus] = useState(false)
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
+  const [showSubjectDialog, setShowSubjectDialog] = useState(false)
+  const [showTermDialog, setShowTermDialog] = useState(false)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const subjectOptions = toOptions(
@@ -471,44 +488,70 @@ function ScheduleForm({
         ) : null}
       </div>
 
-      <label className="admin-field">
-        <span>Subject</span>
-        <select
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, subject: event.target.value }))
-          }
-          required
-          value={draft.subject}
-        >
-          <option value="">Select subject</option>
-          {subjectOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="admin-field">
+        <label htmlFor="schedule-subject">Subject</label>
+        <div className="class-setup-select">
+          <select
+            id="schedule-subject"
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, subject: event.target.value }))
+            }
+            required
+            value={draft.subject}
+          >
+            <option value="">Select subject</option>
+            {subjectOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            aria-label="Create subject"
+            className="button button--secondary class-setup-select__add"
+            disabled={changingStatus || saving}
+            onClick={() => setShowSubjectDialog(true)}
+            title="Create subject"
+            type="button"
+          >
+            <Icon name="plus" />
+          </button>
+        </div>
+      </div>
 
-      <label className="admin-field">
-        <span>Term</span>
-        <select
-          onChange={(event) =>
-            setDraft((current) => ({
-              ...current,
-              school_year_semester: event.target.value,
-            }))
-          }
-          required
-          value={draft.school_year_semester}
-        >
-          <option value="">Select term</option>
-          {termOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="admin-field">
+        <label htmlFor="schedule-term">Term</label>
+        <div className="class-setup-select">
+          <select
+            id="schedule-term"
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                school_year_semester: event.target.value,
+              }))
+            }
+            required
+            value={draft.school_year_semester}
+          >
+            <option value="">Select term</option>
+            {termOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            aria-label="Manage terms"
+            className="button button--secondary class-setup-select__add"
+            disabled={changingStatus || saving}
+            onClick={() => setShowTermDialog(true)}
+            title="Manage terms"
+            type="button"
+          >
+            <Icon name="plus" />
+          </button>
+        </div>
+      </div>
 
       <div className="class-form__split">
         <label className="admin-field">
@@ -634,6 +677,30 @@ function ScheduleForm({
         title="Archive this class?"
       />
     ) : null}
+    {showSubjectDialog ? (
+      <SubjectCreateDialog
+        api={api}
+        refresh={refresh}
+        onClose={() => setShowSubjectDialog(false)}
+        onCreated={(subjectId) => {
+          setDraft((current) => ({ ...current, subject: String(subjectId) }))
+          setMessage('Subject created and selected.')
+        }}
+      />
+    ) : null}
+    {showTermDialog ? (
+      <TermManagementDialog
+        api={api}
+        refresh={refresh}
+        schoolYears={data.schoolYears}
+        terms={data.terms}
+        onClose={() => setShowTermDialog(false)}
+        onSelectTerm={(termId) => {
+          setDraft((current) => ({ ...current, school_year_semester: String(termId) }))
+          setMessage('Term selected for this schedule.')
+        }}
+      />
+    ) : null}
     </>
   )
 }
@@ -653,10 +720,13 @@ function ClassRoster({
   const queryClient = useQueryClient()
   const [isAdding, setIsAdding] = useState(false)
   const [isAttendanceOpen, setIsAttendanceOpen] = useState(false)
+  const [isScoresOpen, setIsScoresOpen] = useState(false)
+  const scoresButtonRef = useRef<HTMLButtonElement>(null)
+  const rosterLoadMoreRef = useRef<HTMLDivElement>(null)
   const [rosterQuery, setRosterQuery] = useState('')
-  const [rosterStatus, setRosterStatus] = useState<'active' | 'inactive' | 'all'>('active')
-  const [bulkSaving, setBulkSaving] = useState(false)
+  const [rosterStatus, setRosterStatus] = useState<'active' | 'inactive'>('active')
   const [rosterMessage, setRosterMessage] = useState('')
+  const [exportingRoster, setExportingRoster] = useState(false)
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
   const localRoster = selectedSchedule
@@ -664,28 +734,41 @@ function ClassRoster({
         (enrollment) => enrollment.schedule === selectedSchedule.id,
       )
     : []
-  const rosterPageQuery = useQuery({
+  const normalizedRosterQuery = rosterQuery.trim()
+  const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, data))
+  const localFilteredRows = filterRosterRows(localRosterRows, normalizedRosterQuery, rosterStatus)
+  const rosterPageQuery = useInfiniteQuery({
     enabled: Boolean(selectedSchedule),
-    queryKey: ['class-roster', selectedSchedule?.id, rosterQuery, rosterStatus],
-    queryFn: () => {
-      const params = new URLSearchParams({ limit: '100', status: rosterStatus })
-      if (rosterQuery.trim()) params.set('search', rosterQuery.trim())
-      return api<RosterApiPage>(
-        `/subjects/subject-schedules/${selectedSchedule!.id}/roster/?${params.toString()}`,
-      )
-    },
+    initialPageParam: 0,
+    queryKey: ['class-roster', selectedSchedule?.id, normalizedRosterQuery, rosterStatus],
+    queryFn: ({ pageParam, signal }) => api<RosterApiPage>(
+      buildRosterPath(
+        selectedSchedule!.id,
+        rosterStatus,
+        normalizedRosterQuery,
+        ROSTER_PAGE_SIZE,
+        pageParam,
+      ),
+      { signal },
+    ),
+    getNextPageParam: (lastPage) => lastPage.next ?? undefined,
   })
-  const rosterRows = rosterPageQuery.data
-    ? rosterPageQuery.data.results.map(apiRosterRow)
-    : localRoster.map((enrollment) => getRosterRow(enrollment, data))
+  const {
+    fetchNextPage: fetchNextRosterPage,
+    hasNextPage: hasNextRosterPage,
+    isFetchingNextPage: isFetchingNextRosterPage,
+    isFetchNextPageError: isNextRosterPageError,
+  } = rosterPageQuery
+  const firstRosterPage = rosterPageQuery.data?.pages[0]
   const visibleRows = rosterPageQuery.data
-    ? rosterRows
-    : filterRosterRows(rosterRows, rosterQuery, rosterStatus)
-  const activeCount = rosterPageQuery.data?.active_count
+    ? rosterPageQuery.data.pages.flatMap((page) => page.results.map(apiRosterRow))
+    : localFilteredRows.slice(0, ROSTER_PAGE_SIZE)
+  const filteredCount = firstRosterPage?.count ?? localFilteredRows.length
+  const activeCount = firstRosterPage?.active_count
     ?? localRoster.filter((enrollment) => enrollment.is_active).length
-  const inactiveCount = rosterPageQuery.data?.inactive_count
+  const inactiveCount = firstRosterPage?.inactive_count
     ?? localRoster.length - activeCount
-  const totalCount = rosterPageQuery.data?.total_count ?? localRoster.length
+  const totalCount = firstRosterPage?.total_count ?? localRoster.length
   const refreshClassRoster = useCallback(async () => {
     await refresh()
     await queryClient.invalidateQueries({
@@ -693,29 +776,50 @@ function ClassRoster({
     })
   }, [queryClient, refresh, selectedSchedule?.id])
 
-  async function updateVisibleEnrollmentStatus(isActive: boolean) {
-    if (!selectedSchedule || !visibleRows.length) return
-    setBulkSaving(true)
-    setRosterMessage('')
+  useEffect(() => {
+    const target = rosterLoadMoreRef.current
+    if (!target || !hasNextRosterPage || isNextRosterPageError) return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (
+        entries[0]?.isIntersecting
+        && hasNextRosterPage
+        && !isFetchingNextRosterPage
+      ) {
+        void fetchNextRosterPage()
+      }
+    }, { rootMargin: '0px 0px 160px' })
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [
+    fetchNextRosterPage,
+    hasNextRosterPage,
+    isFetchingNextRosterPage,
+    isNextRosterPageError,
+  ])
+
+  async function exportFilteredRoster() {
+    if (!selectedSchedule || exportingRoster) return
+
+    setExportingRoster(true)
+    setRosterMessage('Preparing the complete filtered roster CSV...')
     try {
-      const result = await api<{ changed_count: number }>(
-        `/subjects/subject-schedules/${selectedSchedule.id}/update-enrollments/`,
-        {
-          body: JSON.stringify({
-            enrollment_ids: visibleRows.map((row) => row.enrollment.id),
-            is_active: isActive,
-          }),
-          method: 'POST',
-        },
+      const rows = await fetchCompleteRoster(
+        api,
+        selectedSchedule.id,
+        rosterStatus,
+        normalizedRosterQuery,
       )
-      setRosterMessage(`${result.changed_count} enrollment${result.changed_count === 1 ? '' : 's'} updated.`)
-      await refreshClassRoster()
+      exportRosterCsv(selectedSchedule, rows)
+      setRosterMessage(`Exported ${rows.length} student${rows.length === 1 ? '' : 's'}.`)
     } catch (caughtError) {
-      setRosterMessage(toErrorMessage(caughtError))
+      setRosterMessage(`Roster export failed: ${toErrorMessage(caughtError)}`)
     } finally {
-      setBulkSaving(false)
+      setExportingRoster(false)
     }
   }
+
   const classModules = selectedSchedule
     ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
@@ -743,6 +847,16 @@ function ClassRoster({
             </button>
             <button
               className="button button--secondary"
+              disabled={!selectedSchedule?.is_active || !activeCount}
+              onClick={() => setIsScoresOpen(true)}
+              ref={scoresButtonRef}
+              type="button"
+            >
+              <Icon name="grade" />
+              <span>Scores</span>
+            </button>
+            <button
+              className="button button--secondary"
               disabled={!selectedSchedule}
               onClick={() => setIsAdding(true)}
               type="button"
@@ -752,12 +866,10 @@ function ClassRoster({
             </button>
             <RosterActionsMenu
               attendanceReportsTo={selectedSchedule ? `/admin/attendance?schedule=${selectedSchedule.id}` : null}
-              exportDisabled={!selectedSchedule || !visibleRows.length}
+              exportDisabled={!selectedSchedule || !filteredCount || exportingRoster}
               gradebookTo={selectedSchedule ? gradebookUrl(selectedSchedule.id) : null}
               moduleProgressTo={moduleProgressUrl}
-              onExport={() => {
-                if (selectedSchedule) exportRosterCsv(selectedSchedule, visibleRows)
-              }}
+              onExport={() => void exportFilteredRoster()}
             />
           </div>
         }
@@ -767,48 +879,27 @@ function ClassRoster({
 
       {selectedSchedule ? (
         <div className="class-roster-tools">
-          <div className="class-roster-summary">
-            <span>
-              <strong>{activeCount}</strong>
-              Active students
-            </span>
-            <span>
-              <strong>{inactiveCount}</strong>
-              Inactive students
-            </span>
-          </div>
-          <label className="admin-field class-roster-status-filter">
-            <span>Roster status</span>
-            <select
-              onChange={(event) => setRosterStatus(event.target.value as 'active' | 'inactive' | 'all')}
-              value={rosterStatus}
+          <div aria-label="Filter roster by status" className="class-roster-summary" role="group">
+            <button
+              aria-pressed={rosterStatus === 'active'}
+              className={`class-roster-summary__item class-roster-summary__item--active${rosterStatus === 'active' ? ' is-selected' : ''}`}
+              onClick={() => setRosterStatus('active')}
+              type="button"
             >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="all">All students</option>
-            </select>
-          </label>
-          <div className="class-roster-bulk-actions">
-            {rosterStatus !== 'active' ? (
-              <button
-                className="button button--secondary button--compact"
-                disabled={bulkSaving || !visibleRows.length}
-                onClick={() => void updateVisibleEnrollmentStatus(true)}
-                type="button"
-              >
-                Activate shown
-              </button>
-            ) : null}
-            {rosterStatus !== 'inactive' ? (
-              <button
-                className="button button--secondary button--compact"
-                disabled={bulkSaving || !visibleRows.length}
-                onClick={() => void updateVisibleEnrollmentStatus(false)}
-                type="button"
-              >
-                Deactivate shown
-              </button>
-            ) : null}
+              <Icon name="check" />
+              <strong>{activeCount}</strong>
+              <small>Active</small>
+            </button>
+            <button
+              aria-pressed={rosterStatus === 'inactive'}
+              className={`class-roster-summary__item class-roster-summary__item--inactive${rosterStatus === 'inactive' ? ' is-selected' : ''}`}
+              onClick={() => setRosterStatus('inactive')}
+              type="button"
+            >
+              <Icon name="minus" />
+              <strong>{inactiveCount}</strong>
+              <small>Inactive</small>
+            </button>
           </div>
           <label className="admin-search class-roster-search">
             <Icon name="search" />
@@ -822,11 +913,34 @@ function ClassRoster({
         </div>
       ) : null}
 
-      {rosterMessage ? (
-        <p aria-live="polite" className="admin-message">{rosterMessage}</p>
+      {rosterMessage ? <p aria-live="polite" className="admin-message">{rosterMessage}</p> : null}
+      {rosterPageQuery.isError && !rosterPageQuery.data ? (
+        <div className="class-roster-feedback" role="alert">
+          <span>{toErrorMessage(rosterPageQuery.error)}</span>
+          <button
+            className="button button--secondary button--compact"
+            onClick={() => void rosterPageQuery.refetch()}
+            type="button"
+          >
+            Retry roster
+          </button>
+        </div>
       ) : null}
 
-      <div className="table-wrap">
+      <div
+        className="table-wrap class-roster-scroll"
+        onScroll={(event) => {
+          const target = event.currentTarget
+          if (
+            target.scrollTop + target.clientHeight >= target.scrollHeight - 160
+            && hasNextRosterPage
+            && !isFetchingNextRosterPage
+            && !isNextRosterPageError
+          ) {
+            void fetchNextRosterPage()
+          }
+        }}
+      >
         <table className="admin-table class-roster-table">
           <thead>
             <tr>
@@ -859,24 +973,60 @@ function ClassRoster({
                 <td colSpan={10}>Select a class to view and manage enrolled students.</td>
               </tr>
             ) : null}
-            {selectedSchedule && !totalCount ? (
+            {selectedSchedule && rosterPageQuery.isPending && !visibleRows.length ? (
+              <tr>
+                <td colSpan={10}>Loading roster...</td>
+              </tr>
+            ) : null}
+            {selectedSchedule && !rosterPageQuery.isPending && !totalCount ? (
               <tr>
                 <td colSpan={10}>No active students in this class yet. Add students to build the roster.</td>
               </tr>
             ) : null}
-            {selectedSchedule && totalCount && !visibleRows.length ? (
+            {selectedSchedule && !rosterPageQuery.isPending && totalCount && !visibleRows.length ? (
               <tr>
-                <td colSpan={10}>No roster matches found for this search.</td>
+                <td colSpan={10}>
+                  {rosterQuery.trim()
+                    ? 'No roster matches found for this search.'
+                    : rosterStatus === 'inactive'
+                      ? 'No inactive students in this class.'
+                      : 'No active students in this class yet. Add students to build the roster.'}
+                </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        {selectedSchedule && visibleRows.length ? (
+          <div className="class-roster-pagination" ref={rosterLoadMoreRef}>
+            <span aria-live="polite">
+              Showing {visibleRows.length} of {filteredCount} student{filteredCount === 1 ? '' : 's'}
+            </span>
+            {hasNextRosterPage && !isNextRosterPageError ? (
+              <button
+                className="button button--secondary button--compact"
+                disabled={isFetchingNextRosterPage}
+                onClick={() => void fetchNextRosterPage()}
+                type="button"
+              >
+                {isFetchingNextRosterPage ? 'Loading more...' : 'Load more'}
+              </button>
+            ) : null}
+            {isNextRosterPageError ? (
+              <button
+                className="button button--secondary button--compact"
+                onClick={() => void fetchNextRosterPage()}
+                type="button"
+              >
+                Retry loading more
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {selectedSchedule && isAdding ? (
         <AddStudentsModal
           api={api}
-          data={data}
           refresh={refreshClassRoster}
           schedule={selectedSchedule}
           onClose={() => setIsAdding(false)}
@@ -892,6 +1042,20 @@ function ClassRoster({
           refresh={refreshClassRoster}
           schedule={selectedSchedule}
           onClose={() => setIsAttendanceOpen(false)}
+        />
+      ) : null}
+
+      {selectedSchedule && isScoresOpen ? (
+        <ClassScoresDialog
+          api={api}
+          data={data}
+          key={selectedSchedule.id}
+          refresh={refreshClassRoster}
+          schedule={selectedSchedule}
+          onClose={() => {
+            setIsScoresOpen(false)
+            window.requestAnimationFrame(() => scoresButtonRef.current?.focus())
+          }}
         />
       ) : null}
 
@@ -1456,31 +1620,36 @@ function GradeSummaryItem({ label, value }: { label: string; value: string }) {
 
 function AddStudentsModal({
   api,
-  data,
   onClose,
   refresh,
   schedule,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
   onClose: () => void
   refresh: () => Promise<void>
   schedule: SubjectSchedule
 }) {
+  const [activeTab, setActiveTab] = useState<'choose' | 'import'>('choose')
   const [query, setQuery] = useState('')
   const [importRows, setImportRows] = useState<StudentImportRow[]>([])
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
-  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [newCredentials, setNewCredentials] = useState<Array<{ student_number: string; temporary_password: string }>>([])
+  const [selectedStudents, setSelectedStudents] = useState<AvailableStudent[]>([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-  const [students, setStudents] = useState<User[]>([])
+  const [students, setStudents] = useState<AvailableStudent[]>([])
   const [studentCount, setStudentCount] = useState(0)
-  const [nextStudentOffset, setNextStudentOffset] = useState<number | null>(0)
+  const [activeOptionIndex, setActiveOptionIndex] = useState(-1)
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [studentError, setStudentError] = useState('')
   const dialogRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const hasMoreStudents = nextStudentOffset !== null
+  const selectedIds = selectedStudents.map((student) => student.id)
+  const normalizedQuery = query.trim()
+  const suggestions = students.filter(
+    (student) => !selectedStudents.some((selected) => selected.id === student.id),
+  )
+  const showSuggestions = activeTab === 'choose' && normalizedQuery.length >= 2
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null
@@ -1499,7 +1668,7 @@ function AddStudentsModal({
       dialogRef.current?.querySelectorAll<HTMLElement>(
         'button:not(:disabled), input:not(:disabled), select:not(:disabled), [href]',
       ) ?? [],
-    )
+    ).filter((element) => !element.closest('[hidden]'))
     if (!focusable.length) return
     const first = focusable[0]
     const last = focusable[focusable.length - 1]
@@ -1512,29 +1681,19 @@ function AddStudentsModal({
     }
   }
 
-  const loadAvailableStudents = useCallback(async function loadAvailableStudents({
-    offset,
-    reset,
-    signal,
-  }: {
-    offset: number
-    reset: boolean
-    signal?: AbortSignal
-  }) {
+  const loadAvailableStudents = useCallback(async function loadAvailableStudents(signal?: AbortSignal) {
     setLoadingStudents(true)
     setStudentError('')
 
     try {
-      const page = await api<ApiPage<User>>(
-        buildAvailableStudentsPath(schedule.id, query, offset),
+      const page = await api<ApiPage<AvailableStudent>>(
+        buildAvailableStudentsPath(schedule.id, query),
         { signal },
       )
 
-      setStudents((current) =>
-        reset ? page.results : mergeStudents(current, page.results),
-      )
+      setStudents(page.results)
       setStudentCount(page.count)
-      setNextStudentOffset(page.next)
+      setActiveOptionIndex(page.results.length ? 0 : -1)
     } catch (caughtError) {
       if (!isAbortError(caughtError)) {
         setStudentError(toErrorMessage(caughtError))
@@ -1545,20 +1704,71 @@ function AddStudentsModal({
   }, [api, query, schedule.id])
 
   useEffect(() => {
+    if (activeTab !== 'choose' || normalizedQuery.length < 2) {
+      return
+    }
+
     const controller = new AbortController()
     const timeout = window.setTimeout(() => {
-      void loadAvailableStudents({
-        offset: 0,
-        reset: true,
-        signal: controller.signal,
-      })
+      void loadAvailableStudents(controller.signal)
     }, 250)
 
     return () => {
       controller.abort()
       window.clearTimeout(timeout)
     }
-  }, [data.enrollments, loadAvailableStudents])
+  }, [activeTab, loadAvailableStudents, normalizedQuery.length])
+
+  function selectStudent(student: AvailableStudent) {
+    setSelectedStudents((current) =>
+      current.some((selected) => selected.id === student.id) ? current : [...current, student],
+    )
+    setQuery('')
+    setStudents([])
+    setStudentCount(0)
+    setActiveOptionIndex(-1)
+    searchInputRef.current?.focus()
+  }
+
+  function selectTab(tab: 'choose' | 'import', focusTab = false) {
+    setActiveTab(tab)
+    if (focusTab) {
+      window.setTimeout(() => document.getElementById(`${tab}-students-tab`)?.focus(), 0)
+    } else if (tab === 'choose') {
+      window.setTimeout(() => searchInputRef.current?.focus(), 0)
+    }
+  }
+
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const nextTab = event.key === 'ArrowLeft' || event.key === 'Home' ? 'choose' : 'import'
+    selectTab(nextTab, true)
+  }
+
+  function handleComboboxKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape' && showSuggestions) {
+      event.preventDefault()
+      event.stopPropagation()
+      setQuery('')
+      setStudents([])
+      setActiveOptionIndex(-1)
+      return
+    }
+    if (!suggestions.length) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveOptionIndex((current) => (current + 1) % suggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveOptionIndex((current) => (current <= 0 ? suggestions.length - 1 : current - 1))
+    } else if (event.key === 'Enter' && activeOptionIndex >= 0) {
+      event.preventDefault()
+      selectStudent(suggestions[activeOptionIndex])
+    } else if (event.key === 'Tab') {
+      setActiveOptionIndex(-1)
+    }
+  }
 
   async function addStudents() {
     setSaving(true)
@@ -1576,9 +1786,9 @@ function AddStudentsModal({
       setMessage(
         `${result.added_count} added, ${result.reactivated_count} reactivated, ${result.already_active_count} already active.`,
       )
-      setSelectedIds([])
+      setSelectedStudents([])
+      setQuery('')
       await refresh()
-      await loadAvailableStudents({ offset: 0, reset: true })
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -1599,16 +1809,17 @@ function AddStudentsModal({
         `/subjects/subject-schedules/${schedule.id}/import-roster/`,
         {
           body: JSON.stringify({
-            rows: importRows.map((row) => ({ student_number: row.studentNumber })),
+            rows: importRows.map(importRowPayload),
           }),
           method: 'POST',
         },
       )
 
-      setImportRows([])
-      setImportPreview(null)
+      const credentials = result.credentials ?? []
+      setNewCredentials(credentials)
+      if (credentials.length) downloadNewStudentCredentials(credentials)
       setMessage(
-        `${result.added_count ?? 0} added, ${result.reactivated_count ?? 0} reactivated, ${result.already_active_count ?? 0} already active.`,
+        `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
       )
       await refresh()
     } catch (caughtError) {
@@ -1631,13 +1842,14 @@ function AddStudentsModal({
         {
           body: JSON.stringify({
             dry_run: true,
-            rows: rows.map((row) => ({ student_number: row.studentNumber })),
+            rows: rows.map(importRowPayload),
           }),
           method: 'POST',
         },
       )
       setImportRows(rows)
       setImportPreview(preview)
+      setNewCredentials([])
       setMessage(
         preview.valid
           ? `${preview.ready_count} student${preview.ready_count === 1 ? '' : 's'} ready to import.`
@@ -1675,115 +1887,213 @@ function AddStudentsModal({
           </button>
         </div>
 
-        <label className="admin-field">
-          <span>Search students</span>
-          <input
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Name or username"
-            ref={searchInputRef}
-            type="search"
-            value={query}
-          />
-        </label>
-
-        <div className="class-import-panel">
-          <div>
-            <strong>Import roster</strong>
-            <span>
-              Existing accounts are matched by student_number. Other CSV columns are ignored.
-            </span>
-          </div>
-          <label className="admin-field">
-            <span>Student list CSV</span>
-            <input
-              accept=".csv,text/csv,text/plain"
-              onChange={(event) => void readImportFile(event.target.files?.[0] ?? null)}
-              type="file"
-            />
-          </label>
-          {importRows.length ? (
-            <button
-              className="button button--secondary"
-              disabled={saving || !importPreview?.valid}
-              onClick={() => void importStudents()}
-              type="button"
-            >
-              <Icon name="upload" />
-              <span>
-                {saving ? 'Importing...' : `Import ${importRows.length} students`}
-              </span>
-            </button>
-          ) : null}
+        <div aria-label="Add students method" className="student-picker-tabs" role="tablist">
+          <button
+            aria-controls="choose-students-panel"
+            aria-selected={activeTab === 'choose'}
+            className={activeTab === 'choose' ? 'is-active' : ''}
+            id="choose-students-tab"
+            onClick={() => selectTab('choose')}
+            onKeyDown={handleTabKeyDown}
+            role="tab"
+            type="button"
+          >
+            <Icon name="users" />
+            <span>Choose students</span>
+          </button>
+          <button
+            aria-controls="import-students-panel"
+            aria-selected={activeTab === 'import'}
+            className={activeTab === 'import' ? 'is-active' : ''}
+            id="import-students-tab"
+            onClick={() => selectTab('import')}
+            onKeyDown={handleTabKeyDown}
+            role="tab"
+            type="button"
+          >
+            <Icon name="upload" />
+            <span>Import CSV</span>
+          </button>
         </div>
 
-        {importPreview ? (
-          <div className="class-import-preview" aria-label="Roster import preview">
-            <strong>
-              {importPreview.ready_count} of {importPreview.row_count} rows ready
-            </strong>
-            {importPreview.rows.some((row) => row.status === 'error') ? (
+        <div
+          aria-labelledby="choose-students-tab"
+          className="student-picker-panel"
+          hidden={activeTab !== 'choose'}
+          id="choose-students-panel"
+          role="tabpanel"
+        >
+          <div className="student-combobox">
+            <label className="admin-field" htmlFor="student-picker-search">
+              <span>Find a student</span>
+            </label>
+            <div className="student-combobox__input">
+              <Icon name="search" />
+              <input
+                aria-activedescendant={activeOptionIndex >= 0 ? `student-option-${suggestions[activeOptionIndex]?.id}` : undefined}
+                aria-autocomplete="list"
+                aria-controls="available-students-listbox"
+                aria-expanded={showSuggestions}
+                autoComplete="off"
+                id="student-picker-search"
+                onChange={(event) => {
+                  const nextQuery = event.target.value
+                  setQuery(nextQuery)
+                  setActiveOptionIndex(-1)
+                  if (nextQuery.trim().length < 2) {
+                    setStudents([])
+                    setStudentCount(0)
+                    setStudentError('')
+                  }
+                }}
+                onKeyDown={handleComboboxKeyDown}
+                placeholder="Search by name or student number"
+                ref={searchInputRef}
+                role="combobox"
+                type="search"
+                value={query}
+              />
+            </div>
+            {showSuggestions ? (
+              <div className="student-combobox__results" id="available-students-listbox" role="listbox">
+                {loadingStudents ? <p>Searching students...</p> : null}
+                {!loadingStudents && studentError ? <p role="alert">{studentError}</p> : null}
+                {!loadingStudents && !studentError && suggestions.map((student, index) => (
+                  <button
+                    aria-selected={index === activeOptionIndex}
+                    className={index === activeOptionIndex ? 'is-highlighted' : ''}
+                    id={`student-option-${student.id}`}
+                    key={student.id}
+                    onClick={() => selectStudent(student)}
+                    onMouseEnter={() => setActiveOptionIndex(index)}
+                    role="option"
+                    type="button"
+                  >
+                    <span>
+                      <strong>{student.display_name}</strong>
+                      <small>
+                        {student.student_number || 'No student number'}
+                        {student.section ? ` · Section ${student.section}` : ''}
+                      </small>
+                    </span>
+                    {student.enrollment_status === 'inactive' ? <em>Will reactivate</em> : null}
+                  </button>
+                ))}
+                {!loadingStudents && !studentError && !suggestions.length ? (
+                  <p>No available students found.</p>
+                ) : null}
+                {!loadingStudents && studentCount > AVAILABLE_STUDENT_LIMIT ? (
+                  <small className="student-combobox__refine">More students found—refine your search.</small>
+                ) : null}
+              </div>
+            ) : (
+              <small className="student-picker-hint">Enter at least two characters to search existing student accounts.</small>
+            )}
+          </div>
+
+          <section aria-label="Selected students" className="student-picker-selection">
+            <div className="student-picker-selection__heading">
+              <strong>Selected ({selectedStudents.length})</strong>
+              {selectedStudents.length ? (
+                <button onClick={() => setSelectedStudents([])} type="button">Clear all</button>
+              ) : null}
+            </div>
+            {selectedStudents.length ? (
               <ul>
-                {importPreview.rows.filter((row) => row.status === 'error').map((row) => (
-                  <li key={`${row.row}-${row.student_number ?? 'missing'}`}>
-                    Row {row.row}{row.student_number ? ` (${row.student_number})` : ''}: {row.error}
+                {selectedStudents.map((student) => (
+                  <li key={student.id}>
+                    <span>
+                      <strong>{student.display_name}</strong>
+                      <small>{student.student_number || 'No student number'}</small>
+                    </span>
+                    <button
+                      aria-label={`Remove ${student.display_name}`}
+                      onClick={() => setSelectedStudents((current) => current.filter((item) => item.id !== student.id))}
+                      type="button"
+                    >
+                      <Icon name="close" />
+                    </button>
                   </li>
                 ))}
               </ul>
-            ) : null}
-          </div>
-        ) : null}
-
-        {studentError ? <p className="admin-message">{studentError}</p> : null}
-
-        <div className="student-picker-list">
-          {loadingStudents && !students.length ? (
-            <p className="admin-empty-line">Loading students...</p>
-          ) : null}
-          {students.map((student) => (
-            <label className="student-picker-list__item" key={student.id}>
-              <input
-                checked={selectedIds.includes(student.id)}
-                onChange={(event) =>
-                  setSelectedIds((current) =>
-                    event.target.checked
-                      ? [...current, student.id]
-                      : current.filter((id) => id !== student.id),
-                  )
-                }
-                type="checkbox"
-              />
-              <span>
-                <strong>{fullName(student)}</strong>
-                <small>{student.username}</small>
-              </span>
-            </label>
-          ))}
-          {!loadingStudents && !students.length ? (
-            <p className="admin-empty-line">No available students found.</p>
-          ) : null}
+            ) : (
+              <p>No students selected yet.</p>
+            )}
+          </section>
         </div>
 
-        <div className="student-picker-footer">
-          <span>
-            {studentCount
-              ? `${students.length} of ${studentCount} available students shown`
-              : 'No available students shown'}
-          </span>
-          {hasMoreStudents ? (
-            <button
-              className="button button--secondary"
-              disabled={loadingStudents || saving}
-              onClick={() =>
-                void loadAvailableStudents({
-                  offset: nextStudentOffset,
-                  reset: false,
-                })
-              }
-              type="button"
-            >
-              <Icon name="plus" />
-              <span>{loadingStudents ? 'Loading...' : 'Load more'}</span>
-            </button>
+        <div
+          aria-labelledby="import-students-tab"
+          className="student-picker-panel"
+          hidden={activeTab !== 'import'}
+          id="import-students-panel"
+          role="tabpanel"
+        >
+          <div className="class-import-panel">
+            <div className="class-import-panel__heading">
+              <div>
+                <strong>Import roster</strong>
+                <span>Use Student Number, Last Name, First Name, and Middle Name. Other columns are ignored.</span>
+              </div>
+              <button
+                className="button button--secondary button--compact"
+                onClick={downloadRosterImportTemplate}
+                type="button"
+              >
+                <Icon name="file" />
+                <span>Download CSV template</span>
+              </button>
+            </div>
+            <label className="admin-field">
+              <span>Student list CSV</span>
+              <input
+                accept=".csv,text/csv,text/plain"
+                onChange={(event) => void readImportFile(event.target.files?.[0] ?? null)}
+                type="file"
+              />
+            </label>
+            {importRows.length ? (
+              <button
+                className="button button--secondary"
+                disabled={saving || !importPreview?.valid}
+                onClick={() => void importStudents()}
+                type="button"
+              >
+                <Icon name="upload" />
+                <span>{saving ? 'Importing...' : `Import ${importRows.length} students`}</span>
+              </button>
+            ) : null}
+          </div>
+
+          {importPreview ? (
+            <div className="class-import-preview" aria-label="Roster import preview">
+              <strong>{importPreview.ready_count} of {importPreview.row_count} rows ready</strong>
+              <span>
+                {importPreview.create_count ?? 0} create · {importPreview.enroll_count ?? 0} enroll · {importPreview.reactivate_count ?? 0} reactivate · {importPreview.already_active_count ?? 0} already enrolled
+              </span>
+              <ul>
+                {importPreview.rows.map((row) => (
+                  <li className={row.status === 'error' ? 'is-error' : ''} key={`${row.row}-${row.student_number ?? 'missing'}`}>
+                    Row {row.row}{row.student_number ? ` (${row.student_number})` : ''}: {row.error ?? importStatusLabel(row.status)}
+                    {!row.error && row.student_name ? ` - ${row.student_name}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {newCredentials.length ? (
+            <div className="class-import-credentials" role="status">
+              <strong>Save the new student credentials now</strong>
+              <span>They are available only in this dialog and cannot be recovered from the server.</span>
+              <button
+                className="button button--secondary"
+                onClick={() => downloadNewStudentCredentials(newCredentials)}
+                type="button"
+              >
+                <Icon name="file" />
+                <span>Download credentials again</span>
+              </button>
+            </div>
           ) : null}
         </div>
 
@@ -1793,15 +2103,17 @@ function AddStudentsModal({
           <button className="button button--secondary" onClick={onClose} type="button">
             Cancel
           </button>
-          <button
-            className="button button--primary"
-            disabled={saving || !selectedIds.length}
-            onClick={() => void addStudents()}
-            type="button"
-          >
-            <Icon name="save" />
-            <span>{saving ? 'Adding...' : `Add ${selectedIds.length}`}</span>
-          </button>
+          {activeTab === 'choose' ? (
+            <button
+              className="button button--primary"
+              disabled={saving || !selectedIds.length}
+              onClick={() => void addStudents()}
+              type="button"
+            >
+              <Icon name="save" />
+              <span>{saving ? 'Adding...' : `Add ${selectedIds.length}`}</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -2020,11 +2332,9 @@ function formatClassDays(value: string) {
 function buildAvailableStudentsPath(
   scheduleId: number,
   query: string,
-  offset: number,
 ) {
   const params = new URLSearchParams({
-    limit: String(STUDENT_PAGE_SIZE),
-    offset: String(offset),
+    limit: String(AVAILABLE_STUDENT_LIMIT),
     schedule: String(scheduleId),
   })
   const normalizedQuery = query.trim()
@@ -2034,21 +2344,6 @@ function buildAvailableStudentsPath(
   }
 
   return `/accounts/users/available_students/?${params.toString()}`
-}
-
-function mergeStudents(current: User[], incoming: User[]) {
-  const seen = new Set(current.map((student) => student.id))
-  return [
-    ...current,
-    ...incoming.filter((student) => {
-      if (seen.has(student.id)) {
-        return false
-      }
-
-      seen.add(student.id)
-      return true
-    }),
-  ]
 }
 
 function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterRowData {
@@ -2142,14 +2437,12 @@ function hasAnyPeriodGrade(grades: PrimaryGradeSummary) {
 function filterRosterRows(
   rows: RosterRowData[],
   query: string,
-  status: 'active' | 'inactive' | 'all',
+  status: 'active' | 'inactive',
 ) {
   const normalizedQuery = query.trim().toLowerCase()
-  const statusRows = status === 'all'
-    ? rows
-    : rows.filter((row) =>
-        status === 'active' ? row.enrollment.is_active : !row.enrollment.is_active,
-      )
+  const statusRows = rows.filter((row) =>
+    status === 'active' ? row.enrollment.is_active : !row.enrollment.is_active,
+  )
 
   if (!normalizedQuery) {
     return statusRows
@@ -2290,30 +2583,101 @@ function parseStudentImport(text: string): StudentImportRow[] {
     }
 
     return {
-      email: getCell('email', 3),
-      firstName: getCell('first_name', 1),
-      lastName: getCell('last_name', 2),
-      section: getCell('section', 4),
+      firstName: cleanImportedPersonName(getCell('first_name', 2)),
+      lastName: cleanImportedPersonName(getCell('last_name', 1)),
+      middleName: cleanImportedPersonName(getCell('middle_name', 3)),
       studentNumber,
-      username: getCell('username', 6),
-      yearLevel: parseOptionalNumber(getCell('year_level', 5)),
     }
   })
 
   return parsedRows
 }
 
-function normalizeImportHeader(value: string) {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+function downloadRosterImportTemplate() {
+  const blob = new Blob(['Student Number,Last Name,First Name,Middle Name\r\n'], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'student-roster-template.csv'
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
-function parseOptionalNumber(value: string) {
-  if (!value) {
-    return null
+function buildRosterPath(
+  scheduleId: number,
+  status: 'active' | 'inactive',
+  query: string,
+  limit: number,
+  offset: number,
+) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    status,
+  })
+  if (query) params.set('search', query)
+  return `/subjects/subject-schedules/${scheduleId}/roster/?${params.toString()}`
+}
+
+async function fetchCompleteRoster(
+  api: AuthedRequest,
+  scheduleId: number,
+  status: 'active' | 'inactive',
+  query: string,
+) {
+  const results: RosterApiItem[] = []
+  let offset: number | null = 0
+
+  while (offset !== null) {
+    const page: RosterApiPage = await api<RosterApiPage>(buildRosterPath(
+      scheduleId,
+      status,
+      query,
+      ROSTER_EXPORT_PAGE_SIZE,
+      offset,
+    ))
+    results.push(...page.results)
+    offset = page.next
   }
 
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
+  return results.map(apiRosterRow)
+}
+
+function importRowPayload(row: StudentImportRow) {
+  return {
+    first_name: row.firstName,
+    last_name: row.lastName,
+    middle_name: row.middleName,
+    student_number: row.studentNumber,
+  }
+}
+
+function importStatusLabel(status: ImportPreview['rows'][number]['status']) {
+  return {
+    already_enrolled: 'Already enrolled',
+    create: 'Create account',
+    enroll: 'Enroll',
+    error: 'Error',
+    reactivate: 'Reactivate',
+  }[status]
+}
+
+function downloadNewStudentCredentials(credentials: Array<{ student_number: string; temporary_password: string }>) {
+  const csv = [
+    ['student_number', 'temporary_password'],
+    ...credentials.map((credential) => [credential.student_number, credential.temporary_password]),
+  ].map((row) => row.map(csvEscape).join(',')).join('\r\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'new-student-credentials.csv'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function normalizeImportHeader(value: string) {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
 
 function parseCsvRows(text: string) {

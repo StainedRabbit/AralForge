@@ -17,15 +17,10 @@ logger = logging.getLogger(__name__)
 
 LESSON_SECTION_FIELDS = (
     ("What We'll Learn", ('learning_targets', 'objectives')),
-    ("Words We'll Use", ('key_terms',)),
     ('Before We Start', ('before_you_start',)),
     ("Let's Understand", ('short_discussion', 'overview')),
     ("Let's Practice", ('lets_practice',)),
-    ('Now We Apply', ('apply_what_you_learned',)),
     ('Challenge Task', ('challenge_task',)),
-    ('How Our Work Will Be Checked', ('rubric',)),
-    ("Let's Reflect", ('reflection',)),
-    ('How We Show Learning', ('evidence_of_learning',)),
     ('Student Activities', ('student_activities',)),
     ('Resources / References', ('resources',)),
 )
@@ -168,7 +163,6 @@ def lesson_context(lesson):
             'body': markdown_html(example.body),
             'common_mistake': markdown_html(example.common_mistake),
             'image': media_file_context(example.image, example.alt_text or example.title),
-            'mini_check': markdown_html(example.mini_check),
             'title': example.title,
         }
         for example in lesson.lesson_examples.filter(is_published=True).order_by('order', 'id')

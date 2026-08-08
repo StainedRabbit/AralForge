@@ -11,11 +11,14 @@ import { useActiveLessonSection } from '../hooks/useActiveLessonSection'
 import type { ModuleLesson, ModuleTopic } from '../types'
 import { toErrorMessage } from '../utils/format'
 import {
+  getLessonResumeTarget,
   getLessonSections,
+  lessonResumeActionLabel,
   lessonSectionId,
   lessonsForTopic,
   topicsForModule,
 } from '../utils/modules'
+import type { LessonResumeTarget } from '../utils/modules'
 import {
   hasActiveModuleAccess,
   isMockAssessment,
@@ -72,25 +75,14 @@ export function ModuleDetailPage({
   const startedLessonIds = new Set(
     studentLessonProgress.map((progress) => progress.lesson),
   )
-  const resumeLesson =
-    [...studentLessonProgress]
-      .filter(
-        (progress) =>
-          !progress.completed_at &&
-          publishedLessons.some((lesson) => lesson.id === progress.lesson),
-      )
-      .sort(
-        (first, second) =>
-          new Date(second.last_viewed_at).getTime() -
-          new Date(first.last_viewed_at).getTime(),
-      )
-      .map((progress) =>
-        publishedLessons.find((lesson) => lesson.id === progress.lesson),
-      )
-      .find((lesson): lesson is ModuleLesson => Boolean(lesson)) ??
-    publishedLessons.find((lesson) => !completedLessonIds.has(lesson.id)) ??
-    publishedLessons[0] ??
-    null
+  const resumeTarget = getLessonResumeTarget(
+    publishedLessons,
+    data.lessonProgress,
+    {
+      currentUserId,
+      isAccessible: Boolean(module?.is_accessible),
+    },
+  )
   const completedCount = publishedLessons.filter((lesson) =>
     completedLessonIds.has(lesson.id),
   ).length
@@ -121,12 +113,15 @@ export function ModuleDetailPage({
       return
     }
 
-    viewedLessonIds.current.add(selectedLesson.id)
     const progress = data.lessonProgress.find(
       (item) =>
         item.lesson === selectedLesson.id && item.student === currentUserId,
     )
     const timer = window.setTimeout(async () => {
+      if (viewedLessonIds.current.has(selectedLesson.id)) {
+        return
+      }
+      viewedLessonIds.current.add(selectedLesson.id)
       try {
         if (progress) {
           await api(`/modules/lesson-progress/${progress.id}/`, {
@@ -144,6 +139,7 @@ export function ModuleDetailPage({
         }
         await refresh()
       } catch (caughtError) {
+        viewedLessonIds.current.delete(selectedLesson.id)
         setProgressMessage(toErrorMessage(caughtError))
       }
     }, 0)
@@ -296,13 +292,12 @@ export function ModuleDetailPage({
           completedLessonIds={completedLessonIds}
           completionPercent={completionPercent}
           data={data}
-          hasStarted={studentLessonProgress.length > 0}
           moduleId={module.id}
           moduleOverview={module.lesson_overview}
           moduleOutcomes={module.learning_objectives}
           onOpenLesson={openLesson}
           onOpenTopic={openTopic}
-          resumeLesson={resumeLesson}
+          resumeTarget={resumeTarget}
           startedLessonIds={startedLessonIds}
           topics={topics}
         />
@@ -400,26 +395,24 @@ function ModuleContents({
   completedLessonIds,
   completionPercent,
   data,
-  hasStarted,
   moduleId,
   moduleOutcomes,
   moduleOverview,
   onOpenLesson,
   onOpenTopic,
-  resumeLesson,
+  resumeTarget,
   startedLessonIds,
   topics,
 }: {
   completedLessonIds: Set<number>
   completionPercent: number
   data: WorkspaceData
-  hasStarted: boolean
   moduleId: number
   moduleOutcomes: string
   moduleOverview: string
   onOpenLesson: (lesson: ModuleLesson) => void
   onOpenTopic: (topic: ModuleTopic) => void
-  resumeLesson: ModuleLesson | null
+  resumeTarget: LessonResumeTarget | null
   startedLessonIds: Set<number>
   topics: ModuleTopic[]
 }) {
@@ -432,15 +425,12 @@ function ModuleContents({
             <h2>Module Contents</h2>
             <p>{moduleOverview || 'Explore the competency topics and lessons in curriculum order.'}</p>
           </div>
-          {resumeLesson ? (
-            <button className="button button--primary" onClick={() => onOpenLesson(resumeLesson)} type="button">
+          {resumeTarget ? (
+            <button className="button button--primary lesson-resume-action" onClick={() => onOpenLesson(resumeTarget.lesson)} type="button">
               <Icon name="arrow-right" />
-              <span>
-                {completionPercent === 100
-                  ? 'Review Module'
-                  : hasStarted
-                    ? 'Resume Module'
-                    : 'Start Module'}
+              <span className="lesson-resume-action__copy">
+                <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
+                <small>{resumeTarget.lesson.title}</small>
               </span>
             </button>
           ) : null}
@@ -567,28 +557,14 @@ function TopicOverview({
   const topicPercent = lessons.length
     ? Math.round((completedCount / lessons.length) * 100)
     : 0
-  const recentIncompleteLesson =
-    [...data.lessonProgress]
-      .filter(
-        (progress) =>
-          !progress.completed_at &&
-          lessons.some((lesson) => lesson.id === progress.lesson),
-      )
-      .sort(
-        (first, second) =>
-          new Date(second.last_viewed_at).getTime() -
-          new Date(first.last_viewed_at).getTime(),
-      )
-      .map((progress) =>
-        lessons.find((lesson) => lesson.id === progress.lesson),
-      )
-      .find((lesson): lesson is ModuleLesson => Boolean(lesson)) ?? null
-  const nextLesson =
-    recentIncompleteLesson ??
-    lessons.find((lesson) => !completedLessonIds.has(lesson.id)) ??
-    lessons[0] ??
-    null
-  const hasStarted = lessons.some((lesson) => startedLessonIds.has(lesson.id))
+  const resumeTarget = getLessonResumeTarget(
+    lessons,
+    data.lessonProgress,
+    {
+      currentUserId: data.currentUser?.id ?? null,
+      isAccessible: true,
+    },
+  )
 
   return (
     <div className="student-topic-overview">
@@ -607,19 +583,16 @@ function TopicOverview({
             <h2>{topic.title}</h2>
             <RichLessonText value={topic.overview} />
           </div>
-          {nextLesson ? (
+          {resumeTarget ? (
             <button
-              className="button button--primary"
-              onClick={() => onOpenLesson(nextLesson)}
+              className="button button--primary lesson-resume-action"
+              onClick={() => onOpenLesson(resumeTarget.lesson)}
               type="button"
             >
               <Icon name="arrow-right" />
-              <span>
-                {completedCount === lessons.length
-                  ? 'Review Topic'
-                  : hasStarted
-                    ? 'Continue Topic'
-                    : 'Start Topic'}
+              <span className="lesson-resume-action__copy">
+                <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
+                <small>{resumeTarget.lesson.title}</small>
               </span>
             </button>
           ) : null}
@@ -835,6 +808,16 @@ function StudentLessonReader({
         : lessonSections,
     [lessonSections, mainActivity],
   )
+  const firstSupplementalSectionIndex = displayedLessonSections.findIndex(
+    (section) =>
+      section.title === 'Student Activities' ||
+      section.title === 'Resources / References',
+  )
+  const mainActivityInsertionIndex = mainActivity
+    ? firstSupplementalSectionIndex >= 0
+      ? firstSupplementalSectionIndex
+      : displayedLessonSections.length
+    : -1
   const sectionIds = useMemo(
     () => displayedLessonSections.map((section) => lessonSectionId(section.title)),
     [displayedLessonSections],
@@ -909,6 +892,35 @@ function StudentLessonReader({
 
     void onToggleComplete()
   }
+
+  const mainActivityLessonBlock = mainActivity ? (
+    <>
+      <LessonMainActivityPanel
+        activity={mainActivity}
+        api={api}
+        data={data}
+        onSubmitted={refresh}
+      />
+      {challengeSection ? (
+        mainActivityReviewUnlocked ? (
+          <section
+            className="lesson-content-section"
+            id={lessonSectionId(challengeSection.title)}
+          >
+            <p className="eyebrow">Ready for Challenge</p>
+            <h2>{challengeSection.title}</h2>
+            <RichLessonText value={challengeSection.content} />
+          </section>
+        ) : (
+          <section className="lesson-content-section lesson-content-section--locked">
+            <p className="eyebrow">Challenge locked</p>
+            <h2>Challenge Task</h2>
+            <p>Review Answers unlocks after a full score or after all Main Activity attempts are used.</p>
+          </section>
+        )
+      ) : null}
+    </>
+  ) : null
 
   return (
     <div className="student-lesson-reader">
@@ -1048,36 +1060,9 @@ function StudentLessonReader({
             })}
           </nav>
         ) : null}
-        {displayedLessonSections.map((section) => (
+        {displayedLessonSections.map((section, index) => (
           <Fragment key={section.title}>
-            {section.title === "Let's Reflect" ? (
-              <>
-                <LessonMainActivityPanel
-                  activity={mainActivity}
-                  api={api}
-                  data={data}
-                  onSubmitted={refresh}
-                />
-                {mainActivity && challengeSection ? (
-                  mainActivityReviewUnlocked ? (
-                    <section
-                      className="lesson-content-section"
-                      id={lessonSectionId(challengeSection.title)}
-                    >
-                      <p className="eyebrow">Ready for Challenge</p>
-                      <h2>{challengeSection.title}</h2>
-                      <RichLessonText value={challengeSection.content} />
-                    </section>
-                  ) : (
-                    <section className="lesson-content-section lesson-content-section--locked">
-                      <p className="eyebrow">Challenge locked</p>
-                      <h2>Challenge Task</h2>
-                      <p>Review Answers unlocks after a full score or after all Main Activity attempts are used.</p>
-                    </section>
-                  )
-                ) : null}
-              </>
-            ) : null}
+            {index === mainActivityInsertionIndex ? mainActivityLessonBlock : null}
             <section
               className="lesson-content-section"
               id={lessonSectionId(section.title)}
@@ -1090,34 +1075,9 @@ function StudentLessonReader({
             </section>
           </Fragment>
         ))}
-        {mainActivity && !displayedLessonSections.some((section) => section.title === "Let's Reflect") ? (
-          <>
-            <LessonMainActivityPanel
-              activity={mainActivity}
-              api={api}
-              data={data}
-              onSubmitted={refresh}
-            />
-            {challengeSection ? (
-              mainActivityReviewUnlocked ? (
-                <section
-                  className="lesson-content-section"
-                  id={lessonSectionId(challengeSection.title)}
-                >
-                  <p className="eyebrow">Ready for Challenge</p>
-                  <h2>{challengeSection.title}</h2>
-                  <RichLessonText value={challengeSection.content} />
-                </section>
-              ) : (
-                <section className="lesson-content-section lesson-content-section--locked">
-                  <p className="eyebrow">Challenge locked</p>
-                  <h2>Challenge Task</h2>
-                  <p>Review Answers unlocks after a full score or after all Main Activity attempts are used.</p>
-                </section>
-              )
-            ) : null}
-          </>
-        ) : null}
+        {mainActivityInsertionIndex === displayedLessonSections.length
+          ? mainActivityLessonBlock
+          : null}
         <LessonCodingAssessments data={data} lessonId={lesson.id} />
         {lesson.assessment_url ? (
           <a className="button button--secondary" href={lesson.assessment_url} rel="noreferrer" target="_blank">

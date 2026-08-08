@@ -23,6 +23,7 @@ export type User = {
   role: Role
   is_admin_teacher: boolean
   is_active: boolean
+  must_change_password: boolean
 }
 
 export type StudentProfile = {
@@ -159,16 +160,11 @@ export type ModuleLesson = {
   title: string
   order: number
   learning_targets: string
-  key_terms: string
   before_you_start: string
   short_discussion: string
   guided_examples: string
   lets_practice: string
-  apply_what_you_learned: string
   challenge_task: string
-  rubric: string
-  reflection: string
-  evidence_of_learning: string
   objectives: string
   overview: string
   subtopics: string
@@ -204,7 +200,6 @@ export type ModuleLessonExample = {
   alt_text: string
   body: string
   common_mistake: string
-  mini_check: string
   is_published: boolean
   created_at: string
   updated_at: string
@@ -644,6 +639,7 @@ export type GradeItem = {
   grade_category: number
   subject: number
   title: string
+  date: string | null
   points_possible: string
   order: number
   is_required: boolean

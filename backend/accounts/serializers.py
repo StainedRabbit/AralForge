@@ -20,8 +20,9 @@ class UserSerializer(serializers.ModelSerializer):
             'role',
             'is_admin_teacher',
             'is_active',
+            'must_change_password',
         )
-        read_only_fields = ('id', 'is_admin_teacher')
+        read_only_fields = ('id', 'is_admin_teacher', 'must_change_password')
 
     def validate_password(self, value):
         validate_password(value, self.instance)
@@ -47,9 +48,35 @@ class UserSerializer(serializers.ModelSerializer):
 
         if password:
             instance.set_password(password)
+            instance.must_change_password = False
 
         instance.save()
         return instance
+
+
+class AvailableStudentSerializer(serializers.ModelSerializer):
+    display_name = serializers.SerializerMethodField()
+    enrollment_status = serializers.SerializerMethodField()
+    section = serializers.CharField(source='student_profile.section', default='')
+    student_number = serializers.CharField(source='student_profile.student_number', default='')
+    year_level = serializers.IntegerField(source='student_profile.year_level', allow_null=True, default=None)
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'display_name',
+            'student_number',
+            'section',
+            'year_level',
+            'enrollment_status',
+        )
+
+    def get_display_name(self, instance):
+        return instance.get_full_name().strip() or instance.username
+
+    def get_enrollment_status(self, instance):
+        return 'inactive' if getattr(instance, 'has_inactive_enrollment', False) else 'not_enrolled'
 
 
 class StudentProfileSerializer(serializers.ModelSerializer):

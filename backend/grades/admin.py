@@ -57,7 +57,7 @@ class GradeCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(GradeItem)
 class GradeItemAdmin(admin.ModelAdmin):
-    list_display = ('grade_category', 'schedule', 'title', 'source_type', 'points_possible', 'order')
+    list_display = ('grade_category', 'schedule', 'title', 'date', 'source_type', 'points_possible', 'order')
     list_filter = ('grade_category__subject', 'grade_category__grading_period', 'source_type')
     search_fields = ('title', 'grade_category__subject__code', 'grade_category__name')
 

@@ -3,7 +3,7 @@ type StoredDraft<TDraft> = {
   value: TDraft
 }
 
-const DRAFT_PREFIX = 'ezoryx:lesson-draft'
+const DRAFT_PREFIX = 'ezoryx:lesson-draft:v2'
 
 export function lessonDraftKey({
   lessonId,

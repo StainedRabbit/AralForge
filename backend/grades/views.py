@@ -1,11 +1,15 @@
-from django.db.models import Q
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Max, Q
 from django.shortcuts import get_object_or_404
-from rest_framework import viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from subjects.models import Subject
+from subjects.models import ScheduleStudent, Subject, SubjectSchedule
 
 from .models import (
     FinalGrade,
@@ -98,14 +102,78 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'coding_problem',
         )
 
-        if self.request.user.is_admin_teacher:
-            return queryset
+        if not self.request.user.is_admin_teacher:
+            queryset = queryset.filter(
+                schedule__students__student=self.request.user,
+                schedule__students__is_active=True,
+                schedule__is_active=True,
+            ).distinct()
 
-        return queryset.filter(
-            schedule__students__student=self.request.user,
-            schedule__students__is_active=True,
-            schedule__is_active=True,
-        ).distinct()
+        schedule = self.request.query_params.get('schedule')
+        source_type = self.request.query_params.get('source_type')
+        grading_period = self.request.query_params.get('period')
+        item_date = self.request.query_params.get('date')
+        if schedule:
+            queryset = queryset.filter(schedule_id=schedule)
+        if source_type:
+            queryset = queryset.filter(source_type=source_type)
+        if grading_period:
+            queryset = queryset.filter(grade_category__grading_period=grading_period)
+        if item_date:
+            queryset = queryset.filter(date=item_date)
+        return queryset
+
+    @action(detail=False, methods=['post'], url_path='score-sheet')
+    @transaction.atomic
+    def score_sheet(self, request):
+        require_teacher(request)
+        schedule = get_object_or_404(
+            SubjectSchedule.objects.select_for_update().select_related('subject'),
+            pk=request.data.get('schedule'),
+        )
+        if not schedule.is_active:
+            raise serializers.ValidationError({'schedule': 'Archived classes cannot record scores.'})
+
+        category = get_object_or_404(GradeCategory, pk=request.data.get('grade_category'))
+        if category.category == 'ATTENDANCE':
+            raise serializers.ValidationError({
+                'grade_category': 'Use the attendance workflow for attendance categories.',
+            })
+        if not request.data.get('date'):
+            raise serializers.ValidationError({'date': 'A score-sheet date is required.'})
+        order = GradeItem.objects.filter(
+            schedule=schedule,
+            grade_category=category,
+        ).aggregate(maximum=Max('order'))['maximum']
+        item_serializer = self.get_serializer(data={
+            'schedule': schedule.id,
+            'grade_category': category.id,
+            'title': request.data.get('title'),
+            'date': request.data.get('date'),
+            'points_possible': request.data.get('points_possible'),
+            'order': (order if order is not None else -1) + 1,
+            'is_required': True,
+            'source_type': 'MANUAL',
+        })
+        item_serializer.is_valid(raise_exception=True)
+        item = item_serializer.save()
+        save_score_sheet_roster(item, request.data.get('records'))
+        return Response(score_sheet_payload(item), status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'put'], url_path='roster')
+    @transaction.atomic
+    def roster(self, request, pk=None):
+        require_teacher(request)
+        item = self.get_object()
+        if request.method == 'PUT':
+            if not item.schedule_id or not item.schedule.is_active:
+                raise serializers.ValidationError({'schedule': 'Archived or unassigned classes cannot record scores.'})
+            if item.source_type != 'MANUAL':
+                raise serializers.ValidationError({'source_type': 'Only manual score sheets can be edited here.'})
+            SubjectSchedule.objects.select_for_update().get(pk=item.schedule_id)
+            save_score_sheet_roster(item, request.data.get('records'))
+            item.refresh_from_db()
+        return Response(score_sheet_payload(item))
 
     @action(detail=True, methods=['post'])
     def resync(self, request, pk=None):
@@ -113,6 +181,149 @@ class GradeItemViewSet(viewsets.ModelViewSet):
 
         item = self.get_object()
         return Response({'synchronized_scores': sync_grade_item(item)})
+
+
+def require_teacher(request):
+    if not request.user.is_admin_teacher:
+        raise PermissionDenied('Only the teacher can manage class score sheets.')
+
+
+def active_score_roster(item):
+    if not item.schedule_id:
+        return []
+    return list(
+        ScheduleStudent.objects.select_for_update()
+        .select_related('student', 'student__student_profile')
+        .filter(schedule=item.schedule, is_active=True)
+        .order_by('student__last_name', 'student__first_name', 'student_id')
+    )
+
+
+def validate_score_sheet_records(item, records, enrollments):
+    if not isinstance(records, list):
+        raise serializers.ValidationError({'records': 'Provide the complete active class roster.'})
+
+    active_ids = {enrollment.student_id for enrollment in enrollments}
+    submitted_ids = []
+    validated = []
+    score_field = serializers.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        min_value=Decimal('0'),
+        max_value=item.points_possible,
+    )
+    row_errors = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            row_errors[index] = {'detail': 'Each roster row must be an object.'}
+            continue
+        try:
+            student_id = int(record.get('student'))
+        except (TypeError, ValueError):
+            row_errors[index] = {'student': 'A valid student is required.'}
+            continue
+        submitted_ids.append(student_id)
+        row_status = str(record.get('status') or 'GRADED').upper()
+        remarks = str(record.get('remarks') or '').strip()
+        if row_status not in {'GRADED', 'EXCUSED'}:
+            row_errors[index] = {'status': 'Status must be graded or excused.'}
+            continue
+        if row_status == 'EXCUSED':
+            if not remarks:
+                row_errors[index] = {'remarks': 'An excuse reason is required.'}
+                continue
+            raw_score = None
+        else:
+            value = record.get('raw_score')
+            try:
+                raw_score = score_field.run_validation('0' if value in (None, '') else value)
+            except serializers.ValidationError as error:
+                row_errors[index] = {'raw_score': error.detail}
+                continue
+        validated.append({
+            'student_id': student_id,
+            'raw_score': raw_score,
+            'status': row_status,
+            'remarks': remarks,
+        })
+
+    if len(submitted_ids) != len(set(submitted_ids)):
+        raise serializers.ValidationError({'records': 'Each student can appear only once.'})
+    if set(submitted_ids) != active_ids:
+        raise serializers.ValidationError({
+            'records': 'The active class roster changed. Reload the score sheet and try again.',
+        })
+    if row_errors:
+        raise serializers.ValidationError({'records': row_errors})
+    return validated
+
+
+def save_score_sheet_roster(item, records):
+    enrollments = active_score_roster(item)
+    if not enrollments:
+        raise serializers.ValidationError({'records': 'Add at least one active student before recording scores.'})
+    validated = validate_score_sheet_records(item, records, enrollments)
+    for record in validated:
+        StudentGradeItemScore.objects.update_or_create(
+            grade_item=item,
+            student_id=record['student_id'],
+            defaults={
+                'raw_score': record['raw_score'],
+                'status': record['status'],
+                'origin': StudentGradeItemScore.Origin.MANUAL,
+                'override_reason': record['remarks'] if record['status'] == 'EXCUSED' else '',
+                'remarks': record['remarks'],
+            },
+        )
+
+
+def score_sheet_payload(item):
+    active_enrollments = list(
+        item.schedule.students.select_related('student', 'student__student_profile')
+        .filter(is_active=True)
+        .order_by('student__last_name', 'student__first_name', 'student_id')
+    ) if item.schedule_id else []
+    scores = list(
+        item.student_scores.select_related('student', 'student__student_profile')
+        .order_by('student__last_name', 'student__first_name', 'student_id')
+    )
+    scores_by_student = {score.student_id: score for score in scores}
+    active_ids = {enrollment.student_id for enrollment in active_enrollments}
+    rows = [score_sheet_row(enrollment.student, True, scores_by_student.get(enrollment.student_id))
+            for enrollment in active_enrollments]
+    rows.extend(
+        score_sheet_row(score.student, False, score)
+        for score in scores
+        if score.student_id not in active_ids
+    )
+    graded = [score for score in scores if score.status == StudentGradeItemScore.Status.GRADED]
+    return {
+        'item': GradeItemSerializer(item).data,
+        'rows': rows,
+        'counts': {
+            'student_count': len(rows),
+            'active_count': len(active_enrollments),
+            'graded_count': len(graded),
+            'zero_count': sum(score.raw_score == 0 for score in graded),
+            'excused_count': sum(
+                score.status == StudentGradeItemScore.Status.EXCUSED for score in scores
+            ),
+        },
+    }
+
+
+def score_sheet_row(student, is_active, score):
+    profile = getattr(student, 'student_profile', None)
+    return {
+        'student': student.id,
+        'student_name': student.get_full_name() or student.username,
+        'student_number': profile.student_number if profile else '',
+        'is_active': is_active,
+        'score_id': score.id if score else None,
+        'raw_score': format(score.raw_score, 'f') if score and score.raw_score is not None else None,
+        'status': score.status if score else 'GRADED',
+        'remarks': score.remarks if score else '',
+    }
 
 
 class StudentGradeItemScoreViewSet(viewsets.ModelViewSet):

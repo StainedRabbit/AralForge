@@ -318,6 +318,7 @@ class GradeItem(models.Model):
         related_name='items',
     )
     title = models.CharField(max_length=180)
+    date = models.DateField(null=True, blank=True)
     points_possible = models.DecimalField(max_digits=7, decimal_places=2, default=100)
     order = models.PositiveIntegerField(default=0)
     is_required = models.BooleanField(default=True)

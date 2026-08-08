@@ -8,6 +8,7 @@ import { MarkdownEditor } from '../../components/MarkdownEditor'
 import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
 import type { ModuleLesson, ModuleLessonAsset, ModuleLessonExample } from '../../types'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
+import { cleanImportedName } from '../../utils/importCleaning'
 import {
   lessonDraftKey,
   readLessonDraft,
@@ -17,19 +18,14 @@ import {
 import { subjectName } from '../../utils/modules'
 
 type LessonDraft = {
-  apply_what_you_learned: string
   before_you_start: string
   challenge_task: string
-  evidence_of_learning: string
   is_published: boolean
-  key_terms: string
   learning_targets: string
   lets_practice: string
   order: string
   pdf_file: File | null
-  reflection: string
   resources: string
-  rubric: string
   short_discussion: string
   title: string
   topic: string
@@ -43,7 +39,6 @@ type LessonExampleDraft = {
   alt_text: string
   body: string
   common_mistake: string
-  mini_check: string
   is_published: boolean
   existingImage: string
   image: File | null
@@ -55,15 +50,10 @@ type SaveState = 'clean' | 'local' | 'saved' | 'saving' | 'unsaved'
 type LessonImportMode = 'empty' | 'replace'
 type LessonTemplateFieldKey =
   | 'learning_targets'
-  | 'key_terms'
   | 'before_you_start'
   | 'short_discussion'
   | 'lets_practice'
-  | 'apply_what_you_learned'
   | 'challenge_task'
-  | 'rubric'
-  | 'reflection'
-  | 'evidence_of_learning'
 
 export function AdminLessonEditorPage({
   api,
@@ -550,7 +540,6 @@ export function AdminLessonEditorPage({
                       </label>
                       <TextArea label="Example text" onChange={(value) => updateExample(example.id, 'body', value)} rows={5} value={example.body} />
                       <TextArea label="Common mistake" onChange={(value) => updateExample(example.id, 'common_mistake', value)} rows={4} value={example.common_mistake} />
-                      <TextArea label="Mini-check" onChange={(value) => updateExample(example.id, 'mini_check', value)} rows={3} value={example.mini_check} />
                     </div>
                   </div>
                 ))}
@@ -797,9 +786,9 @@ type ParsedLessonExampleImport = {
   common_mistake: string
   imageUrl: string
   is_published: boolean
-  mini_check: string
   order: string
   title: string
+  unsupportedFields: string[]
 }
 
 type LessonImageReference = {
@@ -822,11 +811,6 @@ By the end of this lesson, students can identify common flowchart symbols.
 
 ![Flowchart symbols](images/flowchart-symbols.svg)
 
-## Words We'll Use
-- Algorithm
-- Flowchart
-- Process
-
 ## Before We Start
 What symbols have you seen in maps, apps, or signs?
 
@@ -836,19 +820,8 @@ A flowchart shows the steps of a process using standard symbols.
 ## Let's Practice
 Label each flowchart symbol and describe its purpose.
 
-## Now We Apply
-Create a simple flowchart for preparing for class.
-
 ## Challenge Task
 Improve your flowchart by adding at least one decision symbol.
-
-## How Our Work Will Be Checked
-- Correct symbols
-- Clear sequence
-- Complete explanation
-
-## Let's Reflect
-Which symbol was easiest to use? Why?
 
 ## Lesson Examples
 
@@ -863,9 +836,6 @@ This example shows the most common flowchart symbols.
 Common mistake:
 Students may confuse input/output with process symbols.
 
-Mini-check:
-Which symbol should we use for user input?
-
 ## Resources
 - Java toolchain guide
 - images/flowchart-symbols.svg
@@ -873,25 +843,14 @@ Which symbol should we use for user input?
 `
 
 const lessonImportAliases: Record<string, LessonTemplateFieldKey | 'resources'> = {
-  'apply': 'apply_what_you_learned',
-  'apply what you learned': 'apply_what_you_learned',
   'before we start': 'before_you_start',
   'challenge': 'challenge_task',
   'challenge task': 'challenge_task',
-  'evidence of learning': 'evidence_of_learning',
-  'how our work will be checked': 'rubric',
-  'how we show learning': 'evidence_of_learning',
-  'key terms': 'key_terms',
   'lets practice': 'lets_practice',
-  'lets reflect': 'reflection',
   'lets understand': 'short_discussion',
-  'now we apply': 'apply_what_you_learned',
-  'reflection': 'reflection',
   'resources': 'resources',
-  'rubric': 'rubric',
   'short discussion': 'short_discussion',
   'what well learn': 'learning_targets',
-  'words well use': 'key_terms',
 }
 
 function parseLessonImportMarkdown(value: string): ParsedLessonImport {
@@ -933,6 +892,9 @@ function parseLessonImportMarkdown(value: string): ParsedLessonImport {
     }
 
     const example = parseLessonExampleImport(currentExampleTitle, exampleBuffer)
+    parsed.unknownSections.push(
+      ...example.unsupportedFields.map((field) => `Lesson example field: ${field}`),
+    )
     if (example.title || example.body || example.imageUrl) {
       parsed.examples.push(example)
     }
@@ -964,13 +926,13 @@ function parseLessonImportMarkdown(value: string): ParsedLessonImport {
       flush()
       const titleMatch = title.match(/^Lesson\s*:\s*(.+)$/i)
       if (level === 1 && titleMatch) {
-        parsed.title = titleMatch[1].trim()
+        parsed.title = cleanImportedName(titleMatch[1])
         currentKey = null
         currentUnknown = ''
         return
       }
       if (level === 1 && !parsed.title) {
-        parsed.title = title.trim()
+        parsed.title = cleanImportedName(title)
         currentKey = null
         currentUnknown = ''
         return
@@ -1004,7 +966,7 @@ function parseLessonImportMarkdown(value: string): ParsedLessonImport {
         return
       }
       if (key === 'title' && !parsed.title) {
-        parsed.title = rawValue
+        parsed.title = cleanImportedName(rawValue)
         return
       }
     }
@@ -1027,15 +989,14 @@ function parseLessonExampleImport(
     common_mistake: '',
     imageUrl: '',
     is_published: true,
-    mini_check: '',
     order: '',
     title: stripExampleHeading(headingTitle),
+    unsupportedFields: [],
   }
-  let currentBlock: 'body' | 'common_mistake' | 'mini_check' = 'body'
-  const blocks: Record<'body' | 'common_mistake' | 'mini_check', string[]> = {
+  let currentBlock: 'body' | 'common_mistake' | null = 'body'
+  const blocks: Record<'body' | 'common_mistake', string[]> = {
     body: [],
     common_mistake: [],
-    mini_check: [],
   }
 
   lines.forEach((line) => {
@@ -1061,20 +1022,13 @@ function parseLessonExampleImport(
         return
       }
       if (key === 'title' && rawValue) {
-        example.title = rawValue
+        example.title = cleanImportedName(rawValue)
         return
       }
       if (key === 'common mistake' || key === 'common mistakes') {
         currentBlock = 'common_mistake'
         if (rawValue) {
           blocks.common_mistake.push(rawValue)
-        }
-        return
-      }
-      if (key === 'mini check' || key === 'mini-check') {
-        currentBlock = 'mini_check'
-        if (rawValue) {
-          blocks.mini_check.push(rawValue)
         }
         return
       }
@@ -1085,6 +1039,9 @@ function parseLessonExampleImport(
         }
         return
       }
+      example.unsupportedFields.push(meta[1].trim())
+      currentBlock = null
+      return
     }
 
     const image = line.match(/!\[([^\]]*)\]\(([^)]+)\)/)
@@ -1094,12 +1051,13 @@ function parseLessonExampleImport(
       return
     }
 
-    blocks[currentBlock].push(line)
+    if (currentBlock) {
+      blocks[currentBlock].push(line)
+    }
   })
 
   example.body = blocks.body.join('\n').trim()
   example.common_mistake = blocks.common_mistake.join('\n').trim()
-  example.mini_check = blocks.mini_check.join('\n').trim()
   if (!example.alt_text && example.imageUrl) {
     example.alt_text = imageAltTextFromFilename(importedImageFilename(example.imageUrl))
   }
@@ -1107,7 +1065,7 @@ function parseLessonExampleImport(
 }
 
 function stripExampleHeading(value: string) {
-  return value.replace(/^Example\s*:\s*/i, '').trim()
+  return cleanImportedName(value.replace(/^Example\s*:\s*/i, ''))
 }
 
 function isLessonExamplesHeading(value: string) {
@@ -1157,7 +1115,6 @@ function collectLessonImageReferences(parsed: ParsedLessonImport) {
     ...parsed.examples.map((example) => [
       example.body,
       example.common_mistake,
-      example.mini_check,
     ].join('\n\n')),
   ]
   blocks.forEach((block) => {
@@ -1560,7 +1517,7 @@ function LessonImportModal({
                 )
               }) : <small>No local Markdown image links detected.</small>}
               {parsed.unknownSections.length ? (
-                <small>Unknown sections: {parsed.unknownSections.join(', ')}</small>
+                <small>Unsupported sections: {parsed.unknownSections.join(', ')}</small>
               ) : null}
             </div>
           </section>
@@ -1710,15 +1667,10 @@ const studentLessonFields: Array<{
   rows: number
 }> = [
   { key: 'learning_targets', label: "What We'll Learn", rows: 5 },
-  { key: 'key_terms', label: "Words We'll Use", rows: 5 },
   { key: 'before_you_start', label: 'Before We Start', rows: 5 },
   { key: 'short_discussion', label: "Let's Understand", rows: 12 },
   { key: 'lets_practice', label: "Let's Practice", rows: 10 },
-  { key: 'apply_what_you_learned', label: 'Now We Apply', rows: 8 },
   { key: 'challenge_task', label: 'Challenge Task', rows: 6 },
-  { key: 'rubric', label: 'How Our Work Will Be Checked', rows: 6 },
-  { key: 'reflection', label: "Let's Reflect", rows: 5 },
-  { key: 'evidence_of_learning', label: 'How We Show Learning', rows: 6 },
 ]
 
 function mergeImportedLessonExamples(
@@ -1765,7 +1717,6 @@ function mergeImportedLessonExamples(
         : `import-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       image,
       is_published: example.is_published,
-      mini_check: example.mini_check,
       order,
       serverId: existingIndex >= 0 ? nextExamples[existingIndex].serverId : undefined,
       title,
@@ -1833,7 +1784,6 @@ function createExampleDrafts(
       id: `server-${example.id}`,
       image: null,
       is_published: example.is_published,
-      mini_check: example.mini_check,
       order: String(example.order),
       serverId: example.id,
       title: example.title,
@@ -1850,7 +1800,6 @@ function createEmptyExampleDraft(order: number): LessonExampleDraft {
     id: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     image: null,
     is_published: true,
-    mini_check: '',
     order: String(order),
     title: '',
   }
@@ -1892,7 +1841,6 @@ async function syncLessonExamples(
       example.title.trim() ||
         example.body.trim() ||
         example.common_mistake.trim() ||
-        example.mini_check.trim() ||
         example.image ||
         example.existingImage,
     )
@@ -1907,7 +1855,6 @@ async function syncLessonExamples(
     formData.append('alt_text', example.alt_text)
     formData.append('body', example.body)
     formData.append('common_mistake', example.common_mistake)
-    formData.append('mini_check', example.mini_check)
     formData.append('is_published', example.is_published ? 'true' : 'false')
     if (example.image) {
       formData.append('image', example.image)
@@ -1927,19 +1874,14 @@ async function syncLessonExamples(
 
 function createLessonDraft(topicId: string, lesson?: ModuleLesson): LessonDraft {
   return {
-    apply_what_you_learned: lesson?.apply_what_you_learned ?? '',
     before_you_start: lesson?.before_you_start ?? '',
     challenge_task: lesson?.challenge_task ?? '',
-    evidence_of_learning: lesson?.evidence_of_learning ?? '',
     is_published: lesson?.is_published ?? false,
-    key_terms: lesson?.key_terms ?? '',
     learning_targets: lesson?.learning_targets ?? '',
     lets_practice: lesson?.lets_practice ?? '',
     order: lesson?.order ? String(lesson.order) : '0',
     pdf_file: null,
-    reflection: lesson?.reflection ?? '',
     resources: lesson?.resources ?? '',
-    rubric: lesson?.rubric ?? '',
     short_discussion: lesson?.short_discussion ?? '',
     title: lesson?.title ?? '',
     topic: lesson?.topic ? String(lesson.topic) : topicId,
@@ -1950,22 +1892,17 @@ function buildLessonPayload(draft: LessonDraft) {
   const payload = {
     acquisition: '',
     answer_key: '',
-    apply_what_you_learned: draft.apply_what_you_learned,
     before_you_start: draft.before_you_start,
     challenge_task: draft.challenge_task,
     common_misconceptions: '',
     expected_outputs: '',
-    evidence_of_learning: draft.evidence_of_learning,
     guided_examples: '',
     is_published: draft.is_published,
-    key_terms: draft.key_terms,
     learning_targets: draft.learning_targets,
     lets_practice: draft.lets_practice,
     making_meaning: '',
     order: Number(draft.order || 0),
-    reflection: draft.reflection,
     resources: draft.resources,
-    rubric: draft.rubric,
     short_discussion: draft.short_discussion,
     subtopics: '',
     teacher_notes: '',

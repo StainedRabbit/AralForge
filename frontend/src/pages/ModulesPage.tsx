@@ -6,6 +6,8 @@ import { RichLessonText } from '../components/RichLessonText'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard } from '../components/ui'
 import type { ModuleLesson, ModuleTopic } from '../types'
 import {
+  getLessonResumeTarget,
+  lessonResumeActionLabel,
   lessonSearchText,
   lessonsForTopic,
   modulesForSubject,
@@ -70,6 +72,32 @@ export function ModulesPage({
           )
         : [],
     [data.moduleTopics, selectedModule],
+  )
+  const publishedLessons = useMemo(
+    () =>
+      publishedTopics.flatMap((topic) =>
+        lessonsForTopic(data.moduleLessons, topic.id).filter(
+          (lesson) => lesson.is_published,
+        ),
+      ),
+    [data.moduleLessons, publishedTopics],
+  )
+  const resumeTarget = useMemo(
+    () =>
+      getLessonResumeTarget(
+        publishedLessons,
+        data.lessonProgress,
+        {
+          currentUserId: data.currentUser?.id ?? null,
+          isAccessible: Boolean(selectedModule?.is_accessible),
+        },
+      ),
+    [
+      data.currentUser?.id,
+      data.lessonProgress,
+      publishedLessons,
+      selectedModule?.is_accessible,
+    ],
   )
 
   useEffect(() => {
@@ -214,10 +242,24 @@ export function ModulesPage({
               />
             </div>
             {selectedModule ? (
-              <div className="student-module-browser__meta">
-                <span>{moduleAccessLabel(data, selectedModule)}</span>
-                <span>{publishedTopics.length} topic{publishedTopics.length === 1 ? '' : 's'}</span>
-                <Link to={`/modules/${selectedModule.id}`}>Module Contents</Link>
+              <div className="student-module-browser__actions">
+                <div className="student-module-browser__meta">
+                  <span>{moduleAccessLabel(data, selectedModule)}</span>
+                  <span>{publishedTopics.length} topic{publishedTopics.length === 1 ? '' : 's'}</span>
+                  <Link to={`/modules/${selectedModule.id}`}>Module Contents</Link>
+                </div>
+                {resumeTarget ? (
+                  <Link
+                    className="button button--primary lesson-resume-action"
+                    to={`/modules/${selectedModule.id}?topic=${resumeTarget.lesson.topic}&lesson=${resumeTarget.lesson.id}`}
+                  >
+                    <Icon name="arrow-right" />
+                    <span className="lesson-resume-action__copy">
+                      <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
+                      <small>{resumeTarget.lesson.title}</small>
+                    </span>
+                  </Link>
+                ) : null}
               </div>
             ) : null}
           </div>

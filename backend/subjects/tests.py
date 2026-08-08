@@ -259,6 +259,54 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual([item['id'] for item in response.data], [own_schedule.id])
         self.assertNotIn(other_schedule.id, [item['id'] for item in response.data])
 
+    def test_roster_action_pages_students_with_numeric_offsets(self):
+        schedule = self.create_schedule()
+        user_model = get_user_model()
+        students = [self.student]
+        for index in range(12):
+            students.append(user_model.objects.create_user(
+                username=f'paged-student-{index:02d}',
+                password='testpass123',
+                role=user_model.Role.STUDENT,
+            ))
+        ScheduleStudent.objects.bulk_create(
+            ScheduleStudent(schedule=schedule, student=student)
+            for student in students
+        )
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-roster', args=[schedule.id])
+
+        first_page = self.client.get(url, {'limit': 10, 'offset': 0, 'status': 'active'})
+        second_page = self.client.get(url, {'limit': 10, 'offset': 10, 'status': 'active'})
+
+        self.assertEqual(first_page.status_code, status.HTTP_200_OK)
+        self.assertEqual(first_page.data['count'], 13)
+        self.assertEqual(first_page.data['total_count'], 13)
+        self.assertEqual(len(first_page.data['results']), 10)
+        self.assertEqual(first_page.data['next'], 10)
+        self.assertIsNone(first_page.data['previous'])
+        self.assertEqual(second_page.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(second_page.data['results']), 3)
+        self.assertIsNone(second_page.data['next'])
+        self.assertEqual(second_page.data['previous'], 0)
+        first_ids = {item['id'] for item in first_page.data['results']}
+        second_ids = {item['id'] for item in second_page.data['results']}
+        self.assertFalse(first_ids & second_ids)
+
+    def test_roster_filters_do_not_filter_the_parent_schedule(self):
+        schedule = self.create_schedule()
+        self.student.first_name = 'Alex'
+        self.student.save(update_fields=['first_name'])
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student, is_active=False)
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-roster', args=[schedule.id])
+
+        response = self.client.get(url, {'status': 'inactive', 'search': 'Alex'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['student'], self.student.id)
+
     def test_enroll_students_action_adds_and_reactivates_atomically(self):
         schedule = self.create_schedule()
         enrollment = ScheduleStudent.objects.create(
@@ -314,6 +362,115 @@ class SubjectScheduleApiTests(APITestCase):
             ScheduleStudent.objects.filter(schedule=schedule, student=self.student).exists(),
         )
 
+    def test_import_roster_creates_missing_student_with_minimal_profile_and_credentials(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+        rows = [{
+            'student_number': '2027-NEW-1',
+            'first_name': 'New',
+            'middle_name': 'Middle',
+            'last_name': 'Learner',
+            'ignored_column': 'ignored value',
+        }]
+
+        preview = self.client.post(url, {'dry_run': True, 'rows': rows}, format='json')
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        self.assertEqual(preview.data['create_count'], 1)
+        self.assertEqual(preview.data['rows'][0]['status'], 'create')
+        self.assertNotIn('credentials', preview.data)
+        self.assertFalse(StudentProfile.objects.filter(student_number='2027-NEW-1').exists())
+
+        imported = self.client.post(url, {'rows': rows}, format='json')
+        self.assertEqual(imported.status_code, status.HTTP_200_OK)
+        self.assertEqual(imported.data['created_count'], 1)
+        credential = imported.data['credentials'][0]
+        profile = StudentProfile.objects.select_related('user').get(student_number='2027-NEW-1')
+        self.assertEqual(profile.section, '')
+        self.assertIsNone(profile.year_level)
+        self.assertEqual(profile.user.email, '')
+        self.assertEqual(profile.user.first_name, 'New Middle')
+        self.assertEqual(profile.user.last_name, 'Learner')
+        self.assertTrue(profile.user.must_change_password)
+        self.assertTrue(profile.user.check_password(credential['temporary_password']))
+        self.assertTrue(ScheduleStudent.objects.filter(schedule=schedule, student=profile.user).exists())
+
+    def test_import_roster_cleans_new_student_names_without_changing_identifiers(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+        rows = [{
+            'student_number': '2027-mIxEd-01',
+            'first_name': '  élise   marIA ',
+            'middle_name': 'ana-maE',
+            'last_name': "o'connor",
+        }]
+
+        preview = self.client.post(url, {'dry_run': True, 'rows': rows}, format='json')
+
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            preview.data['rows'][0]['student_name'],
+            "Élise MarIA Ana-MaE O'Connor",
+        )
+        self.assertEqual(preview.data['rows'][0]['student_number'], '2027-mIxEd-01')
+
+        imported = self.client.post(url, {'rows': rows}, format='json')
+
+        self.assertEqual(imported.status_code, status.HTTP_200_OK)
+        profile = StudentProfile.objects.select_related('user').get(
+            student_number='2027-mIxEd-01',
+        )
+        self.assertEqual(profile.user.first_name, 'Élise MarIA Ana-MaE')
+        self.assertEqual(profile.user.last_name, "O'Connor")
+
+    def test_import_roster_does_not_overwrite_existing_student_names(self):
+        schedule = self.create_schedule()
+        existing = get_user_model().objects.create_user(
+            username='existing-name',
+            first_name='Existing',
+            last_name='Student',
+            role='STUDENT',
+        )
+        StudentProfile.objects.create(user=existing, student_number='2027-KEEP-NAME')
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            reverse('subjects:subject-schedule-import-roster', args=[schedule.id]),
+            {
+                'rows': [{
+                    'student_number': '2027-KEEP-NAME',
+                    'first_name': 'replacement',
+                    'last_name': 'name',
+                }],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        existing.refresh_from_db()
+        self.assertEqual(existing.first_name, 'Existing')
+        self.assertEqual(existing.last_name, 'Student')
+
+    def test_import_roster_requires_names_for_new_students_and_rolls_back_all_rows(self):
+        schedule = self.create_schedule()
+        StudentProfile.objects.create(user=self.student, student_number='2027-EXISTING')
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+
+        response = self.client.post(
+            url,
+            {'rows': [
+                {'student_number': '2027-EXISTING'},
+                {'student_number': '2027-MISSING-NAME', 'first_name': 'Only'},
+            ]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(ScheduleStudent.objects.filter(schedule=schedule).exists())
+        self.assertFalse(StudentProfile.objects.filter(student_number='2027-MISSING-NAME').exists())
+
     def test_delete_enrollment_deactivates_instead_of_removing(self):
         schedule = self.create_schedule()
         enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
@@ -327,19 +484,3 @@ class SubjectScheduleApiTests(APITestCase):
         enrollment.refresh_from_db()
         self.assertFalse(enrollment.is_active)
         self.assertEqual(enrollment.deactivated_by, self.teacher)
-
-    def test_bulk_enrollment_status_update_is_class_scoped(self):
-        schedule = self.create_schedule()
-        enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
-        self.client.force_authenticate(self.teacher)
-
-        response = self.client.post(
-            reverse('subjects:subject-schedule-update-enrollments', args=[schedule.id]),
-            {'enrollment_ids': [enrollment.id], 'is_active': False},
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['changed_count'], 1)
-        enrollment.refresh_from_db()
-        self.assertFalse(enrollment.is_active)

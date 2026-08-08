@@ -182,6 +182,7 @@ class GradeItemSerializer(serializers.ModelSerializer):
             'grade_category',
             'subject',
             'title',
+            'date',
             'points_possible',
             'order',
             'is_required',

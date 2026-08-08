@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getApiBaseUrl, login as loginRequest } from '../api'
+import { completePasswordSetup, getApiBaseUrl, login as loginRequest } from '../api'
 import type { Session } from '../api'
 import heroImage from '../assets/academic-dashboard.png'
 import { BrandMark } from '../components/navigation'
@@ -14,6 +14,9 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [passwordSetupToken, setPasswordSetupToken] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -22,6 +25,26 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
 
     try {
       const nextSession = await loginRequest(username.trim(), password)
+      if ('must_change_password' in nextSession) {
+        setPasswordSetupToken(nextSession.password_setup_token)
+        setPassword('')
+        return
+      }
+      onLogin(nextSession)
+      navigate('/', { replace: true })
+    } catch (caughtError) {
+      setError(toErrorMessage(caughtError))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handlePasswordSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const nextSession = await completePasswordSetup(passwordSetupToken, newPassword, confirmPassword)
       onLogin(nextSession)
       navigate('/', { replace: true })
     } catch (caughtError) {
@@ -63,15 +86,19 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
           <BrandMark compact />
           <div>
             <p className="eyebrow">Welcome back</p>
-            <h2>Sign in to Ezoryx</h2>
+            <h2>{passwordSetupToken ? 'Create your password' : 'Sign in to Ezoryx'}</h2>
             <p className="muted">
-              Use the account created in your Django backend.
+              {passwordSetupToken
+                ? 'Replace your temporary password before continuing to Ezoryx.'
+                : 'Use your username or student number.'}
             </p>
           </div>
 
-          <form className="form-stack" onSubmit={handleSubmit}>
+          <form className="form-stack" onSubmit={passwordSetupToken ? handlePasswordSetup : handleSubmit}>
+            {!passwordSetupToken ? (
+              <>
             <label>
-              <span>Username</span>
+              <span>Username or student number</span>
               <input
                 autoComplete="username"
                 onChange={(event) => setUsername(event.target.value)}
@@ -93,6 +120,31 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
                 value={password}
               />
             </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  <span>New password</span>
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    required
+                    type="password"
+                    value={newPassword}
+                  />
+                </label>
+                <label>
+                  <span>Confirm new password</span>
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    required
+                    type="password"
+                    value={confirmPassword}
+                  />
+                </label>
+              </>
+            )}
 
             {error ? (
               <div className="inline-alert" role="alert">
@@ -103,7 +155,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
 
             <button className="button button--primary" disabled={loading} type="submit">
               <Icon name="shield" />
-              <span>{loading ? 'Signing in...' : 'Sign in'}</span>
+              <span>{loading ? 'Please wait...' : passwordSetupToken ? 'Set password and continue' : 'Sign in'}</span>
             </button>
           </form>
 

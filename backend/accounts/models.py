@@ -9,6 +9,7 @@ class User(AbstractUser):
         STUDENT = 'STUDENT', 'Student'
 
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
+    must_change_password = models.BooleanField(default=False)
 
     @property
     def is_admin_teacher(self):

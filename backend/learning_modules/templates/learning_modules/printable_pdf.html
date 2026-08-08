@@ -326,12 +326,6 @@
                   <div class="section-body">{{ example.common_mistake|safe }}</div>
                 </div>
               {% endif %}
-              {% if example.mini_check %}
-                <div class="note">
-                  <h4>Mini-check</h4>
-                  <div class="section-body">{{ example.mini_check|safe }}</div>
-                </div>
-              {% endif %}
             </article>
           {% endfor %}
         </section>
@@ -439,12 +433,6 @@
                     <div class="note">
                       <strong>Common mistake</strong>
                       <div class="section-body">{{ example.common_mistake|safe }}</div>
-                    </div>
-                  {% endif %}
-                  {% if example.mini_check %}
-                    <div class="note">
-                      <strong>Mini-check</strong>
-                      <div class="section-body">{{ example.mini_check|safe }}</div>
                     </div>
                   {% endif %}
                 </article>
