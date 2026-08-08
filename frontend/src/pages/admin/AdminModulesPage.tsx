@@ -13,6 +13,7 @@ import type {
   ModuleTopic,
 } from '../../types'
 import { formatDateTime, numeric, toErrorMessage } from '../../utils/format'
+import { cleanImportedName } from '../../utils/importCleaning'
 import {
   getLessonSections,
   lessonSearchText,
@@ -550,8 +551,14 @@ function ModuleOutlineImportModal({
   }
 
   async function copyModuleOutlineExample() {
-    const copied = await copyTextToClipboard(moduleOutlineExampleMarkdown(module.title))
-    setMessage(copied ? 'Example Markdown copied.' : 'Copy failed. You can still download the example MD.')
+    const copied = await copyTextToClipboard(
+      moduleTopicsAndLessonsExampleMarkdown(module.title),
+    )
+    setMessage(
+      copied
+        ? 'Topics + Lessons Markdown copied.'
+        : 'Copy failed. You can still download the Topics + Lessons MD.',
+    )
   }
 
   async function applyOutlineImport() {
@@ -674,13 +681,17 @@ function ModuleOutlineImportModal({
         <div className="lesson-import-modal__body">
           <section className="lesson-import-modal__inputs">
             <div className="lesson-editor__actions">
-              <button className="button button--secondary button--compact" onClick={() => downloadModuleOutlineExample(module.title)} type="button">
+              <button className="button button--secondary button--compact" onClick={() => downloadModuleTopicsOnlyExample(module.title)} type="button">
                 <Icon name="file" />
-                <span>Download Example MD</span>
+                <span>Download Topics Only MD</span>
+              </button>
+              <button className="button button--secondary button--compact" onClick={() => downloadModuleTopicsAndLessonsExample(module.title)} type="button">
+                <Icon name="file" />
+                <span>Download Topics + Lessons MD</span>
               </button>
               <button className="button button--secondary button--compact" onClick={() => void copyModuleOutlineExample()} type="button">
                 <Icon name="file" />
-                <span>Copy Example MD</span>
+                <span>Copy Topics + Lessons</span>
               </button>
               <label className="button button--secondary button--compact import-file-button">
                 <Icon name="upload" />
@@ -695,7 +706,7 @@ function ModuleOutlineImportModal({
                 rows={18}
                 value={text}
               />
-              <small>Use topic headings and lesson bullets. This creates topic records and blank lesson shells only.</small>
+              <small>Use topic headings with optional lesson bullets. Topics without lessons are valid; lesson bullets create blank lesson shells.</small>
             </label>
             {message ? <p className="admin-message">{message}</p> : null}
           </section>
@@ -746,7 +757,7 @@ function ModuleOutlineImportModal({
                         {lesson.exists || lesson.duplicateInImport ? 'Skip: ' : 'Create: '}
                         {lesson.title}
                       </span>
-                    )) : <span>No lessons listed</span>}
+                    )) : <span>Topic only</span>}
                   </div>
                 </article>
               )) : <small>No topic headings found yet.</small>}
@@ -1554,7 +1565,7 @@ function parseModuleOutlineMarkdown(value: string): ParsedModuleOutline {
 
     const moduleMatch = line.match(/^#\s+(.+)$/)
     if (moduleMatch && !moduleTitle) {
-      moduleTitle = moduleMatch[1].trim()
+      moduleTitle = cleanImportedName(moduleMatch[1])
       return
     }
     if (line.match(/^#\s+(.+)$/)) {
@@ -1570,7 +1581,7 @@ function parseModuleOutlineMarkdown(value: string): ParsedModuleOutline {
         lessons: [],
         order: Number.isFinite(parsedOrder) ? parsedOrder : topics.length + 1,
         overview: '',
-        title: stripLeadingNumber(topicMatch[2].trim()),
+        title: cleanImportedName(stripLeadingNumber(topicMatch[2])),
         unit: '',
       }
       topics.push(currentTopic)
@@ -1589,7 +1600,7 @@ function parseModuleOutlineMarkdown(value: string): ParsedModuleOutline {
       if (key === 'competency code' || key === 'code') {
         currentTopic.competency_code = metadataValue
       } else if (key === 'unit') {
-        currentTopic.unit = metadataValue
+        currentTopic.unit = cleanImportedName(metadataValue)
       } else if (key === 'overview') {
         currentTopic.overview = metadataValue
       }
@@ -1601,7 +1612,7 @@ function parseModuleOutlineMarkdown(value: string): ParsedModuleOutline {
       const parsedOrder = Number(lessonMatch[1] || currentTopic.lessons.length + 1)
       currentTopic.lessons.push({
         order: Number.isFinite(parsedOrder) ? parsedOrder : currentTopic.lessons.length + 1,
-        title: stripLeadingNumber(lessonMatch[2].trim()),
+        title: cleanImportedName(stripLeadingNumber(lessonMatch[2])),
       })
       return
     }
@@ -1660,8 +1671,7 @@ function analyzeModuleOutlineImport(
       newTopics += 1
     }
     if (!topic.lessons.length) {
-      badges.push('No lessons')
-      warnings.push(`${topic.title} has no lessons listed.`)
+      badges.push('Topic only')
     }
     if ((importedTopicCounts.get(topicKey) ?? 0) > 1) {
       badges.push('Duplicate topic')
@@ -1695,7 +1705,9 @@ function analyzeModuleOutlineImport(
       }),
       order: topic.order,
       overview: topic.overview,
-      status: existingTopic ? 'Existing topic: new lessons only' : 'New topic',
+      status: topic.lessons.length
+        ? existingTopic ? 'Existing topic: new lessons only' : 'New topic'
+        : existingTopic ? 'Existing topic: no changes' : 'New topic',
       title: topic.title,
       unit: topic.unit,
     }
@@ -1715,10 +1727,17 @@ function analyzeModuleOutlineImport(
   }
 }
 
-function downloadModuleOutlineExample(moduleTitle: string) {
+function downloadModuleTopicsOnlyExample(moduleTitle: string) {
   downloadBlob(
-    new Blob([moduleOutlineExampleMarkdown(moduleTitle)], { type: 'text/markdown' }),
-    'module-outline-import-example.md',
+    new Blob([moduleTopicsOnlyExampleMarkdown(moduleTitle)], { type: 'text/markdown' }),
+    'module-topics-only-template.md',
+  )
+}
+
+function downloadModuleTopicsAndLessonsExample(moduleTitle: string) {
+  downloadBlob(
+    new Blob([moduleTopicsAndLessonsExampleMarkdown(moduleTitle)], { type: 'text/markdown' }),
+    'module-topics-and-lessons-template.md',
   )
 }
 
@@ -1735,7 +1754,22 @@ async function copyTextToClipboard(value: string) {
   }
 }
 
-function moduleOutlineExampleMarkdown(moduleTitle: string) {
+function moduleTopicsOnlyExampleMarkdown(moduleTitle: string) {
+  return `# ${moduleTitle || 'Introduction to Programming'}
+
+## Topic 1: Input, Process, Output
+Competency Code: CS11-IPO-001
+Unit: Programming Basics
+Overview: Students describe how programs receive input, process data, and produce output.
+
+## Topic 2: Control Structures
+Competency Code: CS11-CTRL-001
+Unit: Program Flow
+Overview: Students use decisions and repetition to control program behavior.
+`
+}
+
+function moduleTopicsAndLessonsExampleMarkdown(moduleTitle: string) {
   return `# ${moduleTitle || 'Introduction to Programming'}
 
 ## Topic 1: Input, Process, Output

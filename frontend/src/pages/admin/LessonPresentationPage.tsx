@@ -653,16 +653,11 @@ function buildPresentationSections(
 ): PresentationSection[] {
   const lessonSections = [
     ["What We'll Learn", lesson.learning_targets || lesson.objectives],
-    ["Words We'll Use", lesson.key_terms],
     ['Before We Start', lesson.before_you_start],
     ["Let's Understand", lesson.short_discussion || lesson.overview],
     ["Let's Look at Examples", ''],
     ["Let's Practice", lesson.lets_practice],
-    ['Now We Apply', lesson.apply_what_you_learned],
     ['Challenge Task', lesson.challenge_task],
-    ['How Our Work Will Be Checked', lesson.rubric],
-    ["Let's Reflect", lesson.reflection],
-    ['How We Show Learning', lesson.evidence_of_learning],
   ]
     .filter(
       ([title, content]) =>

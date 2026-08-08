@@ -4,7 +4,6 @@ import type { AuthedRequest, WorkspaceDataWithRefresh } from './types'
 import { MobileHeader, MobileTabbar, Sidebar } from '../components/navigation'
 import type { NavItem } from '../components/navigation'
 import { SkeletonList, StatusBanner } from '../components/ui'
-import { AdminAcademicSetupPage } from '../pages/admin/AdminAcademicSetupPage'
 import { AdminAssessmentsPage } from '../pages/admin/AdminAssessmentsPage'
 import { AdminAttendancePage } from '../pages/admin/AdminAttendancePage'
 import { AdminCodingPage } from '../pages/admin/AdminCodingPage'
@@ -29,7 +28,6 @@ const adminNavItems: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' },
   { to: '/admin/students', label: 'Students', icon: 'users' },
   { to: '/admin/classes', label: 'Classes', icon: 'calendar' },
-  { to: '/admin/academic-setup', label: 'Academic Setup', icon: 'book' },
   { to: '/admin/modules', label: 'Modules', icon: 'module' },
   { to: '/admin/coding', label: 'Coding', icon: 'code' },
   { to: '/admin/assessments', label: 'Assessments', icon: 'assessment' },
@@ -120,13 +118,7 @@ export function AdminApp({
           />
           <Route
             path="/admin/academic-setup"
-            element={
-              <AdminAcademicSetupPage
-                api={api}
-                data={workspace}
-                refresh={workspace.refresh}
-              />
-            }
+            element={<Navigate replace to="/admin/classes" />}
           />
           <Route
             path="/admin/modules"

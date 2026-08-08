@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import BooleanField, Exists, OuterRef, Q, Value
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -7,7 +7,7 @@ from subjects.models import ScheduleStudent
 
 from .models import StudentProfile, User
 from .permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
-from .serializers import StudentProfileSerializer, UserSerializer
+from .serializers import AvailableStudentSerializer, StudentProfileSerializer, UserSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -40,6 +40,19 @@ class UserViewSet(viewsets.ModelViewSet):
                 schedule_id=schedule_id,
             ).values('student_id')
             queryset = queryset.exclude(id__in=enrolled_ids)
+            queryset = queryset.annotate(
+                has_inactive_enrollment=Exists(
+                    ScheduleStudent.objects.filter(
+                        is_active=False,
+                        schedule_id=schedule_id,
+                        student_id=OuterRef('pk'),
+                    ),
+                ),
+            )
+        else:
+            queryset = queryset.annotate(
+                has_inactive_enrollment=Value(False, output_field=BooleanField()),
+            )
 
         if search:
             queryset = queryset.filter(
@@ -60,7 +73,7 @@ class UserViewSet(viewsets.ModelViewSet):
             'count': count,
             'next': offset + limit if offset + limit < count else None,
             'previous': max(offset - limit, 0) if offset > 0 else None,
-            'results': self.get_serializer(results, many=True).data,
+            'results': AvailableStudentSerializer(results, many=True).data,
         })
 
 

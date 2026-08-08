@@ -375,6 +375,212 @@ class ClassScopedGradeTests(APITestCase):
         )
         self.assertEqual(score_response.status_code, 400)
 
+    def test_score_sheet_creates_complete_roster_and_coerces_blank_to_zero(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/grades/items/score-sheet/',
+            {
+                'schedule': self.schedule_a.id,
+                'grade_category': self.category.id,
+                'title': 'Quiz 1',
+                'date': '2027-08-02',
+                'points_possible': '10.00',
+                'records': [
+                    {'student': self.student.id, 'raw_score': '', 'status': 'GRADED'},
+                    {
+                        'student': self.other_student.id,
+                        'raw_score': '',
+                        'status': 'EXCUSED',
+                        'remarks': 'Approved absence',
+                    },
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        item = GradeItem.objects.get(title='Quiz 1')
+        self.assertEqual(str(item.date), '2027-08-02')
+        zero = StudentGradeItemScore.objects.get(grade_item=item, student=self.student)
+        excused = StudentGradeItemScore.objects.get(grade_item=item, student=self.other_student)
+        self.assertEqual(zero.raw_score, Decimal('0.00'))
+        self.assertEqual(zero.status, StudentGradeItemScore.Status.GRADED)
+        self.assertEqual(excused.status, StudentGradeItemScore.Status.EXCUSED)
+        self.assertIsNone(excused.raw_score)
+        self.assertEqual(response.data['counts']['zero_count'], 1)
+        self.assertEqual(response.data['counts']['excused_count'], 1)
+        self.assertEqual(
+            StudentCategoryGrade.objects.get(
+                schedule=self.schedule_a,
+                student=self.student,
+                grade_category=self.category,
+            ).raw_score,
+            Decimal('0.00'),
+        )
+
+    def test_score_sheet_validation_is_atomic(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/grades/items/score-sheet/',
+            {
+                'schedule': self.schedule_a.id,
+                'grade_category': self.category.id,
+                'title': 'Invalid quiz',
+                'date': '2027-08-02',
+                'points_possible': '10.00',
+                'records': [
+                    {'student': self.student.id, 'raw_score': '8.50'},
+                    {'student': self.other_student.id, 'raw_score': '-1'},
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(GradeItem.objects.filter(title='Invalid quiz').exists())
+        self.assertFalse(StudentGradeItemScore.objects.filter(grade_item__title='Invalid quiz').exists())
+
+    def test_score_sheet_update_preserves_inactive_history_and_requires_current_roster(self):
+        inactive_enrollment = ScheduleStudent.objects.create(
+            schedule=self.schedule_a,
+            student=self.other_student,
+        )
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Quiz history',
+            date='2027-08-01',
+            points_possible=Decimal('10.00'),
+        )
+        StudentGradeItemScore.objects.create(
+            grade_item=item,
+            student=self.student,
+            raw_score=Decimal('5.00'),
+        )
+        StudentGradeItemScore.objects.create(
+            grade_item=item,
+            student=self.other_student,
+            raw_score=Decimal('7.00'),
+        )
+        inactive_enrollment.set_active(False, self.teacher)
+        self.client.force_authenticate(self.teacher)
+
+        stale = self.client.put(
+            f'/api/grades/items/{item.id}/roster/',
+            {'records': [
+                {'student': self.student.id, 'raw_score': '9.00'},
+                {'student': self.other_student.id, 'raw_score': '1.00'},
+            ]},
+            format='json',
+        )
+        self.assertEqual(stale.status_code, 400)
+
+        updated = self.client.put(
+            f'/api/grades/items/{item.id}/roster/',
+            {'records': [{'student': self.student.id, 'raw_score': '9.00'}]},
+            format='json',
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.student).raw_score,
+            Decimal('9.00'),
+        )
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.other_student).raw_score,
+            Decimal('7.00'),
+        )
+        inactive_row = next(row for row in updated.data['rows'] if row['student'] == self.other_student.id)
+        self.assertFalse(inactive_row['is_active'])
+
+    def test_students_cannot_read_class_score_sheet_rosters(self):
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Private roster',
+            date='2027-08-01',
+            points_possible=Decimal('10.00'),
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(f'/api/grades/items/{item.id}/roster/')
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_score_sheet_supports_non_attendance_categories_and_filters(self):
+        self.client.force_authenticate(self.teacher)
+        categories = [self.category]
+        for category_type in (
+            GradeCategoryChoices.EXAM,
+            GradeCategoryChoices.ACTIVITY,
+            GradeCategoryChoices.CODING,
+            GradeCategoryChoices.OTHER,
+        ):
+            categories.append(GradeCategory.objects.create(
+                subject=self.subject,
+                grading_period=GradingPeriod.PRELIM,
+                category=category_type,
+                name=f'{category_type.title()} scores',
+                weight=Decimal('0.00'),
+            ))
+
+        created_ids = []
+        for index, category in enumerate(categories, start=1):
+            response = self.client.post(
+                '/api/grades/items/score-sheet/',
+                {
+                    'schedule': self.schedule_a.id,
+                    'grade_category': category.id,
+                    'title': f'Sheet {index}',
+                    'date': '2027-08-03',
+                    'points_possible': '5.00',
+                    'records': [{'student': self.student.id, 'raw_score': '5.00'}],
+                },
+                format='json',
+            )
+            self.assertEqual(response.status_code, 201)
+            created_ids.append(response.data['item']['id'])
+
+        filtered = self.client.get(
+            f'/api/grades/items/?schedule={self.schedule_a.id}'
+            '&source_type=MANUAL&period=PRELIM&date=2027-08-03'
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual({item['id'] for item in filtered.data}, set(created_ids))
+
+    def test_score_sheet_rejects_attendance_categories_and_archived_classes(self):
+        attendance_category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.ATTENDANCE,
+            name='Attendance',
+            weight=Decimal('0.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+        payload = {
+            'schedule': self.schedule_a.id,
+            'grade_category': attendance_category.id,
+            'title': 'Not score entry',
+            'date': '2027-08-03',
+            'points_possible': '1.00',
+            'records': [{'student': self.student.id, 'raw_score': '1.00'}],
+        }
+
+        attendance_response = self.client.post(
+            '/api/grades/items/score-sheet/', payload, format='json'
+        )
+        self.assertEqual(attendance_response.status_code, 400)
+        self.schedule_a.archive(self.teacher)
+        archived_response = self.client.post(
+            '/api/grades/items/score-sheet/',
+            {**payload, 'grade_category': self.category.id},
+            format='json',
+        )
+        self.assertEqual(archived_response.status_code, 400)
+
     def test_deleting_schedule_preserves_grade_history_as_unassigned(self):
         item = GradeItem.objects.create(
             schedule=self.schedule_a,

@@ -1,9 +1,92 @@
 import type { WorkspaceData } from '../app/types'
-import type { Module, ModuleLesson, ModuleTopic } from '../types'
+import type {
+  Module,
+  ModuleLesson,
+  ModuleLessonProgress,
+  ModuleTopic,
+} from '../types'
 
 export type LessonSection = {
   content: string
   title: string
+}
+
+export type LessonResumeMode = 'continue' | 'resume' | 'review' | 'start'
+
+export type LessonResumeTarget = {
+  lesson: ModuleLesson
+  mode: LessonResumeMode
+}
+
+export function getLessonResumeTarget(
+  lessons: ModuleLesson[],
+  progressRecords: ModuleLessonProgress[],
+  {
+    currentUserId,
+    isAccessible,
+  }: {
+    currentUserId: number | null
+    isAccessible: boolean
+  },
+): LessonResumeTarget | null {
+  if (!isAccessible) {
+    return null
+  }
+
+  const publishedLessons = lessons.filter((lesson) => lesson.is_published)
+  if (!publishedLessons.length) {
+    return null
+  }
+
+  const lessonById = new Map(
+    publishedLessons.map((lesson) => [lesson.id, lesson]),
+  )
+  const validProgress = progressRecords.filter(
+    (progress) =>
+      progress.student === currentUserId && lessonById.has(progress.lesson),
+  )
+  const progressByLesson = new Map(
+    validProgress.map((progress) => [progress.lesson, progress]),
+  )
+  const byMostRecent = [...validProgress].sort(
+    (first, second) =>
+      resumeTimestamp(second.last_viewed_at) - resumeTimestamp(first.last_viewed_at),
+  )
+  const recentUnfinished = byMostRecent.find((progress) => !progress.completed_at)
+
+  if (recentUnfinished) {
+    return {
+      lesson: lessonById.get(recentUnfinished.lesson)!,
+      mode: 'resume',
+    }
+  }
+
+  const firstUnstarted = publishedLessons.find(
+    (lesson) => !progressByLesson.has(lesson.id),
+  )
+  if (firstUnstarted) {
+    return {
+      lesson: firstUnstarted,
+      mode: validProgress.length ? 'continue' : 'start',
+    }
+  }
+
+  const recentLesson = byMostRecent[0]
+  return recentLesson
+    ? { lesson: lessonById.get(recentLesson.lesson)!, mode: 'review' }
+    : { lesson: publishedLessons[0], mode: 'start' }
+}
+
+export function lessonResumeActionLabel(mode: LessonResumeMode) {
+  if (mode === 'resume') return 'Resume Lesson'
+  if (mode === 'continue') return 'Continue Lesson'
+  if (mode === 'review') return 'Review Last Lesson'
+  return 'Start Lesson'
+}
+
+function resumeTimestamp(value: string) {
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? 0 : timestamp
 }
 
 export function moduleSearchText(module: Module) {
@@ -59,15 +142,10 @@ export function lessonSearchText(lesson: ModuleLesson) {
   return [
     lesson.title,
     lesson.learning_targets,
-    lesson.key_terms,
     lesson.before_you_start,
     lesson.short_discussion,
     lesson.lets_practice,
-    lesson.apply_what_you_learned,
     lesson.challenge_task,
-    lesson.rubric,
-    lesson.reflection,
-    lesson.evidence_of_learning,
     lesson.objectives,
     lesson.overview,
     lesson.student_activities,
@@ -99,34 +177,24 @@ export function lessonSectionId(title: string) {
 
 export function getLessonSections(lesson: Pick<
   ModuleLesson,
-  | 'apply_what_you_learned'
   | 'before_you_start'
   | 'challenge_task'
-  | 'key_terms'
   | 'learning_targets'
   | 'lets_practice'
   | 'objectives'
   | 'overview'
-  | 'reflection'
-  | 'evidence_of_learning'
   | 'resources'
-  | 'rubric'
   | 'short_discussion'
   | 'student_activities'
   | 'title'
 >, options: { hasStructuredExamples?: boolean } = {}) {
   const sections = [
     ["What We'll Learn", lesson.learning_targets || lesson.objectives],
-    ["Words We'll Use", lesson.key_terms],
     ['Before We Start', lesson.before_you_start],
     ["Let's Understand", lesson.short_discussion || lesson.overview],
     ["Let's Look at Examples", ''],
     ["Let's Practice", lesson.lets_practice],
-    ['Now We Apply', lesson.apply_what_you_learned],
     ['Challenge Task', lesson.challenge_task],
-    ['How Our Work Will Be Checked', lesson.rubric],
-    ["Let's Reflect", lesson.reflection],
-    ['How We Show Learning', lesson.evidence_of_learning],
     ['Student Activities', lesson.student_activities],
     ['Resources / References', lesson.resources],
   ]

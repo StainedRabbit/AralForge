@@ -1,5 +1,12 @@
+import re
+import secrets
+import string
+
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -40,7 +47,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     serializer_class = SubjectScheduleSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
 
-    def get_queryset(self):
+    def get_base_queryset(self):
         queryset = SubjectSchedule.objects.select_related(
             'subject',
             'school_year_semester__school_year',
@@ -49,6 +56,10 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_admin_teacher:
             queryset = queryset.filter(students__student=self.request.user).distinct()
 
+        return queryset
+
+    def get_queryset(self):
+        queryset = self.get_base_queryset()
         term = self.request.query_params.get('term')
         schedule_status = self.request.query_params.get('status', '').strip().lower()
         search = self.request.query_params.get('search', '').strip()
@@ -135,7 +146,10 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def roster(self, request, pk=None):
-        schedule = self.get_object()
+        # Roster filters such as `status` and `search` apply to enrollments, not
+        # to the parent schedule selected by this detail action.
+        schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
+        self.check_object_permissions(request, schedule)
         queryset = schedule.students.select_related('student__student_profile')
         enrollment_status = request.query_params.get('status', '').strip().lower()
         search = request.query_params.get('search', '').strip()
@@ -203,43 +217,8 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         result = enroll_users(schedule, students, request.user)
         return Response(result)
 
-    @action(detail=True, methods=['post'], url_path='update-enrollments')
-    def update_enrollments(self, request, pk=None):
-        schedule = self.get_object()
-        enrollment_ids = request.data.get('enrollment_ids')
-        is_active = request.data.get('is_active')
-        if not isinstance(enrollment_ids, list) or not enrollment_ids:
-            raise serializers.ValidationError({'enrollment_ids': 'Select at least one enrollment.'})
-        if not isinstance(is_active, bool):
-            raise serializers.ValidationError({'is_active': 'Provide true or false.'})
-        try:
-            normalized_ids = list(dict.fromkeys(int(value) for value in enrollment_ids))
-        except (TypeError, ValueError) as error:
-            raise serializers.ValidationError({'enrollment_ids': 'Enrollment IDs must be integers.'}) from error
-
-        with transaction.atomic():
-            enrollments = list(
-                ScheduleStudent.objects.select_for_update().filter(
-                    schedule=schedule,
-                    id__in=normalized_ids,
-                ),
-            )
-            found_ids = {enrollment.id for enrollment in enrollments}
-            missing_ids = [value for value in normalized_ids if value not in found_ids]
-            if missing_ids:
-                raise serializers.ValidationError({
-                    'enrollment_ids': f'Enrollments do not belong to this class: {missing_ids}.',
-                })
-            changed_count = 0
-            for enrollment in enrollments:
-                if enrollment.is_active == is_active:
-                    continue
-                enrollment.set_active(is_active, request.user)
-                changed_count += 1
-
-        return Response({'changed_count': changed_count})
-
     @action(detail=True, methods=['post'], url_path='import-roster')
+    @transaction.atomic
     def import_roster(self, request, pk=None):
         schedule = self.get_object()
         rows = request.data.get('rows')
@@ -251,23 +230,38 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
 
         profiles_by_number = {
             profile.student_number.strip().casefold(): profile
-            for profile in StudentProfile.objects.select_related('user').filter(
-                user__role=User.Role.STUDENT,
-            )
+            for profile in StudentProfile.objects.select_for_update().select_related('user')
+        }
+        enrollments_by_student = {
+            enrollment.student_id: enrollment
+            for enrollment in ScheduleStudent.objects.select_for_update().filter(schedule=schedule)
         }
         seen = set()
         validated = []
         row_results = []
         has_errors = False
+        summary = {'create_count': 0, 'enroll_count': 0, 'reactivate_count': 0, 'already_active_count': 0}
         for index, row in enumerate(rows, start=1):
             if not isinstance(row, dict):
                 row_results.append({'row': index, 'status': 'error', 'error': 'Row must be an object.'})
                 has_errors = True
                 continue
-            student_number = str(row.get('student_number') or row.get('studentNumber') or '').strip()
+            student_number = str(row.get('student_number') or '').strip()
+            first_name = normalize_imported_person_name(row.get('first_name'))
+            middle_name = normalize_imported_person_name(row.get('middle_name'))
+            last_name = normalize_imported_person_name(row.get('last_name'))
             normalized = student_number.casefold()
             if not normalized:
                 row_results.append({'row': index, 'status': 'error', 'error': 'Student number is required.'})
+                has_errors = True
+                continue
+            if len(student_number) > StudentProfile._meta.get_field('student_number').max_length:
+                row_results.append({
+                    'row': index,
+                    'student_number': student_number,
+                    'status': 'error',
+                    'error': 'Student number is too long.',
+                })
                 has_errors = True
                 continue
             if normalized in seen:
@@ -281,22 +275,71 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 continue
             seen.add(normalized)
             profile = profiles_by_number.get(normalized)
-            if not profile:
+            if profile and (
+                profile.user.role != User.Role.STUDENT
+                or not profile.user.is_active
+                or not profile.is_active
+            ):
                 row_results.append({
                     'row': index,
                     'student_number': student_number,
                     'status': 'error',
-                    'error': 'No existing student account matches this number.',
+                    'error': 'This student account is disabled and must be reviewed in Student Management.',
                 })
                 has_errors = True
                 continue
-            validated.append(profile.user)
+            if profile:
+                enrollment = enrollments_by_student.get(profile.user_id)
+                if enrollment and enrollment.is_active:
+                    row_status = 'already_enrolled'
+                    summary['already_active_count'] += 1
+                elif enrollment:
+                    row_status = 'reactivate'
+                    summary['reactivate_count'] += 1
+                else:
+                    row_status = 'enroll'
+                    summary['enroll_count'] += 1
+                validated.append({'profile': profile, 'status': row_status})
+                row_results.append({
+                    'row': index,
+                    'student_number': profile.student_number,
+                    'student_id': profile.user_id,
+                    'student_name': profile.user.get_full_name() or profile.student_number,
+                    'status': row_status,
+                })
+                continue
+
+            if not first_name or not last_name:
+                row_results.append({
+                    'row': index,
+                    'student_number': student_number,
+                    'status': 'error',
+                    'error': 'First name and last name are required for a new student.',
+                })
+                has_errors = True
+                continue
+            account_first_name = ' '.join(part for part in (first_name, middle_name) if part)
+            if len(account_first_name) > 150 or len(last_name) > 150:
+                row_results.append({
+                    'row': index,
+                    'student_number': student_number,
+                    'status': 'error',
+                    'error': 'The combined first and middle name, and the last name, must each be 150 characters or fewer.',
+                })
+                has_errors = True
+                continue
+            validated.append({
+                'first_name': account_first_name,
+                'last_name': last_name,
+                'student_number': student_number,
+                'status': 'create',
+            })
+            summary['create_count'] += 1
             row_results.append({
                 'row': index,
-                'student_number': profile.student_number,
-                'student_id': profile.user_id,
-                'student_name': profile.user.get_full_name() or profile.user.username,
-                'status': 'ready',
+                'student_number': student_number,
+                'student_name': f'{account_first_name} {last_name}',
+                'status': 'create',
             })
 
         preview = {
@@ -304,13 +347,47 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             'row_count': len(rows),
             'ready_count': len(validated),
             'rows': row_results,
+            **summary,
         }
         if dry_run:
             return Response(preview)
         if has_errors:
             return Response(preview, status=status.HTTP_400_BAD_REQUEST)
 
-        preview.update(enroll_users(schedule, validated, request.user))
+        students = []
+        credentials = []
+        for entry in validated:
+            profile = entry.get('profile')
+            if profile:
+                students.append(profile.user)
+                continue
+            user = User(
+                username=available_import_username(entry['student_number']),
+                first_name=entry['first_name'],
+                last_name=entry['last_name'],
+                email='',
+                role=User.Role.STUDENT,
+                is_active=True,
+                must_change_password=True,
+            )
+            temporary_password = generate_temporary_password(user)
+            user.set_password(temporary_password)
+            user.save()
+            StudentProfile.objects.create(
+                user=user,
+                student_number=entry['student_number'],
+                section='',
+                year_level=None,
+            )
+            students.append(user)
+            credentials.append({
+                'student_number': entry['student_number'],
+                'temporary_password': temporary_password,
+            })
+
+        preview.update(enroll_users(schedule, students, request.user))
+        preview['created_count'] = len(credentials)
+        preview['credentials'] = credentials
         return Response(preview)
 
 
@@ -357,6 +434,39 @@ def bounded_int(value, default=0, maximum=None):
     except (TypeError, ValueError):
         number = default
     return min(number, maximum) if maximum is not None else number
+
+
+def available_import_username(student_number):
+    normalized = re.sub(r'[^\w.@+-]+', '-', student_number, flags=re.UNICODE).strip('-')
+    base = f'student-{normalized or "account"}'[:140]
+    candidate = base
+    suffix = 1
+    while User.objects.filter(username=candidate).exists():
+        suffix += 1
+        candidate = f'{base[:145 - len(str(suffix))]}-{suffix}'
+    return candidate
+
+
+def normalize_imported_person_name(value):
+    cleaned = ' '.join(str(value or '').split())
+    return re.sub(
+        r"(^|[\s\-'\u2019])([^\W\d_])",
+        lambda match: f'{match.group(1)}{match.group(2).upper()}',
+        cleaned,
+        flags=re.UNICODE,
+    )
+
+
+def generate_temporary_password(user):
+    alphabet = string.ascii_letters + string.digits + '!@#$%&*?'
+    for _ in range(100):
+        password = ''.join(secrets.choice(alphabet) for _ in range(18))
+        try:
+            validate_password(password, user)
+        except DjangoValidationError:
+            continue
+        return password
+    raise RuntimeError('Could not generate a valid temporary password.')
 
 
 def schedule_dependency_counts(schedule):

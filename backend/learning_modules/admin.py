@@ -96,7 +96,6 @@ class ModuleLessonAdmin(admin.ModelAdmin):
         'expected_outputs',
         'common_misconceptions',
         'teaching_tips',
-        'evidence_of_learning',
         'remediation',
         'enrichment',
         'resources',

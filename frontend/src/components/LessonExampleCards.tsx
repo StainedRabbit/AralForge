@@ -40,12 +40,6 @@ export function LessonExampleCards({
               <RichLessonText value={example.common_mistake} variant={variant} />
             </div>
           ) : null}
-          {example.mini_check ? (
-            <div className="lesson-example-card__note">
-              <strong>Mini-check</strong>
-              <RichLessonText value={example.mini_check} variant={variant} />
-            </div>
-          ) : null}
         </article>
       ))}
     </div>

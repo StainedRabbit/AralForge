@@ -164,16 +164,11 @@ class ModuleLesson(models.Model):
     title = models.CharField(max_length=180)
     order = models.PositiveIntegerField(default=0)
     learning_targets = models.TextField(blank=True)
-    key_terms = models.TextField(blank=True)
     before_you_start = models.TextField(blank=True)
     short_discussion = models.TextField(blank=True)
     guided_examples = models.TextField(blank=True)
     lets_practice = models.TextField(blank=True)
-    apply_what_you_learned = models.TextField(blank=True)
     challenge_task = models.TextField(blank=True)
-    rubric = models.TextField(blank=True)
-    reflection = models.TextField(blank=True)
-    evidence_of_learning = models.TextField(blank=True)
     objectives = models.TextField(blank=True)
     overview = models.TextField(blank=True)
     subtopics = models.TextField(blank=True)
@@ -216,16 +211,11 @@ class ModuleLesson(models.Model):
                 'title',
                 'order',
                 'learning_targets',
-                'key_terms',
                 'before_you_start',
                 'short_discussion',
                 'guided_examples',
                 'lets_practice',
-                'apply_what_you_learned',
                 'challenge_task',
-                'rubric',
-                'reflection',
-                'evidence_of_learning',
                 'objectives',
                 'overview',
                 'student_activities',
@@ -463,16 +453,11 @@ LESSON_PDF_CONTENT_FIELDS = (
     'title',
     'order',
     'learning_targets',
-    'key_terms',
     'before_you_start',
     'short_discussion',
     'guided_examples',
     'lets_practice',
-    'apply_what_you_learned',
     'challenge_task',
-    'rubric',
-    'reflection',
-    'evidence_of_learning',
     'objectives',
     'overview',
     'student_activities',
@@ -541,7 +526,6 @@ class ModuleLessonExample(models.Model):
     alt_text = models.CharField(max_length=240, blank=True)
     body = models.TextField(blank=True)
     common_mistake = models.TextField(blank=True)
-    mini_check = models.TextField(blank=True)
     is_published = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

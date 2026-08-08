@@ -690,6 +690,42 @@ class ModuleLessonProgressApiTests(APITestCase):
         ):
             self.assertNotIn(field, response.data)
 
+    def test_lesson_contract_excludes_removed_sections(self):
+        removed_fields = {
+            'apply_what_you_learned',
+            'evidence_of_learning',
+            'key_terms',
+            'reflection',
+            'rubric',
+        }
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.get(f'/api/modules/lessons/{self.lesson_one.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(removed_fields.isdisjoint(response.data))
+        model_fields = {field.name for field in ModuleLesson._meta.get_fields()}
+        self.assertTrue(removed_fields.isdisjoint(model_fields))
+
+    def test_teacher_can_duplicate_lesson_after_section_removal(self):
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            f'/api/modules/lessons/{self.lesson_one.id}/duplicate/',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['title'], 'Copy of Lesson One')
+        self.assertEqual(response.data['learning_targets'], self.lesson_one.learning_targets)
+        for field in (
+            'apply_what_you_learned',
+            'evidence_of_learning',
+            'key_terms',
+            'reflection',
+            'rubric',
+        ):
+            self.assertNotIn(field, response.data)
+
     def test_student_cannot_create_progress_for_another_student(self):
         self.client.force_authenticate(self.student)
 
@@ -935,6 +971,11 @@ class ModuleLessonExampleApiTests(APITestCase):
                 self.assertEqual(response.status_code, 201)
                 self.assertTrue(response.data['image'].endswith('.svg'))
                 self.assertEqual(response.data['body'], 'Read the diagram.')
+                self.assertNotIn('mini_check', response.data)
+                model_fields = {
+                    field.name for field in ModuleLessonExample._meta.get_fields()
+                }
+                self.assertNotIn('mini_check', model_fields)
 
     def test_student_can_read_published_examples_after_access(self):
         example = ModuleLessonExample.objects.create(
@@ -1055,6 +1096,23 @@ class PrintablePdfApiTests(APITestCase):
         lesson.pdf_is_outdated = False
         lesson.save(update_fields=['pdf_file', 'pdf_generated_at', 'pdf_is_outdated'])
         return lesson
+
+    def test_printable_lesson_sections_exclude_removed_fields(self):
+        from learning_modules.services.pdf_generation import lesson_context
+
+        section_titles = {
+            section['title']
+            for section in lesson_context(self.lesson)['sections']
+        }
+
+        self.assertIn("What We'll Learn", section_titles)
+        self.assertTrue({
+            'Words We\'ll Use',
+            'Now We Apply',
+            'How Our Work Will Be Checked',
+            'Let\'s Reflect',
+            'How We Show Learning',
+        }.isdisjoint(section_titles))
 
     def test_teacher_can_regenerate_module_pdf(self):
         with tempfile.TemporaryDirectory() as media_root:
@@ -1369,6 +1427,7 @@ class PrintablePdfApiTests(APITestCase):
                 self.assertEqual(example_context['image']['alt_text'], 'Flowchart diagram')
                 self.assertIn('flowchart.svg', example_context['image']['src'])
                 self.assertTrue(example_context['image']['src'].startswith('file:///'))
+                self.assertNotIn('mini_check', example_context)
 
 
 class LessonMainActivityApiTests(APITestCase):
