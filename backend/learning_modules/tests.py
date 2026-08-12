@@ -13,6 +13,14 @@ from rest_framework.test import APITestCase
 from accounts.models import User
 from assessments.models import Assessment
 from coding.models import ProgrammingProblem
+from grades.models import (
+    GradeCategory,
+    GradeCategoryChoices,
+    GradeItem,
+    GradeItemSourceType,
+    GradingPeriod,
+    StudentGradeItemScore,
+)
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 from .models import (
@@ -739,6 +747,391 @@ class ModuleLessonProgressApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class PaperMainActivityEntryApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='paper-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='paper-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.other_student = User.objects.create_user(
+            username='paper-other',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.unenrolled_student = User.objects.create_user(
+            username='paper-unenrolled',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.subject = Subject.objects.create(code='PAPER101', name='Paper Quiz Subject')
+        school_year = SchoolYear.objects.create(start_year=2028, end_year=2029)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        self.schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='08:00',
+            end_time='09:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.other_student)
+        self.module = Module.objects.create(
+            title='Paper Quiz Module',
+            slug='paper-quiz-module',
+            subject=self.subject,
+            is_published=True,
+        )
+        self.module.subjects.add(self.subject)
+        topic = ModuleTopic.objects.create(
+            module=self.module,
+            title='Paper Topic',
+            is_published=True,
+        )
+        lesson = ModuleLesson.objects.create(
+            topic=topic,
+            title='Paper Lesson',
+            is_published=True,
+        )
+        self.activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=topic,
+            lesson=lesson,
+            title='Period Quiz',
+            instructions='Answer every question.',
+            points_possible=Decimal('12.00'),
+            max_attempts=1,
+            is_published=True,
+        )
+        self.category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Prelim Quizzes',
+            weight=Decimal('100.00'),
+        )
+        self.item = GradeItem.objects.create(
+            schedule=self.schedule,
+            grade_category=self.category,
+            title=self.activity.title,
+            points_possible=self.activity.points_possible,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Type JVM.',
+            points=Decimal('12.00'),
+            correct_text_answers=['JVM'],
+        )
+
+    def paper_payload(self, rows=None):
+        return {
+            'grade_item': self.item.id,
+            'scores': rows if rows is not None else [
+                {'student': self.student.id, 'score': '9.00'},
+            ],
+        }
+
+    def test_teacher_records_batch_and_corrects_score_without_answers(self):
+        abandoned = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            attempt_number=1,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.student.id, 'score': '9.00'},
+                {'student': self.other_student.id, 'score': '0.00'},
+            ]),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['created_count'], 2)
+        self.assertEqual(response.data['updated_count'], 0)
+        first = next(row for row in response.data['attempts'] if row['student'] == self.student.id)
+        self.assertEqual(first['submission_method'], 'PAPER')
+        self.assertEqual(first['attempt_number'], 2)
+        self.assertEqual(Decimal(first['score']), Decimal('9.00'))
+        self.assertEqual(Decimal(first['max_score']), Decimal('12.00'))
+        self.assertEqual(first['recorded_by'], self.teacher.id)
+        self.assertEqual(first['paper_grade_item'], self.item.id)
+        self.assertFalse(ModuleAccess.objects.filter(student=self.student, module=self.module).exists())
+        attempt = ModuleActivityAttempt.objects.get(pk=first['id'])
+        self.assertFalse(attempt.answers.exists())
+        score = StudentGradeItemScore.objects.get(
+            grade_item=self.item,
+            student=self.student,
+        )
+        self.assertEqual(score.raw_score, Decimal('9.00'))
+        self.assertEqual(score.origin, StudentGradeItemScore.Origin.AUTOMATIC)
+        zero = StudentGradeItemScore.objects.get(
+            grade_item=self.item,
+            student=self.other_student,
+        )
+        self.assertEqual(zero.raw_score, Decimal('0.00'))
+
+        update = self.client.put(
+            f'/api/modules/activity-attempts/{attempt.id}/paper-score/',
+            {'score': '6.50'},
+            format='json',
+        )
+
+        self.assertEqual(update.status_code, 200, update.data)
+        self.assertEqual(Decimal(update.data['score']), Decimal('6.50'))
+        score.refresh_from_db()
+        self.assertEqual(score.raw_score, Decimal('6.50'))
+        self.assertTrue(ModuleActivityAttempt.objects.filter(pk=abandoned.pk).exists())
+
+        upsert = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([{'student': self.student.id, 'score': '5.25'}]),
+            format='json',
+        )
+        self.assertEqual(upsert.status_code, 200, upsert.data)
+        self.assertEqual(upsert.data['created_count'], 0)
+        self.assertEqual(upsert.data['updated_count'], 1)
+        self.assertEqual(upsert.data['attempts'][0]['id'], attempt.id)
+        self.assertEqual(Decimal(upsert.data['attempts'][0]['score']), Decimal('5.25'))
+
+    def test_paper_scores_require_teacher_enrollment_and_no_online_submission(self):
+        self.client.force_authenticate(self.student)
+        forbidden = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload(),
+            format='json',
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.client.force_authenticate(self.teacher)
+        unenrolled = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.unenrolled_student.id, 'score': '8.00'},
+            ]),
+            format='json',
+        )
+        self.assertEqual(unenrolled.status_code, 400)
+
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.other_student,
+            attempt_number=1,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            score=Decimal('6.00'),
+            max_score=Decimal('6.00'),
+            is_submitted=True,
+            submitted_at=timezone.now(),
+        )
+        online_duplicate = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.other_student.id, 'score': '8.00'},
+            ]),
+            format='json',
+        )
+        self.assertEqual(online_duplicate.status_code, 400)
+
+    def test_paper_score_blocks_abandoned_online_attempt_submission(self):
+        grant = ModuleAccess.objects.create(
+            activated_by=self.teacher,
+            module=self.module,
+            student=self.student,
+            payment_status=ModuleAccess.PaymentStatus.PAID,
+            is_active=True,
+        )
+        self.assertTrue(grant.is_available)
+        abandoned = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            attempt_number=1,
+        )
+        self.client.force_authenticate(self.teacher)
+        paper = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload(),
+            format='json',
+        )
+        self.assertEqual(paper.status_code, 200, paper.data)
+
+        self.client.force_authenticate(self.student)
+        submit = self.client.post(
+            f'/api/modules/activity-attempts/{abandoned.id}/submit/',
+        )
+        self.assertEqual(submit.status_code, 403)
+        create = self.client.post(
+            '/api/modules/activity-attempts/',
+            {'activity': self.activity.id, 'student': self.student.id},
+            format='json',
+        )
+        self.assertEqual(create.status_code, 400)
+
+    def test_paper_score_batch_rejects_invalid_rows_atomically(self):
+        self.client.force_authenticate(self.teacher)
+        invalid = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.student.id, 'score': '9.00'},
+                {'student': self.other_student.id, 'score': '12.01'},
+            ]),
+            format='json',
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(ModuleActivityAttempt.objects.filter(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+        ).exists())
+
+        duplicate_response = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.student.id, 'score': '8.00'},
+                {'student': self.student.id, 'score': '7.00'},
+            ]),
+            format='json',
+        )
+        self.assertEqual(duplicate_response.status_code, 400)
+        self.assertFalse(ModuleActivityAttempt.objects.filter(
+            student=self.student,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+        ).exists())
+
+        manual_item = GradeItem.objects.create(
+            schedule=self.schedule,
+            grade_category=self.category,
+            title='Manual item',
+            points_possible=Decimal('12.00'),
+            source_type=GradeItemSourceType.MANUAL,
+        )
+        wrong_item = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            {
+                'grade_item': manual_item.id,
+                'scores': [{'student': self.student.id, 'score': '8.00'}],
+            },
+            format='json',
+        )
+        self.assertEqual(wrong_item.status_code, 400)
+
+        self.schedule.is_active = False
+        self.schedule.save(update_fields=['is_active'])
+        archived = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload(),
+            format='json',
+        )
+        self.assertEqual(archived.status_code, 400)
+        self.assertFalse(ModuleActivityAttempt.objects.filter(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+        ).exists())
+
+    def test_equivalent_online_and_paper_scores_normalize_identically(self):
+        online_student = User.objects.create_user(
+            username='paper-online-equivalent',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=online_student)
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=online_student,
+            attempt_number=1,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            score=Decimal('7.50'),
+            max_score=Decimal('12.00'),
+            is_submitted=True,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.teacher)
+        paper = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([
+                {'student': self.student.id, 'score': '7.50'},
+            ]),
+            format='json',
+        )
+        self.assertEqual(paper.status_code, 200, paper.data)
+        online_score = StudentGradeItemScore.objects.get(
+            grade_item=self.item,
+            student=online_student,
+        )
+        paper_score = StudentGradeItemScore.objects.get(
+            grade_item=self.item,
+            student=self.student,
+        )
+        self.assertEqual(online_score.raw_score, paper_score.raw_score)
+
+    def test_paper_score_is_scoped_to_exact_class_item(self):
+        second_schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=self.schedule.school_year_semester,
+            days='TTH',
+            start_time='09:00',
+            end_time='10:00',
+            section='B',
+        )
+        ScheduleStudent.objects.create(schedule=second_schedule, student=self.student)
+        second_item = GradeItem.objects.create(
+            schedule=second_schedule,
+            grade_category=self.category,
+            title=self.activity.title,
+            points_possible=self.activity.points_possible,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload(),
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(StudentGradeItemScore.objects.filter(
+            grade_item=self.item,
+            student=self.student,
+            raw_score=Decimal('9.00'),
+        ).exists())
+        self.assertFalse(StudentGradeItemScore.objects.filter(
+            grade_item=second_item,
+            student=self.student,
+        ).exists())
+
+    def test_grade_item_api_rejects_duplicate_activity_link_for_same_class(self):
+        self.client.force_authenticate(self.teacher)
+        duplicate = self.client.post(
+            '/api/grades/items/',
+            {
+                'schedule': self.schedule.id,
+                'grade_category': self.category.id,
+                'title': self.activity.title,
+                'points_possible': '12.00',
+                'source_type': GradeItemSourceType.MODULE_ACTIVITY,
+                'module_activity': self.activity.id,
+            },
+            format='json',
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn('module_activity', duplicate.data)
+
+
+class ModuleLessonProgressContinuationApiTests(APITestCase):
+    def setUp(self):
+        ModuleLessonProgressApiTests.setUp(self)
 
     def test_progress_identity_cannot_be_reassigned(self):
         progress = ModuleLessonProgress.objects.create(

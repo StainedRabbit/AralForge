@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
@@ -7,6 +7,9 @@ import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   GradeItem,
   GradeItemSourceType,
+  ModuleActivityAttempt,
+  PaperActivityScoreBatchRequest,
+  PaperActivityScoreBatchResult,
 } from '../../types'
 import { displayScore, formatDate, numeric, toErrorMessage } from '../../utils/format'
 
@@ -21,6 +24,14 @@ const sourceTypes: { label: string; value: GradeItemSourceType }[] = [
 
 type ScoreDraft = Record<string, { rawScore: string; remarks: string }>
 type GradebookViewMode = 'ITEM' | 'MATRIX'
+type RosterFilter = 'ALL' | 'PENDING' | 'ONLINE' | 'PAPER' | 'EXCUSED' | 'OVERRIDDEN'
+type PaperScoreTarget = {
+  attemptId: number | null
+  item: GradeItem
+  notice?: string
+  student: number
+  studentName: string
+}
 
 export function AdminGradebookPage({
   api,
@@ -31,18 +42,23 @@ export function AdminGradebookPage({
   data: WorkspaceData
   refresh: () => Promise<void>
 }) {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [scheduleId, setScheduleId] = useState(() => searchParams.get('schedule') ?? data.schedules[0]?.id.toString() ?? '')
   const [focusedStudentId, setFocusedStudentId] = useState(() => searchParams.get('student') ?? '')
   const selectedSchedule = data.schedules.find((schedule) => schedule.id === Number(scheduleId)) ?? null
-  const [period, setPeriod] = useState<(typeof periods)[number]>('PRELIM')
+  const [period, setPeriod] = useState<(typeof periods)[number]>(() => {
+    const requested = searchParams.get('period')
+    return periods.includes(requested as (typeof periods)[number])
+      ? requested as (typeof periods)[number]
+      : 'PRELIM'
+  })
   const categories = data.gradeCategories.filter(
     (category) =>
       selectedSchedule &&
       category.subject === selectedSchedule.subject &&
       category.grading_period === period,
   )
-  const [categoryId, setCategoryId] = useState('')
+  const [categoryId, setCategoryId] = useState(() => searchParams.get('category') ?? '')
   const selectedCategory =
     categories.find((category) => category.id === Number(categoryId)) ?? categories[0] ?? null
   const items = data.gradeItems
@@ -52,7 +68,7 @@ export function AdminGradebookPage({
       item.schedule === selectedSchedule?.id,
     )
     .sort((left, right) => left.order - right.order || left.id - right.id)
-  const [itemId, setItemId] = useState('')
+  const [itemId, setItemId] = useState(() => searchParams.get('item') ?? '')
   const selectedItem = items.find((item) => item.id === Number(itemId)) ?? items[0] ?? null
   const roster = data.enrollments.filter(
     (enrollment) => selectedSchedule && enrollment.schedule === selectedSchedule.id && enrollment.is_active,
@@ -61,7 +77,12 @@ export function AdminGradebookPage({
     ? roster.find((enrollment) => enrollment.student === Number(focusedStudentId)) ?? null
     : null
   const [studentQuery, setStudentQuery] = useState('')
-  const [needsManualOnly, setNeedsManualOnly] = useState(false)
+  const [rosterFilter, setRosterFilter] = useState<RosterFilter>(() => {
+    const requested = searchParams.get('filter')?.toUpperCase()
+    return ['ALL', 'PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN'].includes(requested ?? '')
+      ? requested as RosterFilter
+      : 'ALL'
+  })
   const [viewMode, setViewMode] = useState<GradebookViewMode>('ITEM')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -79,6 +100,23 @@ export function AdminGradebookPage({
     title: '',
   })
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({})
+  const [paperScoreTarget, setPaperScoreTarget] = useState<PaperScoreTarget | null>(null)
+  const [paperScoreMode, setPaperScoreMode] = useState(false)
+  const [paperScoreDrafts, setPaperScoreDrafts] = useState<Record<string, string>>({})
+  const [confirmPaperScoreDiscard, setConfirmPaperScoreDiscard] = useState(false)
+
+  useEffect(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      setUrlValue(next, 'schedule', selectedSchedule?.id)
+      setUrlValue(next, 'period', period)
+      setUrlValue(next, 'category', selectedCategory?.id)
+      setUrlValue(next, 'item', selectedItem?.id)
+      setUrlValue(next, 'student', focusedStudent?.student)
+      setUrlValue(next, 'filter', rosterFilter === 'ALL' ? null : rosterFilter)
+      return next
+    }, { replace: true })
+  }, [focusedStudent?.student, period, rosterFilter, selectedCategory?.id, selectedItem?.id, selectedSchedule?.id, setSearchParams])
 
   const sourceOptions = getSourceOptions(
     data,
@@ -87,14 +125,50 @@ export function AdminGradebookPage({
     itemDraft.sourceType,
   )
   const visibleRoster = filterScoreRoster({
+    data,
+    filter: rosterFilter,
     item: selectedItem,
-    items,
-    needsManualOnly,
     query: studentQuery,
     roster,
-    scores: data.gradeItemScores,
     studentId: focusedStudent?.student ?? null,
   })
+  const statusCounts = getRosterStatusCounts(data, selectedItem, roster)
+  const selectedActivity = data.activities.find(
+    (activity) => activity.id === selectedItem?.module_activity,
+  ) ?? null
+  const supportsPaperScores = Boolean(
+    selectedActivity?.activity_type === 'INTERACTIVE' && selectedActivity.lesson,
+  )
+  const hasPaperScoreDrafts = selectedItem
+    ? Object.keys(paperScoreDrafts).some((key) => key.startsWith(`paper:${selectedItem.id}:`))
+    : false
+
+  useEffect(() => {
+    if (!hasPaperScoreDrafts) return
+    const warnAboutUnsavedScores = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', warnAboutUnsavedScores)
+    return () => window.removeEventListener('beforeunload', warnAboutUnsavedScores)
+  }, [hasPaperScoreDrafts])
+
+  function togglePaperScoreMode() {
+    if (!paperScoreMode) {
+      setPaperScoreMode(true)
+    } else if (hasPaperScoreDrafts) {
+      setConfirmPaperScoreDiscard(true)
+    } else {
+      setPaperScoreMode(false)
+    }
+  }
+
+  function discardPaperScoreDrafts() {
+    if (selectedItem) {
+      setPaperScoreDrafts((current) => Object.fromEntries(
+        Object.entries(current).filter(([key]) => !key.startsWith(`paper:${selectedItem.id}:`)),
+      ))
+    }
+    setConfirmPaperScoreDiscard(false)
+    setPaperScoreMode(false)
+  }
 
   async function createItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -146,6 +220,45 @@ export function AdminGradebookPage({
     }
 
     await saveScoreCells([selectedItem], visibleRoster)
+  }
+
+  async function savePaperScoreBatch() {
+    if (!selectedItem || !supportsPaperScores) return
+    const rows = roster.flatMap((enrollment) => {
+      const value = paperScoreDrafts[paperScoreDraftKey(selectedItem.id, enrollment.student)]
+      return value !== undefined && value.trim() !== ''
+        ? [{ student: enrollment.student, score: value }]
+        : []
+    })
+    if (!rows.length) {
+      setMessage('Enter at least one paper score before saving.')
+      return
+    }
+    const payload: PaperActivityScoreBatchRequest = {
+      grade_item: selectedItem.id,
+      scores: rows,
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      const result = await api<PaperActivityScoreBatchResult>(
+        '/modules/activity-attempts/paper-scores/',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+      setPaperScoreDrafts((current) => {
+        const next = { ...current }
+        rows.forEach((row) => delete next[paperScoreDraftKey(selectedItem.id, row.student)])
+        return next
+      })
+      setMessage(
+        `Paper scores saved: ${result.created_count} new, ${result.updated_count} corrected.`,
+      )
+      await refresh()
+    } catch (error) {
+      setMessage(`No paper scores were changed. ${toErrorMessage(error)}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function excuseScore(item: GradeItem, student: number) {
@@ -429,7 +542,15 @@ export function AdminGradebookPage({
 
         {selectedCategory ? (
           <div className="gradebook-grid">
-            <div className="gradebook-panel">
+            <div
+              className="gradebook-panel"
+              onKeyDown={(event) => {
+                if (paperScoreMode && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+                  event.preventDefault()
+                  void savePaperScoreBatch()
+                }
+              }}
+            >
               <SectionHeading
                 subtitle={`${items.length} item${items.length === 1 ? '' : 's'}`}
                 title="Grade Items"
@@ -641,6 +762,19 @@ export function AdminGradebookPage({
 
               {viewMode === 'ITEM' && selectedItem ? (
                 <>
+                  <div className="gradebook-status-summary" aria-label="Submission summary">
+                    {(['PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN'] as Array<Exclude<RosterFilter, 'ALL'>>).map((status) => (
+                      <button
+                        className={rosterFilter === status ? 'gradebook-status-card active' : 'gradebook-status-card'}
+                        key={status}
+                        onClick={() => setRosterFilter(rosterFilter === status ? 'ALL' : status)}
+                        type="button"
+                      >
+                        <strong>{statusCounts[status]}</strong>
+                        <span>{rosterFilterLabel(status)}</span>
+                      </button>
+                    ))}
+                  </div>
                   <div className="gradebook-score-tools">
                     <label className="admin-search gradebook-student-search">
                       <Icon name="search" />
@@ -652,23 +786,47 @@ export function AdminGradebookPage({
                         value={studentQuery}
                       />
                     </label>
-                    <label className="admin-check">
-                      <input
-                        checked={needsManualOnly}
-                        onChange={(event) => setNeedsManualOnly(event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>Needs manual score</span>
-                    </label>
+                    <div className="gradebook-filter-chips" aria-label="Filter roster by submission status">
+                      {(['ALL', 'PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN'] as RosterFilter[]).map((filter) => (
+                        <button
+                          aria-pressed={rosterFilter === filter}
+                          className={rosterFilter === filter ? 'active' : ''}
+                          key={filter}
+                          onClick={() => setRosterFilter(filter)}
+                          type="button"
+                        >
+                          {rosterFilterLabel(filter)}
+                        </button>
+                      ))}
+                    </div>
+                    {supportsPaperScores ? (
+                      <button
+                        aria-pressed={paperScoreMode}
+                        className={paperScoreMode ? 'button button--primary button--compact' : 'button button--secondary button--compact'}
+                        onClick={togglePaperScoreMode}
+                        type="button"
+                      >
+                        <Icon name="edit" />
+                        <span>{paperScoreMode ? 'Close paper score entry' : 'Enter paper scores'}</span>
+                      </button>
+                    ) : null}
                   </div>
+                  {paperScoreMode ? (
+                    <p className="admin-message">
+                      Enter checked-paper scores below. Blank fields are unchanged; zero is a valid score.
+                    </p>
+                  ) : null}
                   <div className="table-wrap">
                     <table className="admin-table gradebook-score-table">
                       <thead>
                         <tr>
                           <th>Student</th>
+                          <th>Submission</th>
+                          {paperScoreMode ? <th>Paper score</th> : null}
                           <th>Score</th>
                           <th>Transmuted</th>
-                          <th>Status / Remarks</th>
+                          <th>Remarks</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -683,6 +841,43 @@ export function AdminGradebookPage({
                             rawScore: score?.raw_score ?? '',
                             remarks: score?.remarks ?? '',
                           }
+                          const linkedActivity = data.activities.find(
+                            (activity) => activity.id === selectedItem.module_activity,
+                          )
+                          const activityId = linkedActivity?.id ?? null
+                          const supportsPaperEntry = Boolean(
+                            linkedActivity?.activity_type === 'INTERACTIVE' && linkedActivity.lesson,
+                          )
+                          const paperAttempt = activityId
+                            ? data.activityAttempts.find(
+                              (attempt) =>
+                                attempt.activity === activityId &&
+                                attempt.student === enrollment.student &&
+                                attempt.submission_method === 'PAPER' &&
+                                attempt.paper_grade_item === selectedItem.id,
+                            )
+                            : null
+                          const submittedOnlineAttempt = activityId
+                            ? data.activityAttempts.some(
+                              (attempt) =>
+                                attempt.activity === activityId &&
+                                attempt.student === enrollment.student &&
+                                attempt.submission_method === 'ONLINE' &&
+                                attempt.is_submitted,
+                            )
+                            : false
+                          const recordedBy = paperAttempt?.recorded_by
+                            ? data.users.find((user) => user.id === paperAttempt.recorded_by)
+                            : null
+                          const submissionStatus = getRosterStatus(
+                            data,
+                            selectedItem,
+                            enrollment.student,
+                          )
+                          const paperKey = paperScoreDraftKey(selectedItem.id, enrollment.student)
+                          const paperScoreEligible = supportsPaperEntry &&
+                            !submittedOnlineAttempt &&
+                            (submissionStatus === 'PENDING' || submissionStatus === 'PAPER')
 
                           return (
                             <tr key={enrollment.id}>
@@ -691,11 +886,43 @@ export function AdminGradebookPage({
                                 <span>{enrollment.student_number}</span>
                               </td>
                               <td>
+                                <span className={`status-badge status-badge--${submissionStatus.toLowerCase()}`}>
+                                  {rosterStatusLabel(submissionStatus)}
+                                </span>
+                                {paperAttempt && recordedBy ? (
+                                  <small>
+                                    Entered by {`${recordedBy.first_name} ${recordedBy.last_name}`.trim() || recordedBy.username}
+                                  </small>
+                                ) : null}
+                              </td>
+                              {paperScoreMode ? (
+                                <td>
+                                  <div className="paper-score-inline">
+                                    <input
+                                      aria-label={`Paper score for ${enrollment.student_name}`}
+                                      className="gradebook-score-input"
+                                      disabled={!paperScoreEligible || saving}
+                                      max={numeric(selectedItem.points_possible)}
+                                      min="0"
+                                      onChange={(event) => setPaperScoreDrafts((current) => ({
+                                        ...current,
+                                        [paperKey]: event.target.value,
+                                      }))}
+                                      placeholder={paperScoreEligible ? 'Score' : 'Unavailable'}
+                                      step="0.01"
+                                      type="number"
+                                      value={paperScoreDrafts[paperKey] ?? paperAttempt?.score ?? ''}
+                                    />
+                                    <small>/ {numeric(selectedItem.points_possible).toFixed(2)}</small>
+                                  </div>
+                                </td>
+                              ) : null}
+                              <td>
                                 <input
                                   className="gradebook-score-input"
                                   max={numeric(selectedItem.points_possible)}
                                   min="0"
-                                  disabled={score?.origin === 'AUTOMATIC' || score?.status === 'EXCUSED'}
+                                  disabled={selectedItem.source_type !== 'MANUAL' || score?.status === 'EXCUSED'}
                                   onChange={(event) =>
                                     setScoreDraft((current) => ({
                                       ...current,
@@ -712,9 +939,9 @@ export function AdminGradebookPage({
                               </td>
                               <td>{displayScore(score?.transmuted_grade ?? null)}</td>
                               <td>
-                                <small>{score ? `${score.status} · ${score.origin}` : 'PENDING'}</small>
                                 <input
                                   className="gradebook-remarks-input"
+                                  disabled={selectedItem.source_type !== 'MANUAL'}
                                   onChange={(event) =>
                                     setScoreDraft((current) => ({
                                       ...current,
@@ -726,6 +953,8 @@ export function AdminGradebookPage({
                                   }
                                   value={draft.remarks}
                                 />
+                              </td>
+                              <td>
                                 <div className="admin-actions admin-actions--compact">
                                   {score?.origin === 'AUTOMATIC' ? (
                                     <button disabled={saving} onClick={() => overrideScore(score.id, selectedItem.points_possible)} type="button">Override</button>
@@ -736,6 +965,36 @@ export function AdminGradebookPage({
                                   {score?.status !== 'EXCUSED' ? (
                                     <button disabled={saving} onClick={() => excuseScore(selectedItem, enrollment.student)} type="button">Excuse</button>
                                   ) : null}
+                                  {supportsPaperEntry && paperAttempt ? (
+                                    <button
+                                      className="button button--primary button--compact"
+                                      disabled={saving}
+                                      onClick={() => setPaperScoreTarget({
+                                        attemptId: paperAttempt.id,
+                                        item: selectedItem,
+                                        student: enrollment.student,
+                                        studentName: enrollment.student_name,
+                                      })}
+                                      type="button"
+                                    >
+                                      Edit paper score
+                                    </button>
+                                  ) : null}
+                                  {supportsPaperEntry && !paperAttempt && !submittedOnlineAttempt ? (
+                                    <button
+                                      className="button button--primary button--compact"
+                                      disabled={saving}
+                                      onClick={() => setPaperScoreTarget({
+                                        attemptId: null,
+                                        item: selectedItem,
+                                        student: enrollment.student,
+                                        studentName: enrollment.student_name,
+                                      })}
+                                      type="button"
+                                    >
+                                      Enter paper score
+                                    </button>
+                                  ) : null}
                                 </div>
                               </td>
                             </tr>
@@ -743,26 +1002,38 @@ export function AdminGradebookPage({
                         })}
                         {!roster.length ? (
                           <tr>
-                            <td colSpan={4}>No active students in this class.</td>
+                            <td colSpan={paperScoreMode ? 7 : 6}>No active students in this class.</td>
                           </tr>
                         ) : null}
                         {roster.length && !visibleRoster.length ? (
                           <tr>
-                            <td colSpan={4}>No students match the current score filters.</td>
+                            <td colSpan={paperScoreMode ? 7 : 6}>No students match the current score filters.</td>
                           </tr>
                         ) : null}
                       </tbody>
                     </table>
                   </div>
-                  <button
-                    className="button button--primary gradebook-save-button"
-                    disabled={saving || !visibleRoster.length}
-                    onClick={() => void saveScores()}
-                    type="button"
-                  >
-                    <Icon name="save" />
-                    <span>{saving ? 'Saving...' : 'Save scores'}</span>
-                  </button>
+                  {paperScoreMode ? (
+                    <button
+                      className="button button--primary gradebook-save-button"
+                      disabled={saving || !visibleRoster.length}
+                      onClick={() => void savePaperScoreBatch()}
+                      type="button"
+                    >
+                      <Icon name="save" />
+                      <span>{saving ? 'Saving paper scores...' : 'Save paper scores'}</span>
+                    </button>
+                  ) : selectedItem.source_type === 'MANUAL' ? (
+                    <button
+                      className="button button--primary gradebook-save-button"
+                      disabled={saving || !visibleRoster.length}
+                      onClick={() => void saveScores()}
+                      type="button"
+                    >
+                      <Icon name="save" />
+                      <span>{saving ? 'Saving...' : 'Save scores'}</span>
+                    </button>
+                  ) : null}
                 </>
               ) : (
                 null
@@ -771,14 +1042,14 @@ export function AdminGradebookPage({
               {viewMode === 'MATRIX' ? (
                 <MatrixScorePanel
                   data={data}
+                  filter={rosterFilter}
                   items={items}
-                  needsManualOnly={needsManualOnly}
                   roster={roster}
                   saving={saving}
                   scoreDraft={scoreDraft}
                   selectedCategoryId={selectedCategory.id}
                   selectedScheduleId={selectedSchedule?.id ?? 0}
-                  setNeedsManualOnly={setNeedsManualOnly}
+                  setFilter={setRosterFilter}
                   setScoreDraft={setScoreDraft}
                   setStudentQuery={setStudentQuery}
                   studentQuery={studentQuery}
@@ -787,7 +1058,7 @@ export function AdminGradebookPage({
                 />
               ) : null}
 
-              {message ? <p className="admin-message">{message}</p> : null}
+              {message ? <p className="admin-message" role="status">{message}</p> : null}
 
               {viewMode === 'ITEM' && !selectedItem ? (
                 <p className="admin-empty-line">Select or create a grade item to enter scores.</p>
@@ -796,29 +1067,236 @@ export function AdminGradebookPage({
           </div>
         ) : null}
       </section>
+      {paperScoreTarget ? (
+        <PaperActivityScoreDialog
+          api={api}
+          data={data}
+          key={`${paperScoreTarget.item.id}:${paperScoreTarget.student}:${paperScoreTarget.attemptId ?? 'new'}`}
+          onClose={() => setPaperScoreTarget(null)}
+          onSaved={async (attempt) => {
+            const wasCorrection = paperScoreTarget.attemptId !== null
+            const scoreMessage = `${paperScoreTarget.studentName}: ${displayScore(attempt.score)} / ${displayScore(attempt.max_score)}`
+            const next = wasCorrection
+              ? null
+              : findNextPendingPaperTarget(data, paperScoreTarget.item, paperScoreTarget.student)
+            await refresh()
+            if (wasCorrection) {
+              setMessage(`Paper score corrected. ${scoreMessage}.`)
+              setPaperScoreTarget(null)
+            } else if (next) {
+              setMessage(`Saved ${scoreMessage}. Opening the next pending student.`)
+              setPaperScoreTarget({ ...next, notice: `Saved ${scoreMessage}. Next pending student:` })
+            } else {
+              setMessage(`Saved ${scoreMessage}. Paper entry complete: no pending students remain.`)
+              setPaperScoreTarget(null)
+            }
+          }}
+          target={paperScoreTarget}
+        />
+      ) : null}
+      {confirmPaperScoreDiscard ? (
+        <div aria-labelledby="discard-paper-batch-title" aria-modal="true" className="class-score-discard" role="alertdialog">
+          <div>
+            <strong id="discard-paper-batch-title">Discard unsaved paper scores?</strong>
+            <span>Scores entered in the roster have not been saved.</span>
+            <div className="class-modal-actions">
+              <button className="button button--secondary" onClick={() => setConfirmPaperScoreDiscard(false)} type="button">Keep editing</button>
+              <button className="button button--danger" onClick={discardPaperScoreDrafts} type="button">Discard scores</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </Page>
+  )
+}
+
+function PaperActivityScoreDialog({
+  api,
+  data,
+  onClose,
+  onSaved,
+  target,
+}: {
+  api: AuthedRequest
+  data: WorkspaceData
+  onClose: () => void
+  onSaved: (attempt: ModuleActivityAttempt) => Promise<void>
+  target: PaperScoreTarget
+}) {
+  const activity = data.activities.find(
+    (candidate) => candidate.id === target.item.module_activity,
+  ) ?? null
+  const existingAttempt = target.attemptId
+    ? data.activityAttempts.find((attempt) => attempt.id === target.attemptId) ?? null
+    : null
+  const initialScore = existingAttempt?.score ?? ''
+  const [score, setScore] = useState(initialScore)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const maxScore = numeric(target.item.points_possible)
+  const enteredScore = score.trim() === '' ? null : Number(score)
+  const percentage = enteredScore !== null && Number.isFinite(enteredScore) && maxScore > 0
+    ? (enteredScore / maxScore) * 100
+    : null
+
+  function requestClose() {
+    if (dirty) setConfirmDiscard(true)
+    else onClose()
+  }
+
+  async function savePaperScore() {
+    if (score.trim() === '') {
+      setMessage('Enter the score from the checked paper. Zero is a valid score.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+
+    try {
+      let attempt: ModuleActivityAttempt
+      if (target.attemptId) {
+        attempt = await api<ModuleActivityAttempt>(
+          `/modules/activity-attempts/${target.attemptId}/paper-score/`,
+          { body: JSON.stringify({ score }), method: 'PUT' },
+        )
+      } else {
+        const result = await api<PaperActivityScoreBatchResult>(
+          '/modules/activity-attempts/paper-scores/',
+          {
+            body: JSON.stringify({
+              grade_item: target.item.id,
+              scores: [{ score, student: target.student }],
+            } satisfies PaperActivityScoreBatchRequest),
+            method: 'POST',
+          },
+        )
+        attempt = result.attempts[0]
+      }
+      setDirty(false)
+      await onSaved(attempt)
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div aria-labelledby="paper-score-title" aria-modal="true" className="attendance-modal" role="dialog">
+      <div className="attendance-modal__backdrop" onClick={saving ? undefined : requestClose} />
+      <form
+        className="attendance-modal__panel paper-score-dialog"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            if (confirmDiscard) setConfirmDiscard(false)
+            else requestClose()
+          }
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault()
+            void savePaperScore()
+          }
+        }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void savePaperScore()
+        }}
+      >
+        <div className="attendance-modal__header">
+          <div>
+            <strong id="paper-score-title">
+              {target.attemptId ? 'Correct paper score' : 'Enter paper score'}
+            </strong>
+            <span>{target.studentName} · {activity?.title ?? target.item.title}</span>
+          </div>
+          <button aria-label="Close paper score" className="icon-button" disabled={saving} onClick={requestClose} type="button">
+            <Icon name="close" />
+          </button>
+        </div>
+
+        <div className="paper-score-dialog__body">
+          {target.notice ? <p className="admin-message" role="status">{target.notice} {target.studentName}</p> : null}
+          <p>Enter the total from the checked printed copy. This records a paper submission against the same linked Main Activity.</p>
+          <dl className="paper-score-dialog__context">
+            <div><dt>Student</dt><dd>{target.studentName}</dd></div>
+            <div><dt>Activity</dt><dd>{activity?.title ?? target.item.title}</dd></div>
+            <div><dt>Maximum score</dt><dd>{formatNumber(maxScore)}</dd></div>
+          </dl>
+          <label className="admin-field paper-score-dialog__input">
+            <span>Paper score</span>
+            <input
+              autoFocus
+              max={maxScore}
+              min="0"
+              onChange={(event) => {
+                setScore(event.target.value)
+                setDirty(event.target.value !== initialScore)
+                setMessage('')
+              }}
+              placeholder={`0 to ${formatNumber(maxScore)}`}
+              step="0.01"
+              type="number"
+              value={score}
+            />
+          </label>
+          <div aria-live="polite" className="paper-score-dialog__preview">
+            <span>Calculated result</span>
+            <strong>
+              {enteredScore === null || !Number.isFinite(enteredScore)
+                ? `— / ${formatNumber(maxScore)}`
+                : `${formatNumber(enteredScore)} / ${formatNumber(maxScore)}`}
+            </strong>
+            <span>{percentage === null ? 'Enter a score to see the percentage.' : `${formatNumber(percentage)}%`}</span>
+          </div>
+          {message ? <p className="admin-message" role="alert">{message}</p> : null}
+        </div>
+
+        <div className="class-modal-actions">
+          <span className="paper-score-shortcut">Ctrl/Cmd+S to save</span>
+          <button className="button button--secondary" disabled={saving} onClick={requestClose} type="button">Cancel</button>
+          <button className="button button--primary" disabled={saving} type="submit">
+            <Icon name="save" />
+            <span>{saving ? 'Saving...' : target.attemptId ? 'Update paper score' : 'Save paper score'}</span>
+          </button>
+        </div>
+        {confirmDiscard ? (
+          <div aria-labelledby="discard-paper-title" aria-modal="true" className="class-score-discard" role="alertdialog">
+            <div>
+              <strong id="discard-paper-title">Discard unsaved paper score?</strong>
+              <span>The score change for {target.studentName} will be lost.</span>
+              <div className="class-modal-actions">
+                <button className="button button--secondary" onClick={() => setConfirmDiscard(false)} type="button">Keep editing</button>
+                <button className="button button--danger" onClick={onClose} type="button">Discard changes</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </form>
+    </div>
   )
 }
 
 function MatrixScorePanel({
   data,
+  filter,
   items,
-  needsManualOnly,
   onSave,
   roster,
   saving,
   scoreDraft,
   selectedCategoryId,
   selectedScheduleId,
-  setNeedsManualOnly,
+  setFilter,
   setScoreDraft,
   setStudentQuery,
   studentQuery,
   visibleRoster,
 }: {
   data: WorkspaceData
+  filter: RosterFilter
   items: GradeItem[]
-  needsManualOnly: boolean
   onSave: () => void
   roster: {
     id: number
@@ -830,7 +1308,7 @@ function MatrixScorePanel({
   scoreDraft: ScoreDraft
   selectedCategoryId: number
   selectedScheduleId: number
-  setNeedsManualOnly: (value: boolean) => void
+  setFilter: (value: RosterFilter) => void
   setScoreDraft: Dispatch<SetStateAction<ScoreDraft>>
   setStudentQuery: (value: string) => void
   studentQuery: string
@@ -853,14 +1331,19 @@ function MatrixScorePanel({
             value={studentQuery}
           />
         </label>
-        <label className="admin-check">
-          <input
-            checked={needsManualOnly}
-            onChange={(event) => setNeedsManualOnly(event.target.checked)}
-            type="checkbox"
-          />
-          <span>Needs manual score</span>
-        </label>
+        <div className="gradebook-filter-chips" aria-label="Filter roster by submission status">
+          {(['ALL', 'PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN'] as RosterFilter[]).map((option) => (
+            <button
+              aria-pressed={filter === option}
+              className={filter === option ? 'active' : ''}
+              key={option}
+              onClick={() => setFilter(option)}
+              type="button"
+            >
+              {rosterFilterLabel(option)}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="table-wrap">
         <table className="admin-table gradebook-matrix-table">
@@ -984,17 +1467,16 @@ function getSourcePayload(sourceType: GradeItemSourceType, sourceId: string) {
 }
 
 function filterScoreRoster({
+  data,
+  filter,
   item,
-  items,
-  needsManualOnly,
   query,
   roster,
-  scores,
   studentId,
 }: {
+  data: WorkspaceData
+  filter: RosterFilter
   item: GradeItem | null
-  items: GradeItem[]
-  needsManualOnly: boolean
   query: string
   roster: {
     id: number
@@ -1002,7 +1484,6 @@ function filterScoreRoster({
     student_name: string
     student_number: string
   }[]
-  scores: WorkspaceData['gradeItemScores']
   studentId: number | null
 }) {
   const normalizedQuery = query.trim().toLowerCase()
@@ -1021,25 +1502,104 @@ function filterScoreRoster({
       return false
     }
 
-    if (needsManualOnly) {
-      const itemIds = item ? [item.id] : items.map((entry) => entry.id)
-
-      if (!itemIds.length) {
-        return false
-      }
-
-      return itemIds.some(
-        (itemId) =>
-          !scores.some(
-            (score) =>
-              score.grade_item === itemId &&
-              score.student === enrollment.student,
-          ),
-      )
+    if (filter !== 'ALL') {
+      return getRosterStatus(data, item, enrollment.student) === filter
     }
 
     return true
   })
+}
+
+function getRosterStatus(
+  data: WorkspaceData,
+  item: GradeItem | null,
+  studentId: number,
+): Exclude<RosterFilter, 'ALL'> {
+  if (!item) return 'PENDING'
+  const score = findItemScore(data, item.id, studentId)
+  if (score?.status === 'EXCUSED') return 'EXCUSED'
+  if (score?.origin === 'OVERRIDE') return 'OVERRIDDEN'
+  if (item.module_activity) {
+    const paper = data.activityAttempts.some(
+      (attempt) =>
+        attempt.activity === item.module_activity &&
+        attempt.student === studentId &&
+        attempt.submission_method === 'PAPER' &&
+        attempt.paper_grade_item === item.id &&
+        attempt.is_submitted,
+    )
+    if (paper) return 'PAPER'
+    const online = data.activityAttempts.some(
+      (attempt) =>
+        attempt.activity === item.module_activity &&
+        attempt.student === studentId &&
+        attempt.submission_method === 'ONLINE' &&
+        attempt.is_submitted,
+    )
+    if (online) return 'ONLINE'
+  }
+  return score ? 'ONLINE' : 'PENDING'
+}
+
+function getRosterStatusCounts(
+  data: WorkspaceData,
+  item: GradeItem | null,
+  roster: Array<{ student: number }>,
+): Record<Exclude<RosterFilter, 'ALL'>, number> {
+  const counts = { PENDING: 0, ONLINE: 0, PAPER: 0, EXCUSED: 0, OVERRIDDEN: 0 }
+  roster.forEach((enrollment) => {
+    counts[getRosterStatus(data, item, enrollment.student)] += 1
+  })
+  return counts
+}
+
+function findNextPendingPaperTarget(
+  data: WorkspaceData,
+  item: GradeItem,
+  currentStudentId: number,
+): PaperScoreTarget | null {
+  const roster = data.enrollments.filter(
+    (enrollment) => enrollment.schedule === item.schedule && enrollment.is_active,
+  )
+  const currentIndex = roster.findIndex((enrollment) => enrollment.student === currentStudentId)
+  const ordered = currentIndex >= 0
+    ? [...roster.slice(currentIndex + 1), ...roster.slice(0, currentIndex)]
+    : roster
+  const next = ordered.find(
+    (enrollment) => getRosterStatus(data, item, enrollment.student) === 'PENDING',
+  )
+  return next ? {
+    attemptId: null,
+    item,
+    student: next.student,
+    studentName: next.student_name,
+  } : null
+}
+
+function rosterFilterLabel(filter: RosterFilter) {
+  return ({
+    ALL: 'All',
+    PENDING: 'Pending',
+    ONLINE: 'Online',
+    PAPER: 'Paper',
+    EXCUSED: 'Excused',
+    OVERRIDDEN: 'Overridden',
+  } as const)[filter]
+}
+
+function rosterStatusLabel(status: Exclude<RosterFilter, 'ALL'>) {
+  return ({
+    PENDING: 'Waiting for response',
+    ONLINE: 'Submitted online',
+    PAPER: 'Paper entered',
+    EXCUSED: 'Excused',
+    OVERRIDDEN: 'Score overridden',
+  } as const)[status]
+}
+
+function setUrlValue(params: URLSearchParams, key: string, value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') params.delete(key)
+  else params.set(key, String(value))
 }
 
 function findItemScore(data: WorkspaceData, itemId: number, studentId: number) {
@@ -1066,6 +1626,14 @@ function scoreDraftKey(itemId: number, studentId: number) {
   return `${itemId}:${studentId}`
 }
 
+function paperScoreDraftKey(itemId: number, studentId: number) {
+  return `paper:${itemId}:${studentId}`
+}
+
+function formatNumber(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
 function getSourceOptions(
   data: WorkspaceData,
   subjectId: number | null,
@@ -1089,7 +1657,7 @@ function getSourceOptions(
   if (sourceType === 'MODULE_ACTIVITY') {
     const moduleIds = new Set(
       data.modules
-        .filter((module) => module.subjects.includes(subjectId))
+        .filter((module) => module.subject === subjectId || module.subjects.includes(subjectId))
         .map((module) => module.id),
     )
 
@@ -1115,7 +1683,7 @@ function getSourceOptions(
   if (sourceType === 'CODING') {
     const moduleIds = new Set(
       data.modules
-        .filter((module) => module.subjects.includes(subjectId))
+        .filter((module) => module.subject === subjectId || module.subjects.includes(subjectId))
         .map((module) => module.id),
     )
 

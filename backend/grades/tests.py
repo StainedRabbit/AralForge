@@ -18,6 +18,13 @@ from grades.models import (
     transmute_score,
 )
 from grades.services import compute_final_grade, compute_period_grade, compute_student_category_grade
+from learning_modules.models import (
+    Module,
+    ModuleActivity,
+    ModuleActivityQuestion,
+    ModuleLesson,
+    ModuleTopic,
+)
 from subjects.models import Subject
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, SubjectSchedule
 
@@ -674,3 +681,131 @@ class ClassScopedGradeTests(APITestCase):
         self.assertEqual(grade.completion_status, 'COMPLETE')
         self.assertEqual(grade.raw_score, Decimal('8.00'))
         self.assertEqual(grade.total_score, Decimal('10.00'))
+
+
+class MainActivityBulkAssignmentApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='bulk-teacher', password='testpass123', role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='bulk-student', password='testpass123', role=User.Role.STUDENT,
+        )
+        self.subject = Subject.objects.create(code='BULK101', name='Bulk assignment')
+        self.other_subject = Subject.objects.create(code='BULK102', name='Other subject')
+        school_year = SchoolYear.objects.create(start_year=2030, end_year=2031)
+        term = SchoolYearSemester.objects.create(school_year=school_year, semester=Semester.FIRST)
+        self.schedule_a = SubjectSchedule.objects.create(
+            subject=self.subject, school_year_semester=term, days='MWF',
+            start_time='08:00', end_time='09:00', section='A',
+        )
+        self.schedule_b = SubjectSchedule.objects.create(
+            subject=self.subject, school_year_semester=term, days='TTH',
+            start_time='09:00', end_time='10:00', section='B',
+        )
+        self.other_schedule = SubjectSchedule.objects.create(
+            subject=self.other_subject, school_year_semester=term, days='MWF',
+            start_time='10:00', end_time='11:00', section='C',
+        )
+        self.prelim_quiz = GradeCategory.objects.create(
+            subject=self.subject, grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ, name='Prelim quizzes', weight=Decimal('100.00'),
+        )
+        self.midterm_quiz = GradeCategory.objects.create(
+            subject=self.subject, grading_period=GradingPeriod.MIDTERM,
+            category=GradeCategoryChoices.QUIZ, name='Midterm quizzes', weight=Decimal('100.00'),
+        )
+        self.exam_category = GradeCategory.objects.create(
+            subject=self.subject, grading_period=GradingPeriod.FINAL,
+            category=GradeCategoryChoices.EXAM, name='Final exam', weight=Decimal('100.00'),
+        )
+        module = Module.objects.create(
+            title='Bulk module', slug='bulk-module', subject=self.subject,
+        )
+        topic = ModuleTopic.objects.create(module=module, title='Bulk topic')
+        lesson = ModuleLesson.objects.create(topic=topic, title='Bulk lesson')
+        self.activity = ModuleActivity.objects.create(
+            module=module, lesson=lesson, title='Main quiz', instructions='Answer every item.',
+            points_possible=Decimal('10.00'), is_published=True,
+        )
+        ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Type ten.', points=Decimal('10.00'), correct_text_answers=['10'],
+        )
+        self.client.force_authenticate(self.teacher)
+
+    def assign(self, rows):
+        return self.client.post(
+            '/api/grades/items/assign-main-activity/',
+            {'module_activity': self.activity.id, 'assignments': rows},
+            format='json',
+        )
+
+    def test_bulk_assignment_creates_updates_and_is_idempotent(self):
+        rows = [
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+        ]
+        created = self.assign(rows)
+        repeated = self.assign(rows)
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.data['created_count'], 2)
+        self.assertEqual(created.data['updated_count'], 0)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['created_count'], 0)
+        self.assertEqual(repeated.data['updated_count'], 2)
+        self.assertEqual(GradeItem.objects.filter(module_activity=self.activity).count(), 2)
+
+    def test_bulk_assignment_moves_selected_link_and_preserves_unselected_link(self):
+        self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+        ])
+
+        response = self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.midterm_quiz.id},
+        ])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            GradeItem.objects.get(schedule=self.schedule_a, module_activity=self.activity).grade_category,
+            self.midterm_quiz,
+        )
+        self.assertEqual(
+            GradeItem.objects.get(schedule=self.schedule_b, module_activity=self.activity).grade_category,
+            self.prelim_quiz,
+        )
+
+    def test_one_invalid_row_rolls_back_entire_bulk_assignment(self):
+        response = self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.exam_category.id},
+        ])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())
+
+    def test_rejects_wrong_subject_archived_duplicate_and_non_teacher(self):
+        wrong_subject = self.assign([
+            {'schedule': self.other_schedule.id, 'grade_category': self.prelim_quiz.id},
+        ])
+        duplicate = self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_a.id, 'grade_category': self.midterm_quiz.id},
+        ])
+        self.schedule_b.archive(self.teacher)
+        archived = self.assign([
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+        ])
+        self.client.force_authenticate(self.student)
+        forbidden = self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+        ])
+
+        self.assertEqual(wrong_subject.status_code, 400)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(archived.status_code, 400)
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())

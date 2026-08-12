@@ -734,6 +734,10 @@ class ModuleActivityMatchingPair(models.Model):
 
 
 class ModuleActivityAttempt(models.Model):
+    class SubmissionMethod(models.TextChoices):
+        ONLINE = 'ONLINE', 'Online'
+        PAPER = 'PAPER', 'Paper'
+
     activity = models.ForeignKey(
         ModuleActivity,
         on_delete=models.CASCADE,
@@ -743,6 +747,25 @@ class ModuleActivityAttempt(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='module_activity_attempts',
+    )
+    submission_method = models.CharField(
+        max_length=20,
+        choices=SubmissionMethod,
+        default=SubmissionMethod.ONLINE,
+    )
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='recorded_module_activity_attempts',
+        null=True,
+        blank=True,
+    )
+    paper_grade_item = models.ForeignKey(
+        'grades.GradeItem',
+        on_delete=models.SET_NULL,
+        related_name='paper_activity_attempts',
+        null=True,
+        blank=True,
     )
     attempt_number = models.PositiveSmallIntegerField(default=1)
     score = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
@@ -756,6 +779,11 @@ class ModuleActivityAttempt(models.Model):
             models.UniqueConstraint(
                 fields=['activity', 'student', 'attempt_number'],
                 name='unique_module_activity_attempt_number',
+            ),
+            models.UniqueConstraint(
+                fields=['paper_grade_item', 'student'],
+                condition=Q(paper_grade_item__isnull=False),
+                name='unique_paper_activity_attempt_per_grade_item_student',
             ),
         ]
         ordering = ['-started_at']

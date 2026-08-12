@@ -1,8 +1,12 @@
 import hashlib
 
+from django.contrib.auth import get_user_model
 from django.db import models
 from rest_framework import serializers
 from django.utils import timezone
+
+from grades.models import GradeItem, GradeItemSourceType
+from subjects.models import ScheduleStudent
 
 from .models import (
     Module,
@@ -637,6 +641,9 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'id',
             'activity',
             'student',
+            'submission_method',
+            'recorded_by',
+            'paper_grade_item',
             'attempt_number',
             'score',
             'max_score',
@@ -644,7 +651,17 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'submitted_at',
             'is_submitted',
         )
-        read_only_fields = ('id', 'score', 'max_score', 'started_at', 'submitted_at', 'is_submitted')
+        read_only_fields = (
+            'id',
+            'submission_method',
+            'recorded_by',
+            'paper_grade_item',
+            'score',
+            'max_score',
+            'started_at',
+            'submitted_at',
+            'is_submitted',
+        )
         validators = []
 
     def validate_student(self, value):
@@ -681,6 +698,15 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('This activity is not available.')
 
             if not self.instance and activity:
+                if ModuleActivityAttempt.objects.filter(
+                    activity=activity,
+                    student=request.user,
+                    submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                    is_submitted=True,
+                ).exists():
+                    raise serializers.ValidationError(
+                        'A paper submission has already been recorded for this activity.'
+                    )
                 existing_count = ModuleActivityAttempt.objects.filter(
                     activity=activity,
                     student=request.user,
@@ -692,6 +718,120 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 attrs['attempt_number'] = existing_count + 1
 
         return attrs
+
+
+class PaperActivityScoreRowSerializer(serializers.Serializer):
+    student = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all())
+    score = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=0)
+
+
+class PaperActivityScoreBatchSerializer(serializers.Serializer):
+    grade_item = serializers.PrimaryKeyRelatedField(
+        queryset=GradeItem.objects.select_related(
+            'schedule',
+            'grade_category',
+            'module_activity',
+        ),
+    )
+    scores = PaperActivityScoreRowSerializer(many=True, allow_empty=False)
+
+    def validate(self, attrs):
+        item = attrs['grade_item']
+        activity = validate_paper_score_item(item)
+        rows = attrs['scores']
+        student_ids = [row['student'].id for row in rows]
+        if len(student_ids) != len(set(student_ids)):
+            raise serializers.ValidationError({
+                'scores': 'Each student may appear only once in a paper-score batch.',
+            })
+
+        active_student_ids = set(
+            ScheduleStudent.objects.filter(
+                schedule=item.schedule,
+                student_id__in=student_ids,
+                is_active=True,
+            ).values_list('student_id', flat=True)
+        )
+        online_student_ids = set(
+            ModuleActivityAttempt.objects.filter(
+                activity=activity,
+                student_id__in=student_ids,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                is_submitted=True,
+            ).values_list('student_id', flat=True)
+        )
+        row_errors = {}
+        for index, row in enumerate(rows):
+            errors = {}
+            if row['student'].id not in active_student_ids:
+                errors['student'] = 'This student is not actively enrolled in the selected class.'
+            if row['student'].id in online_student_ids:
+                errors['student'] = 'This student already submitted the Main Activity online.'
+            if row['score'] > item.points_possible:
+                errors['score'] = f'Score must be between 0 and {item.points_possible}.'
+            if errors:
+                row_errors[index] = errors
+        if row_errors:
+            raise serializers.ValidationError({'scores': row_errors})
+
+        attrs['activity'] = activity
+        return attrs
+
+
+class PaperActivityScoreUpdateSerializer(serializers.Serializer):
+    score = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=0)
+
+    def validate_score(self, value):
+        attempt = self.context['attempt']
+        item = attempt.paper_grade_item
+        activity = validate_paper_score_item(item)
+        if attempt.activity_id != activity.id:
+            raise serializers.ValidationError(
+                'This paper attempt does not belong to the linked Main Activity.'
+            )
+        if not ScheduleStudent.objects.filter(
+            schedule=item.schedule,
+            student=attempt.student,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError(
+                'This student is not actively enrolled in the selected class.'
+            )
+        if value > item.points_possible:
+            raise serializers.ValidationError(
+                f'Score must be between 0 and {item.points_possible}.'
+            )
+        if ModuleActivityAttempt.objects.filter(
+            activity=attempt.activity,
+            student=attempt.student,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            is_submitted=True,
+        ).exclude(pk=attempt.pk).exists():
+            raise serializers.ValidationError(
+                'This student already submitted the Main Activity online.'
+            )
+        return value
+
+
+def validate_paper_score_item(item):
+    activity = item.module_activity if item else None
+    if not item or item.source_type != GradeItemSourceType.MODULE_ACTIVITY or not activity:
+        raise serializers.ValidationError({
+            'grade_item': 'Select a grade item linked to a Main Activity.',
+        })
+    if not item.schedule_id or not item.schedule.is_active:
+        raise serializers.ValidationError({
+            'grade_item': 'Paper scores require an active class assignment.',
+        })
+    if (
+        activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE
+        or not activity.lesson_id
+        or not activity.is_published
+    ):
+        raise serializers.ValidationError({
+            'grade_item': 'The linked Main Activity must be published and interactive.',
+        })
+    return activity
 
 
 class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
@@ -753,6 +893,16 @@ class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
             restricted_fields = {'is_correct', 'points_earned', 'feedback'}
             if restricted_fields.intersection(self.initial_data):
                 raise serializers.ValidationError('Students cannot set grading fields.')
+
+        if (
+            request
+            and request.user.is_admin_teacher
+            and attempt
+            and attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.PAPER
+        ):
+            raise serializers.ValidationError(
+                'Paper scores do not expose editable answer records.'
+            )
 
         return attrs
 

@@ -5,7 +5,15 @@ from django.core.management import BaseCommand, call_command
 
 from accounts.models import StudentProfile, User
 from grades.models import GradeCategory, GradeCategoryChoices, GradingPeriod
-from learning_modules.models import Module, ModuleAccess, ModuleLesson, ModuleTopic
+from learning_modules.models import (
+    Module,
+    ModuleAccess,
+    ModuleActivity,
+    ModuleActivityQuestion,
+    ModuleActivityQuestionChoice,
+    ModuleLesson,
+    ModuleTopic,
+)
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 
@@ -134,6 +142,92 @@ class Command(BaseCommand):
             module=resume_module,
             payment_status=ModuleAccess.PaymentStatus.PAID,
             student=students[0],
+        )
+
+        workflow_subject = Subject.objects.create(code='E2EQ1', name='Quiz Workflow')
+        for period in (GradingPeriod.PRELIM, GradingPeriod.MIDTERM):
+            GradeCategory.objects.create(
+                subject=workflow_subject,
+                grading_period=period,
+                category=GradeCategoryChoices.QUIZ,
+                name=f'{period.title()} Quizzes',
+                weight=100,
+            )
+        workflow_classes = [
+            SubjectSchedule.objects.create(
+                subject=workflow_subject,
+                school_year_semester=first_term,
+                days='MO,WE',
+                start_time=time(13, 0),
+                end_time=time(14, 0),
+                section='E2E-C',
+                room='Lab 3',
+            ),
+            SubjectSchedule.objects.create(
+                subject=workflow_subject,
+                school_year_semester=first_term,
+                days='TU,TH',
+                start_time=time(14, 0),
+                end_time=time(15, 0),
+                section='E2E-D',
+                room='Lab 4',
+            ),
+        ]
+        for schedule in workflow_classes:
+            for student in students:
+                ScheduleStudent.objects.create(schedule=schedule, student=student)
+
+        workflow_module = Module.objects.create(
+            title='E2E Main Activity Workflow',
+            slug='e2e-main-activity-workflow',
+            subject=workflow_subject,
+            description='Browser fixture for bulk linking and score-only paper entry.',
+            is_published=False,
+        )
+        workflow_module.subjects.add(workflow_subject)
+        workflow_topic = ModuleTopic.objects.create(
+            module=workflow_module,
+            title='Quiz Workflow Topic',
+            order=1,
+            is_published=False,
+        )
+        workflow_lesson = ModuleLesson.objects.create(
+            topic=workflow_topic,
+            title='Quiz Workflow Lesson',
+            order=1,
+            learning_targets='Complete the Main Activity.',
+            is_published=False,
+        )
+        Module.objects.filter(pk=workflow_module.pk).update(is_published=True)
+        ModuleTopic.objects.filter(pk=workflow_topic.pk).update(is_published=True)
+        ModuleLesson.objects.filter(pk=workflow_lesson.pk).update(is_published=True)
+        workflow_activity = ModuleActivity.objects.create(
+            module=workflow_module,
+            lesson=workflow_lesson,
+            title='Paper Queue Quiz',
+            instructions='Complete the printed Main Activity for manual checking.',
+            points_possible=10,
+            is_published=True,
+        )
+        workflow_question = ModuleActivityQuestion.objects.create(
+            activity=workflow_activity,
+            question_type=ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            prompt='Which response is correct?',
+            points=10,
+            order=1,
+            is_published=True,
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=workflow_question,
+            text='Correct response',
+            is_correct=True,
+            order=1,
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=workflow_question,
+            text='Incorrect response',
+            is_correct=False,
+            order=2,
         )
 
         self.stdout.write(self.style.SUCCESS('Seeded isolated Playwright data.'))
