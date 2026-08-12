@@ -9,12 +9,15 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
+from learning_modules.models import ModuleActivity
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
 
 from .models import (
     FinalGrade,
     GradeCategory,
+    GradeCategoryChoices,
     GradeItem,
+    GradeItemSourceType,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
@@ -123,6 +126,59 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(date=item_date)
         return queryset
 
+    @action(detail=False, methods=['post'], url_path='assign-main-activity')
+    @transaction.atomic
+    def assign_main_activity(self, request):
+        require_teacher(request)
+        activity_id = request.data.get('module_activity')
+        assignments = request.data.get('assignments')
+        if not activity_id:
+            raise serializers.ValidationError({'module_activity': 'A Main Activity is required.'})
+        if not isinstance(assignments, list) or not assignments:
+            raise serializers.ValidationError({'assignments': 'Select at least one class assignment.'})
+
+        activity = get_object_or_404(
+            ModuleActivity.objects.select_related('module', 'lesson').prefetch_related('questions'),
+            pk=activity_id,
+        )
+        readiness_errors = main_activity_readiness_errors(activity)
+        if readiness_errors:
+            raise serializers.ValidationError({'module_activity': readiness_errors})
+
+        validated_rows = validate_main_activity_assignments(activity, assignments)
+        items = []
+        created_count = 0
+        updated_count = 0
+        for schedule, category, existing_item in validated_rows:
+            values = {
+                'schedule': schedule.id,
+                'grade_category': category.id,
+                'title': activity.title,
+                'points_possible': activity.points_possible,
+                'is_required': True,
+                'source_type': GradeItemSourceType.MODULE_ACTIVITY,
+                'module_activity': activity.id,
+            }
+            if existing_item:
+                item_serializer = self.get_serializer(existing_item, data=values, partial=True)
+                updated_count += 1
+            else:
+                maximum = GradeItem.objects.filter(
+                    schedule=schedule,
+                    grade_category=category,
+                ).aggregate(maximum=Max('order'))['maximum']
+                values['order'] = (maximum if maximum is not None else -1) + 1
+                item_serializer = self.get_serializer(data=values)
+                created_count += 1
+            item_serializer.is_valid(raise_exception=True)
+            items.append(item_serializer.save())
+
+        return Response({
+            'items': self.get_serializer(items, many=True).data,
+            'created_count': created_count,
+            'updated_count': updated_count,
+        })
+
     @action(detail=False, methods=['post'], url_path='score-sheet')
     @transaction.atomic
     def score_sheet(self, request):
@@ -186,6 +242,94 @@ class GradeItemViewSet(viewsets.ModelViewSet):
 def require_teacher(request):
     if not request.user.is_admin_teacher:
         raise PermissionDenied('Only the teacher can manage class score sheets.')
+
+
+def main_activity_readiness_errors(activity):
+    errors = []
+    if activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE or not activity.lesson_id:
+        errors.append('Only an interactive lesson Main Activity can be assigned.')
+    if not activity.is_published:
+        errors.append('Publish the Main Activity before assigning it.')
+    if not activity.title.strip():
+        errors.append('Add a title before assigning it.')
+    if not activity.instructions.strip():
+        errors.append('Add instructions before assigning it.')
+    if activity.points_possible <= 0:
+        errors.append('Points possible must be greater than zero.')
+    if not any(question.is_published for question in activity.questions.all()):
+        errors.append('Publish at least one question before assigning it.')
+    return errors
+
+
+def validate_main_activity_assignments(activity, assignments):
+    row_errors = {}
+    parsed_rows = []
+    schedule_ids = []
+    category_ids = []
+    for index, assignment in enumerate(assignments):
+        if not isinstance(assignment, dict):
+            row_errors[index] = {'detail': 'Each assignment must be an object.'}
+            continue
+        try:
+            schedule_id = int(assignment.get('schedule'))
+            category_id = int(assignment.get('grade_category'))
+        except (TypeError, ValueError):
+            row_errors[index] = {'detail': 'A valid class and Quiz category are required.'}
+            continue
+        if schedule_id in schedule_ids:
+            row_errors[index] = {'schedule': 'Each class may appear only once.'}
+            continue
+        schedule_ids.append(schedule_id)
+        category_ids.append(category_id)
+        parsed_rows.append((index, schedule_id, category_id))
+
+    schedules = {
+        schedule.id: schedule
+        for schedule in SubjectSchedule.objects.select_for_update().select_related('subject').filter(pk__in=schedule_ids)
+    }
+    categories = {
+        category.id: category
+        for category in GradeCategory.objects.select_related('subject').filter(pk__in=category_ids)
+    }
+    validated = []
+    for index, schedule_id, category_id in parsed_rows:
+        schedule = schedules.get(schedule_id)
+        category = categories.get(category_id)
+        errors = {}
+        if not schedule:
+            errors['schedule'] = 'This class does not exist.'
+        elif not schedule.is_active:
+            errors['schedule'] = 'Archived classes cannot be assigned.'
+        if not category:
+            errors['grade_category'] = 'This grade category does not exist.'
+        elif category.category != GradeCategoryChoices.QUIZ:
+            errors['grade_category'] = 'Select an existing Quiz category.'
+        if schedule and category and schedule.subject_id != category.subject_id:
+            errors['grade_category'] = 'This Quiz category does not belong to the selected class subject.'
+        if schedule and not (
+            activity.module.subject_id == schedule.subject_id
+            or activity.module.subjects.filter(pk=schedule.subject_id).exists()
+        ):
+            errors['schedule'] = 'This class subject is not associated with the Main Activity module.'
+
+        linked_items = []
+        if schedule:
+            linked_items = list(
+                GradeItem.objects.select_for_update().filter(
+                    schedule=schedule,
+                    module_activity=activity,
+                )
+            )
+            if len(linked_items) > 1:
+                errors['schedule'] = 'This class has duplicate links that must be resolved first.'
+        if errors:
+            row_errors[index] = errors
+        else:
+            validated.append((schedule, category, linked_items[0] if linked_items else None))
+
+    if row_errors:
+        raise serializers.ValidationError({'assignments': row_errors})
+    return validated
 
 
 def active_score_roster(item):

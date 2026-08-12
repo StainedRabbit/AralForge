@@ -306,12 +306,31 @@ export type ModuleActivityAttempt = {
   id: number
   activity: number
   student: number
+  submission_method: 'ONLINE' | 'PAPER'
+  recorded_by: number | null
+  paper_grade_item: number | null
   attempt_number: number
   score: string | null
   max_score: string
   started_at: string
   submitted_at: string | null
   is_submitted: boolean
+}
+
+export type PaperActivityScoreInput = {
+  student: number
+  score: string
+}
+
+export type PaperActivityScoreBatchRequest = {
+  grade_item: number
+  scores: PaperActivityScoreInput[]
+}
+
+export type PaperActivityScoreBatchResult = {
+  attempts: ModuleActivityAttempt[]
+  created_count: number
+  updated_count: number
 }
 
 export type ModuleActivityAnswer = {
@@ -652,6 +671,22 @@ export type GradeItem = {
   source_points_possible: string
   created_at: string
   updated_at: string
+}
+
+export type MainActivityGradeAssignment = {
+  schedule: number
+  grade_category: number
+}
+
+export type MainActivityBulkAssignmentRequest = {
+  module_activity: number
+  assignments: MainActivityGradeAssignment[]
+}
+
+export type MainActivityBulkAssignmentResult = {
+  items: GradeItem[]
+  created_count: number
+  updated_count: number
 }
 
 export type StudentCategoryGrade = {

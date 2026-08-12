@@ -230,6 +230,17 @@ class GradeItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({required_field: 'This attendance session does not belong to the selected class.'})
             if source_type == 'ASSESSMENT' and not source_value.counts_toward_grade:
                 raise serializers.ValidationError({required_field: 'This assessment does not count toward grades.'})
+            if (
+                source_type == 'MODULE_ACTIVITY'
+                and schedule
+                and GradeItem.objects.filter(
+                    schedule=schedule,
+                    module_activity=source_value,
+                ).exclude(pk=getattr(self.instance, 'pk', None)).exists()
+            ):
+                raise serializers.ValidationError({
+                    required_field: 'This Main Activity is already linked to the selected class.',
+                })
 
         points_possible = attrs.get('points_possible', getattr(self.instance, 'points_possible', None))
         if points_possible is not None and points_possible <= 0:
@@ -320,12 +331,18 @@ def source_matches_subject(source_type, source, subject_id):
     if source_type == 'ATTENDANCE':
         return source.subject_id == subject_id
     if source_type == 'MODULE_ACTIVITY':
-        return source.module.subjects.filter(pk=subject_id).exists()
+        return (
+            source.module.subject_id == subject_id
+            or source.module.subjects.filter(pk=subject_id).exists()
+        )
     if source_type == 'CODING':
         if source.subject_id == subject_id:
             return True
         if source.module_id:
-            return source.module.subjects.filter(pk=subject_id).exists()
+            return (
+                source.module.subject_id == subject_id
+                or source.module.subjects.filter(pk=subject_id).exists()
+            )
         return False
     return True
 

@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { AuthedRequest, WorkspaceData } from '../../app/types'
 import type {
+  GradeCategory,
+  MainActivityBulkAssignmentRequest,
+  MainActivityBulkAssignmentResult,
   ModuleActivity,
   ModuleActivityQuestion,
   ModuleActivityQuestionType,
@@ -29,7 +33,7 @@ type QuestionDraft = {
 }
 
 type PreviewMode = 'not_started' | 'score_only' | 'review'
-type EditorTab = 'setup' | 'questions' | 'import' | 'preview'
+type EditorTab = 'setup' | 'questions' | 'import' | 'preview' | 'grading'
 type UpdateQuestion = <TField extends keyof QuestionDraft>(
   id: string,
   field: TField,
@@ -203,7 +207,7 @@ export function MainActivityEditor({
     URL.revokeObjectURL(url)
   }
 
-  async function saveActivity() {
+  async function saveActivity(nextTab?: EditorTab) {
     if (!module || !topic) {
       setMessage('Lesson module context is missing.')
       return
@@ -241,6 +245,7 @@ export function MainActivityEditor({
       await syncQuestions(api, data, savedActivity.id, questionDrafts, initialDrafts)
       await refresh()
       setMessage('Main Activity saved.')
+      if (nextTab) setActiveTab(nextTab)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -248,12 +253,47 @@ export function MainActivityEditor({
     }
   }
 
+  const linkedClassCount = activity
+    ? new Set(
+        data.gradeItems
+          .filter((item) => item.module_activity === activity.id && item.schedule)
+          .map((item) => item.schedule),
+      ).size
+    : 0
+  const publishedQuestionCount = activeDrafts.filter((question) => question.is_published).length
+  const publishedPoints = activeDrafts
+    .filter((question) => question.is_published)
+    .reduce((total, question) => total + (Number(question.points) || 0), 0)
+  const nextTab = ({
+    setup: 'questions',
+    questions: 'import',
+    import: 'preview',
+    preview: 'grading',
+    grading: undefined,
+  } as const)[activeTab]
+
   return (
     <section className="main-activity-editor">
       <SectionHeading
         subtitle="Website-based, auto-graded lesson work"
         title="Main Activity"
       />
+
+      <div className="activity-readiness-strip" aria-label="Main Activity readiness summary">
+        <span className={activity ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {activity ? 'Saved' : 'Not saved'}
+        </span>
+        <span className={isPublished ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {isPublished ? 'Published' : 'Draft'}
+        </span>
+        <span className={publishedQuestionCount ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {publishedQuestionCount} published question{publishedQuestionCount === 1 ? '' : 's'}
+        </span>
+        <span className="status-badge">{publishedPoints} question points</span>
+        <span className={linkedClassCount ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {linkedClassCount} linked class{linkedClassCount === 1 ? '' : 'es'}
+        </span>
+      </div>
 
       <section className={readinessWarnings.length ? 'activity-readiness activity-readiness--warning' : 'activity-readiness activity-readiness--ready'}>
         <div>
@@ -277,6 +317,7 @@ export function MainActivityEditor({
           ['questions', `Questions (${activeDrafts.length})`],
           ['import', 'Import'],
           ['preview', 'Preview'],
+          ...(activity ? [['grading', `Grading (${linkedClassCount})`]] : []),
         ] as Array<[EditorTab, string]>).map(([tab, label]) => (
           <button
             className={activeTab === tab ? 'active' : ''}
@@ -352,6 +393,17 @@ export function MainActivityEditor({
         </section>
       ) : null}
 
+      {activeTab === 'grading' && activity && module ? (
+        <ActivityGradingAssignments
+          activity={activity}
+          api={api}
+          data={data}
+          moduleSubject={module.subject}
+          moduleSubjects={module.subjects}
+          refresh={refresh}
+        />
+      ) : null}
+
       {activeTab === 'import' ? (
         <section className="main-activity-tab-panel main-activity-tools main-activity-tools--import">
           <p className="eyebrow">Structured import</p>
@@ -420,14 +472,16 @@ export function MainActivityEditor({
 
       {message ? <p className="admin-message">{message}</p> : null}
       <div className="lesson-editor__actions">
-        <button className="button button--secondary" onClick={() => setActiveTab('questions')} type="button">
-          <Icon name="plus" />
-          <span>Manage Questions</span>
-        </button>
-        <button className="button button--primary" disabled={saving} onClick={() => void saveActivity()} type="button">
+        <button className="button button--secondary" disabled={saving} onClick={() => void saveActivity()} type="button">
           <Icon name="save" />
           <span>{saving ? 'Saving...' : 'Save Main Activity'}</span>
         </button>
+        {nextTab ? (
+          <button className="button button--primary" disabled={saving} onClick={() => void saveActivity(nextTab)} type="button">
+            <Icon name="save" />
+            <span>{saving ? 'Saving...' : `Save and continue to ${formatEditorTab(nextTab)}`}</span>
+          </button>
+        ) : null}
       </div>
       {showImportExample ? (
         <StructuredImportExampleModal
@@ -437,6 +491,299 @@ export function MainActivityEditor({
       ) : null}
     </section>
   )
+}
+
+const gradingPeriods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
+type GradingPeriod = (typeof gradingPeriods)[number]
+type AssignmentDraft = {
+  selected: boolean
+  period: GradingPeriod
+  categoryId: string
+}
+
+function ActivityGradingAssignments({
+  activity,
+  api,
+  data,
+  moduleSubject,
+  moduleSubjects,
+  refresh,
+}: {
+  activity: ModuleActivity
+  api: AuthedRequest
+  data: WorkspaceData
+  moduleSubject: number | null
+  moduleSubjects: number[]
+  refresh: () => Promise<void>
+}) {
+  const subjectIds = new Set([
+    ...moduleSubjects,
+    ...(moduleSubject ? [moduleSubject] : []),
+  ])
+  const schedules = data.schedules.filter(
+    (schedule) => schedule.is_active && subjectIds.has(schedule.subject),
+  )
+  const existingItemsBySchedule = new Map(
+    schedules.map((schedule) => [
+      schedule.id,
+      data.gradeItems.filter(
+        (item) =>
+          item.schedule === schedule.id &&
+          item.source_type === 'MODULE_ACTIVITY' &&
+          item.module_activity === activity.id,
+      ),
+    ]),
+  )
+  const [defaultPeriod, setDefaultPeriod] = useState<GradingPeriod>('PRELIM')
+  const [drafts, setDrafts] = useState<Record<number, AssignmentDraft>>(() =>
+    Object.fromEntries(schedules.map((schedule) => {
+      const existing = existingItemsBySchedule.get(schedule.id)?.[0]
+      const category = data.gradeCategories.find((candidate) => candidate.id === existing?.grade_category)
+      const period = category?.grading_period ?? 'PRELIM'
+      const automaticCategory = quizCategoriesFor(data, schedule.id, period)[0]
+      return [schedule.id, {
+        selected: Boolean(existing),
+        period,
+        categoryId: String(category?.id ?? automaticCategory?.id ?? ''),
+      }]
+    })),
+  )
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  function updateDraft(scheduleId: number, changes: Partial<AssignmentDraft>) {
+    setDrafts((current) => ({
+      ...current,
+      [scheduleId]: { ...current[scheduleId], ...changes },
+    }))
+  }
+
+  function selectSchedule(scheduleId: number, selected: boolean) {
+    const schedule = schedules.find((candidate) => candidate.id === scheduleId)
+    if (!schedule) return
+    const current = drafts[scheduleId]
+    const category = current?.categoryId
+      ? current.categoryId
+      : String(quizCategoriesFor(data, scheduleId, defaultPeriod)[0]?.id ?? '')
+    updateDraft(scheduleId, {
+      selected,
+      period: current?.period ?? defaultPeriod,
+      categoryId: category,
+    })
+  }
+
+  function changeDefaultPeriod(period: GradingPeriod) {
+    setDefaultPeriod(period)
+    setDrafts((current) => Object.fromEntries(schedules.map((schedule) => {
+      const draft = current[schedule.id]
+      if (!draft?.selected) return [schedule.id, draft]
+      return [schedule.id, {
+        ...draft,
+        period,
+        categoryId: String(quizCategoriesFor(data, schedule.id, period)[0]?.id ?? ''),
+      }]
+    })))
+  }
+
+  function changeRowPeriod(scheduleId: number, period: GradingPeriod) {
+    updateDraft(scheduleId, {
+      period,
+      categoryId: String(quizCategoriesFor(data, scheduleId, period)[0]?.id ?? ''),
+    })
+  }
+
+  async function applyAssignments() {
+    const selected = schedules.filter((schedule) => drafts[schedule.id]?.selected)
+    if (!selected.length) {
+      setMessage('Select at least one class to assign.')
+      return
+    }
+    const missingCategory = selected.find((schedule) => !drafts[schedule.id]?.categoryId)
+    if (missingCategory) {
+      setMessage(`Configure a Quiz category for ${missingCategory.subject_code} ${missingCategory.section || ''} before applying.`)
+      return
+    }
+    const payload: MainActivityBulkAssignmentRequest = {
+      module_activity: activity.id,
+      assignments: selected.map((schedule) => ({
+        schedule: schedule.id,
+        grade_category: Number(drafts[schedule.id].categoryId),
+      })),
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      const result = await api<MainActivityBulkAssignmentResult>(
+        '/grades/items/assign-main-activity/',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+      setMessage(
+        `Assignments applied: ${result.created_count} linked, ${result.updated_count} updated. Unselected classes were unchanged.`,
+      )
+      await refresh()
+    } catch (error) {
+      setMessage(`Nothing was changed. ${toErrorMessage(error)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeAssignment(scheduleId: number) {
+    const schedule = schedules.find((candidate) => candidate.id === scheduleId)
+    const existingItem = existingItemsBySchedule.get(scheduleId)?.[0]
+    if (!schedule || !existingItem || !window.confirm(
+      `Remove ${activity.title} from ${schedule.subject_code} ${schedule.section || ''}? Its linked scores will also be removed.`,
+    )) return
+    setSaving(true)
+    setMessage('')
+    try {
+      await api(`/grades/items/${existingItem.id}/`, { method: 'DELETE' })
+      updateDraft(scheduleId, { selected: false })
+      setMessage(`Removed the link for ${schedule.subject_code} ${schedule.section || ''}.`)
+      await refresh()
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="main-activity-tab-panel activity-grading-panel">
+      <div className="activity-grading-heading">
+        <div>
+          <p className="eyebrow">Class gradebook links</p>
+          <h3>Count this Main Activity as a quiz</h3>
+          <p>Select classes together, then review any per-class category overrides before applying.</p>
+        </div>
+        <label className="admin-field">
+          <span>Default period</span>
+          <select onChange={(event) => changeDefaultPeriod(event.target.value as GradingPeriod)} value={defaultPeriod}>
+            {gradingPeriods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
+          </select>
+        </label>
+        <div className="lesson-editor__actions">
+          <button
+            className="button button--secondary button--compact"
+            onClick={() => schedules.forEach((schedule) => selectSchedule(schedule.id, true))}
+            type="button"
+          >
+            Select all
+          </button>
+          <button
+            className="button button--secondary button--compact"
+            onClick={() => schedules.forEach((schedule) => selectSchedule(schedule.id, false))}
+            type="button"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <div className="activity-grading-list">
+        {schedules.map((schedule) => {
+          const draft = drafts[schedule.id] ?? { selected: false, period: defaultPeriod, categoryId: '' }
+          const categories = quizCategoriesFor(data, schedule.id, draft.period)
+          const existingItems = existingItemsBySchedule.get(schedule.id) ?? []
+          const existingItem = existingItems[0]
+          const existingCategory = data.gradeCategories.find((category) => category.id === existingItem?.grade_category)
+          return (
+            <article className={`activity-grading-row${draft.selected ? ' activity-grading-row--selected' : ''}`} key={schedule.id}>
+              <label className="activity-grading-row__select">
+                <input
+                  checked={draft.selected}
+                  disabled={existingItems.length > 1}
+                  onChange={(event) => selectSchedule(schedule.id, event.target.checked)}
+                  type="checkbox"
+                />
+                <span className="activity-grading-row__class">
+                  <strong>{schedule.subject_code} {schedule.section || ''}</strong>
+                  <span>{schedule.term_name}</span>
+                </span>
+              </label>
+              <span className={`status-badge ${existingItems.length > 1 ? 'status-badge--error' : existingItem ? 'status-badge--ready' : ''}`}>
+                {existingItems.length > 1 ? 'Error: duplicate links' : existingItem ? 'Linked' : 'Not linked'}
+              </span>
+              <label className="admin-field">
+                <span>Period</span>
+                <select
+                  disabled={!draft.selected || existingItems.length > 1}
+                  onChange={(event) => changeRowPeriod(schedule.id, event.target.value as GradingPeriod)}
+                  value={draft.period}
+                >
+                  {gradingPeriods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
+                </select>
+              </label>
+              <label className="admin-field">
+                <span>Quiz category</span>
+                <select
+                  disabled={!draft.selected || !categories.length || existingItems.length > 1}
+                  onChange={(event) => updateDraft(schedule.id, { categoryId: event.target.value })}
+                  value={draft.categoryId}
+                >
+                  {!categories.length ? <option value="">No Quiz category</option> : null}
+                  {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
+              </label>
+              <div className="activity-grading-row__actions">
+                {existingItem && existingCategory ? (
+                  <Link
+                    className="button button--secondary button--compact"
+                    to={`/admin/gradebook?schedule=${schedule.id}&period=${existingCategory.grading_period}&category=${existingCategory.id}&item=${existingItem.id}&filter=PENDING`}
+                  >
+                    Open Gradebook
+                  </Link>
+                ) : null}
+                {existingItem ? (
+                  <button className="button button--secondary button--compact" disabled={saving} onClick={() => void removeAssignment(schedule.id)} type="button">
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+              {!categories.length && draft.selected ? (
+                <p className="admin-message">
+                  No Quiz category for {formatPeriod(draft.period)}. <Link to="/admin/grades">Configure grade categories</Link>.
+                </p>
+              ) : null}
+            </article>
+          )
+        })}
+        {!schedules.length ? (
+          <p className="admin-empty-line">No active classes are associated with this module subject.</p>
+        ) : null}
+      </div>
+      {message ? <p className="admin-message" role="status">{message}</p> : null}
+      <div className="lesson-editor__actions">
+        <button
+          className="button button--primary"
+          disabled={saving || !schedules.some((schedule) => drafts[schedule.id]?.selected)}
+          onClick={() => void applyAssignments()}
+          type="button"
+        >
+          <Icon name="save" />
+          <span>{saving ? 'Applying assignments...' : 'Apply selected assignments'}</span>
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function quizCategoriesFor(data: WorkspaceData, scheduleId: number, period: GradingPeriod): GradeCategory[] {
+  const schedule = data.schedules.find((candidate) => candidate.id === scheduleId)
+  if (!schedule) return []
+  return data.gradeCategories.filter(
+    (category) =>
+      category.subject === schedule.subject &&
+      category.category === 'QUIZ' &&
+      category.grading_period === period,
+  )
+}
+
+function formatPeriod(period: GradingPeriod) {
+  return period.charAt(0) + period.slice(1).toLowerCase()
+}
+
+function formatEditorTab(tab: EditorTab) {
+  return tab.charAt(0).toUpperCase() + tab.slice(1)
 }
 
 function QuestionEditorCard({

@@ -1,6 +1,8 @@
 from django.http import FileResponse
+from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
-from rest_framework import decorators, permissions, response, viewsets
+from rest_framework import decorators, permissions, response, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
@@ -37,6 +39,8 @@ from .serializers import (
     ModuleActivityQuestionChoiceSerializer,
     ModuleActivityQuestionSerializer,
     ModuleActivitySubmissionSerializer,
+    PaperActivityScoreBatchSerializer,
+    PaperActivityScoreUpdateSerializer,
     ModuleLessonAssetSerializer,
     ModuleLessonSerializer,
     ModuleLessonExampleSerializer,
@@ -659,6 +663,8 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
             'activity__module',
             'activity__lesson',
             'student',
+            'recorded_by',
+            'paper_grade_item',
         )
 
         if self.request.user.is_admin_teacher:
@@ -673,13 +679,36 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
-        serializer.save(student=student)
+        serializer.save(
+            student=student,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            recorded_by=None,
+            paper_grade_item=None,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        attempt = self.get_object()
+        if not request.user.is_admin_teacher and attempt.is_submitted:
+            raise PermissionDenied('Submitted attempts cannot be deleted by students.')
+        return super().destroy(request, *args, **kwargs)
 
     @decorators.action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
         attempt = self.get_object()
         if not request.user.is_admin_teacher and attempt.student_id != request.user.id:
             raise PermissionDenied('Students can only submit their own attempts.')
+        if (
+            attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.ONLINE
+            and ModuleActivityAttempt.objects.filter(
+                activity=attempt.activity,
+                student=attempt.student,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                is_submitted=True,
+            ).exclude(pk=attempt.pk).exists()
+        ):
+            raise PermissionDenied(
+                'A paper submission has already been recorded for this activity.'
+            )
         if attempt.is_submitted:
             serializer = self.get_serializer(attempt)
             return response.Response(serializer.data)
@@ -687,6 +716,104 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
         attempt = submit_activity_attempt(attempt)
         serializer = self.get_serializer(attempt)
         return response.Response(serializer.data)
+
+    @decorators.action(detail=False, methods=['post'], url_path='paper-scores')
+    @transaction.atomic
+    def record_paper_scores(self, request):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can record paper scores.')
+
+        entry = PaperActivityScoreBatchSerializer(data=request.data)
+        entry.is_valid(raise_exception=True)
+        item = entry.validated_data['grade_item']
+        activity = entry.validated_data['activity']
+        attempts = []
+        created_count = 0
+        updated_count = 0
+        for row in entry.validated_data['scores']:
+            student = row['student']
+            attempt = ModuleActivityAttempt.objects.select_for_update().filter(
+                paper_grade_item=item,
+                student=student,
+            ).first()
+            if attempt:
+                attempt.score = row['score']
+                attempt.max_score = item.points_possible
+                attempt.recorded_by = request.user
+                attempt.is_submitted = True
+                if not attempt.submitted_at:
+                    attempt.submitted_at = timezone.now()
+                attempt.answers.all().delete()
+                attempt.save(update_fields=[
+                    'score',
+                    'max_score',
+                    'recorded_by',
+                    'is_submitted',
+                    'submitted_at',
+                ])
+                updated_count += 1
+            else:
+                last_attempt = ModuleActivityAttempt.objects.filter(
+                    activity=activity,
+                    student=student,
+                ).aggregate(maximum=Max('attempt_number'))['maximum'] or 0
+                attempt = ModuleActivityAttempt.objects.create(
+                    activity=activity,
+                    student=student,
+                    attempt_number=last_attempt + 1,
+                    submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                    recorded_by=request.user,
+                    paper_grade_item=item,
+                    score=row['score'],
+                    max_score=item.points_possible,
+                    submitted_at=timezone.now(),
+                    is_submitted=True,
+                )
+                created_count += 1
+            attempts.append(attempt)
+
+        return response.Response({
+            'attempts': self.get_serializer(attempts, many=True).data,
+            'created_count': created_count,
+            'updated_count': updated_count,
+        })
+
+    @decorators.action(detail=True, methods=['put'], url_path='paper-score')
+    @transaction.atomic
+    def update_paper_score(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can correct paper scores.')
+
+        attempt = self.get_object()
+        if (
+            attempt.submission_method != ModuleActivityAttempt.SubmissionMethod.PAPER
+            or not attempt.paper_grade_item_id
+        ):
+            return response.Response(
+                {'detail': 'Only a paper activity score can be corrected here.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        entry = PaperActivityScoreUpdateSerializer(
+            data=request.data,
+            context={'attempt': attempt},
+        )
+        entry.is_valid(raise_exception=True)
+        attempt.answers.all().delete()
+        attempt.score = entry.validated_data['score']
+        attempt.max_score = attempt.paper_grade_item.points_possible
+        attempt.recorded_by = request.user
+        attempt.is_submitted = True
+        if not attempt.submitted_at:
+            attempt.submitted_at = timezone.now()
+        attempt.save(update_fields=[
+            'score',
+            'max_score',
+            'recorded_by',
+            'is_submitted',
+            'submitted_at',
+        ])
+        return response.Response(self.get_serializer(attempt).data)
 
 
 class ModuleActivityAnswerViewSet(viewsets.ModelViewSet):
@@ -712,6 +839,14 @@ class ModuleActivityAnswerViewSet(viewsets.ModelViewSet):
                 prefix='attempt__activity__module__',
             ),
         ).distinct()
+
+    def destroy(self, request, *args, **kwargs):
+        answer = self.get_object()
+        if answer.attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.PAPER:
+            raise PermissionDenied(
+                'Paper scores do not expose editable answer records.'
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class ModuleActivitySubmissionViewSet(viewsets.ModelViewSet):

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 
 from subjects.models import ScheduleStudent
 
@@ -45,7 +46,13 @@ def _module_activity_result(item, student):
     if activity.activity_type == activity.ActivityType.INTERACTIVE:
         candidates = [
             _normalized_score(attempt.score, attempt.max_score, item.points_possible)
-            for attempt in activity.attempts.filter(student=student, is_submitted=True)
+            for attempt in activity.attempts.filter(
+                student=student,
+                is_submitted=True,
+            ).filter(
+                Q(submission_method='ONLINE')
+                | Q(submission_method='PAPER', paper_grade_item=item)
+            )
         ]
     else:
         submission = activity.submissions.filter(student=student, graded_at__isnull=False).first()
