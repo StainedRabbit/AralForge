@@ -28,6 +28,11 @@ class AttendanceSession(models.Model):
     date = models.DateField()
     points_possible = models.DecimalField(max_digits=5, decimal_places=2, default=1)
     notes = models.TextField(blank=True)
+    roster_students = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='attendance_session_rosters',
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
