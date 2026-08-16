@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../app/types'
 import type {
@@ -33,7 +33,7 @@ export function LessonMainActivityPanel({
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const questions = useMemo(
+  const liveQuestions = useMemo(
     () =>
       activity
         ? data.activityQuestions
@@ -64,8 +64,10 @@ export function LessonMainActivityPanel({
       (submittedAttempts.length >= activity.max_attempts ||
         submittedAttempts.some(
           (attempt) =>
-            numeric(attempt.max_score) > 0 &&
-            numeric(attempt.score) >= numeric(attempt.max_score),
+            activity.passing_score !== null
+              ? numeric(attempt.score) >= numeric(activity.passing_score)
+              : numeric(attempt.max_score) > 0 &&
+                numeric(attempt.score) >= numeric(attempt.max_score),
         )),
   )
   const activeAttempt =
@@ -75,10 +77,22 @@ export function LessonMainActivityPanel({
     attempts[0] ??
     null
   const displayAttempt = reviewUnlocked && reviewAttempt ? reviewAttempt : activeAttempt
-  const canStartAttempt = Boolean(
-    activity && attempts.length < activity.max_attempts && !activeAttempt?.is_submitted,
+  const questions = useMemo(
+    () => questionsForAttempt(displayAttempt, liveQuestions, activity?.id ?? 0),
+    [activity?.id, displayAttempt, liveQuestions],
   )
-  const canStartNewAttempt = Boolean(activity && attempts.length < activity.max_attempts)
+  const now = Date.now()
+  const opensAt = activity?.opens_at ? new Date(activity.opens_at).getTime() : null
+  const effectiveDueAt = activity?.effective_due_at
+    ? new Date(activity.effective_due_at).getTime()
+    : null
+  const beforeOpen = opensAt !== null && now < opensAt
+  const afterDue = effectiveDueAt !== null && now > effectiveDueAt
+  const windowClosed = beforeOpen || (afterDue && !activity?.allow_late_submissions)
+  const canStartAttempt = Boolean(
+    activity && !windowClosed && attempts.length < activity.max_attempts && !activeAttempt?.is_submitted,
+  )
+  const canStartNewAttempt = Boolean(activity && !windowClosed && attempts.length < activity.max_attempts)
   const initialDrafts = useMemo(
     () => displayAttempt ? buildActivityDrafts(displayAttempt, questions, data) : {},
     [data, displayAttempt, questions],
@@ -134,30 +148,7 @@ export function LessonMainActivityPanel({
     setMessage('')
     try {
       const attempt = await ensureAttempt()
-      await Promise.all(
-        questions.map((question) => {
-          const existingAnswer = data.activityAnswers.find(
-            (answer) => answer.attempt === attempt.id && answer.question === question.id,
-          )
-          const draft = drafts[question.id] ?? emptyDraft(question, data)
-          return api(
-            existingAnswer
-              ? `/modules/activity-answers/${existingAnswer.id}/`
-              : '/modules/activity-answers/',
-            {
-              method: existingAnswer ? 'PATCH' : 'POST',
-              body: JSON.stringify({
-                attempt: attempt.id,
-                question: question.id,
-                selected_choice: draft.selected_choice,
-                text_answer: draft.text_answer,
-                choice_order: draft.choice_order,
-                matching_answer: draft.matching_answer,
-              }),
-            },
-          )
-        }),
-      )
+      await saveAttemptDraft(attempt.id, drafts)
       await api(`/modules/activity-attempts/${attempt.id}/submit/`, { method: 'POST' })
       setMessage('Main Activity submitted.')
       await onSubmitted()
@@ -166,6 +157,16 @@ export function LessonMainActivityPanel({
     } finally {
       setSaving(false)
     }
+  }
+
+  async function saveAttemptDraft(
+    attemptId: number,
+    drafts: Record<number, ActivityDraft>,
+  ) {
+    await api(`/modules/activity-attempts/${attemptId}/draft/`, {
+      method: 'PUT',
+      body: JSON.stringify({ answers: drafts }),
+    })
   }
 
   return (
@@ -189,6 +190,11 @@ export function LessonMainActivityPanel({
               Review unlocked
             </span>
           ) : null}
+          {activity.passing_score !== null && bestAttempt ? (
+            <span className={numeric(bestAttempt.score) >= numeric(activity.passing_score) ? 'status-pill status-pill--success' : 'status-pill'}>
+              {numeric(bestAttempt.score) >= numeric(activity.passing_score) ? 'Passed' : 'Needs improvement'}
+            </span>
+          ) : null}
           {activeAttempt?.is_submitted && !reviewUnlocked ? (
             <button
               className="button button--secondary button--compact"
@@ -208,6 +214,13 @@ export function LessonMainActivityPanel({
           <Icon name={message.includes('submitted') ? 'check' : 'warning'} />
           <span>{message}</span>
         </div>
+      ) : null}
+
+      {beforeOpen ? (
+        <div className="inline-alert"><Icon name="warning" /><span>This activity opens {formatDateTime(activity.opens_at)}.</span></div>
+      ) : null}
+      {afterDue ? (
+        <div className="inline-alert"><Icon name="warning" /><span>{activity.allow_late_submissions ? 'The due date has passed. Late submissions are accepted.' : 'This activity is closed because its due date has passed.'}</span></div>
       ) : null}
 
       {bestAttempt && !reviewUnlocked ? (
@@ -239,7 +252,9 @@ export function LessonMainActivityPanel({
           displayAttempt={displayAttempt}
           initialDrafts={initialDrafts}
           key={`${displayAttempt.id}-${questions.map((question) => question.id).join('-')}`}
+          locked={windowClosed}
           onSubmit={submitActivity}
+          onSaveDraft={(drafts) => saveAttemptDraft(displayAttempt.id, drafts)}
           questions={questions}
           reviewUnlocked={reviewUnlocked}
           saving={saving}
@@ -253,7 +268,9 @@ function ActivityQuestionForm({
   data,
   displayAttempt,
   initialDrafts,
+  locked,
   onSubmit,
+  onSaveDraft,
   questions,
   reviewUnlocked,
   saving,
@@ -261,22 +278,71 @@ function ActivityQuestionForm({
   data: RouteData
   displayAttempt: ModuleActivityAttempt
   initialDrafts: Record<number, ActivityDraft>
+  locked: boolean
   onSubmit: (
     event: FormEvent<HTMLFormElement>,
     drafts: Record<number, ActivityDraft>,
   ) => Promise<void>
+  onSaveDraft: (drafts: Record<number, ActivityDraft>) => Promise<void>
   questions: ModuleActivityQuestion[]
   reviewUnlocked: boolean
   saving: boolean
 }) {
   const [drafts, setDrafts] = useState(initialDrafts)
+  const [showSubmissionReview, setShowSubmissionReview] = useState(false)
+  const [draftStatus, setDraftStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved')
+  const firstRender = useRef(true)
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const draftSignature = JSON.stringify(drafts)
+  const unanswered = questions.filter((question) => !isAnswered(question, drafts[question.id]))
+
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    if (displayAttempt.is_submitted || locked) return
+    const timer = window.setTimeout(async () => {
+      setDraftStatus('saving')
+      try {
+        const queuedSave = saveQueue.current
+          .catch(() => undefined)
+          .then(() => onSaveDraft(drafts))
+        saveQueue.current = queuedSave
+        await queuedSave
+        setDraftStatus('saved')
+      } catch {
+        setDraftStatus('error')
+      }
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [displayAttempt.is_submitted, draftSignature, drafts, locked, onSaveDraft])
 
   function updateDraft(questionId: number, draft: ActivityDraft) {
+    setDraftStatus('unsaved')
     setDrafts((current) => ({ ...current, [questionId]: draft }))
   }
 
   return (
-    <form className="lesson-main-activity__questions" onSubmit={(event) => void onSubmit(event, drafts)}>
+    <form
+      className="lesson-main-activity__questions"
+      onSubmit={(event) => {
+        if (!showSubmissionReview) {
+          event.preventDefault()
+          setShowSubmissionReview(true)
+          return
+        }
+        event.preventDefault()
+        void saveQueue.current
+          .catch(() => undefined)
+          .then(() => onSubmit(event, drafts))
+      }}
+    >
+      {!displayAttempt.is_submitted ? (
+        <p className={`activity-draft-status activity-draft-status--${draftStatus}`} role="status">
+          {draftStatus === 'saving' ? 'Saving answers…' : draftStatus === 'unsaved' ? 'Unsaved answer changes' : draftStatus === 'error' ? 'Autosave failed — your answers are still on this screen.' : 'Answers saved'}
+        </p>
+      ) : null}
       {reviewUnlocked ? (
         <div>
           <p className="eyebrow">Review Answers</p>
@@ -286,24 +352,46 @@ function ActivityQuestionForm({
       {questions.map((question, index) => (
         <ActivityQuestionCard
           data={data}
-          draft={drafts[question.id] ?? emptyDraft(question, data)}
+          displayAttempt={displayAttempt}
+          draft={drafts[question.id] ?? emptyDraft(question, data, displayAttempt)}
           key={question.id}
           number={index + 1}
           onChange={(draft) => updateDraft(question.id, draft)}
           question={question}
-          readonly={displayAttempt.is_submitted}
+          readonly={displayAttempt.is_submitted || locked || saving}
           reviewUnlocked={reviewUnlocked}
         />
       ))}
-      {!displayAttempt.is_submitted ? (
-        <button
-          className="button button--primary"
-          disabled={saving || !questions.length}
-          type="submit"
-        >
-          <Icon name="send" />
-          <span>{saving ? 'Submitting...' : 'Submit Main Activity'}</span>
-        </button>
+      {!displayAttempt.is_submitted && !locked ? (
+        showSubmissionReview ? (
+          <section className="activity-submission-review" aria-label="Submission review">
+            <div>
+              <p className="eyebrow">Check before submitting</p>
+              <h3>{questions.length - unanswered.length} of {questions.length} answered</h3>
+              <p>{unanswered.length ? `${unanswered.length} unanswered question${unanswered.length === 1 ? '' : 's'}. You may still submit.` : 'Every question has an answer.'}</p>
+            </div>
+            {unanswered.length ? (
+              <div className="activity-unanswered-links">
+                {unanswered.map((question) => {
+                  const number = questions.findIndex((item) => item.id === question.id) + 1
+                  return <button key={question.id} onClick={() => document.getElementById(`activity-question-${question.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })} type="button">Question {number}</button>
+                })}
+              </div>
+            ) : null}
+            <div className="lesson-editor__actions">
+              <button className="button button--secondary" onClick={() => setShowSubmissionReview(false)} type="button">Keep reviewing</button>
+              <button className="button button--primary" disabled={saving || !questions.length} type="submit">
+                <Icon name="send" />
+                <span>{saving ? 'Submitting...' : 'Confirm submission'}</span>
+              </button>
+            </div>
+          </section>
+        ) : (
+          <button className="button button--primary" disabled={saving || !questions.length} type="submit">
+            <Icon name="send" />
+            <span>Review and submit</span>
+          </button>
+        )
       ) : null}
     </form>
   )
@@ -311,6 +399,7 @@ function ActivityQuestionForm({
 
 function ActivityQuestionCard({
   data,
+  displayAttempt,
   draft,
   number,
   onChange,
@@ -319,6 +408,7 @@ function ActivityQuestionCard({
   reviewUnlocked,
 }: {
   data: RouteData
+  displayAttempt: ModuleActivityAttempt
   draft: ActivityDraft
   number: number
   onChange: (draft: ActivityDraft) => void
@@ -326,15 +416,11 @@ function ActivityQuestionCard({
   readonly: boolean
   reviewUnlocked: boolean
 }) {
-  const choices = data.activityChoices
-    .filter((choice) => choice.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
-  const pairs = data.activityMatchingPairs
-    .filter((pair) => pair.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
+  const choices = choicesForQuestion(question, data, displayAttempt)
+  const pairs = pairsForQuestion(question, data, displayAttempt)
 
   return (
-    <article className="question-card">
+    <article className="question-card" id={`activity-question-${question.id}`}>
       <div className="question-card__header">
         <span className="subject-chip">Question {number}</span>
         <span className="status-pill">{numeric(question.points)} pts</span>
@@ -426,17 +512,19 @@ function ActivityQuestionCard({
       )}
 
       {reviewUnlocked ? (
-        <AnswerReview data={data} draft={draft} question={question} />
+        <AnswerReview attempt={displayAttempt} data={data} draft={draft} question={question} />
       ) : null}
     </article>
   )
 }
 
 function AnswerReview({
+  attempt,
   data,
   draft,
   question,
 }: {
+  attempt: ModuleActivityAttempt
   data: RouteData
   draft: ActivityDraft
   question: ModuleActivityQuestion
@@ -445,11 +533,11 @@ function AnswerReview({
     <div className="answer-review">
       <div>
         <strong>Your answer</strong>
-        <p>{studentAnswerText(question, draft, data) || 'No answer submitted.'}</p>
+        <p>{studentAnswerText(question, draft, data, attempt) || 'No answer submitted.'}</p>
       </div>
       <div>
         <strong>Correct answer</strong>
-        <p>{correctAnswerText(question, data) || 'Review with your teacher.'}</p>
+        <p>{correctAnswerText(question, data, attempt) || 'Review with your teacher.'}</p>
       </div>
       {question.explanation ? (
         <div>
@@ -465,9 +553,10 @@ function studentAnswerText(
   question: ModuleActivityQuestion,
   draft: ActivityDraft,
   data: RouteData,
+  attempt?: ModuleActivityAttempt,
 ) {
-  const choices = data.activityChoices.filter((choice) => choice.question === question.id)
-  const pairs = data.activityMatchingPairs.filter((pair) => pair.question === question.id)
+  const choices = choicesForQuestion(question, data, attempt)
+  const pairs = pairsForQuestion(question, data, attempt)
   if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
     return choices.find((choice) => choice.id === draft.selected_choice)?.text ?? ''
   }
@@ -485,13 +574,9 @@ function studentAnswerText(
   return draft.text_answer
 }
 
-function correctAnswerText(question: ModuleActivityQuestion, data: RouteData) {
-  const choices = data.activityChoices
-    .filter((choice) => choice.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
-  const pairs = data.activityMatchingPairs
-    .filter((pair) => pair.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
+function correctAnswerText(question: ModuleActivityQuestion, data: RouteData, attempt?: ModuleActivityAttempt) {
+  const choices = choicesForQuestion(question, data, attempt)
+  const pairs = pairsForQuestion(question, data, attempt)
   if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
     return choices.filter((choice) => choice.is_correct).map((choice) => choice.text).join(', ')
   }
@@ -513,6 +598,7 @@ function answerToDraft(
   question: ModuleActivityQuestion,
   answer: ModuleActivityAnswer | undefined,
   data: RouteData,
+  attempt?: ModuleActivityAttempt,
 ): ActivityDraft {
   if (answer) {
     return {
@@ -522,7 +608,7 @@ function answerToDraft(
       matching_answer: answer.matching_answer,
     }
   }
-  return emptyDraft(question, data)
+  return emptyDraft(question, data, attempt)
 }
 
 function buildActivityDrafts(
@@ -532,18 +618,26 @@ function buildActivityDrafts(
 ) {
   const nextDrafts: Record<number, ActivityDraft> = {}
   questions.forEach((question) => {
+    const savedDraft = displayAttempt.draft_answers?.[String(question.id)]
+    if (savedDraft) {
+      nextDrafts[question.id] = {
+        selected_choice: savedDraft.selected_choice,
+        text_answer: savedDraft.text_answer,
+        choice_order: savedDraft.choice_order,
+        matching_answer: savedDraft.matching_answer,
+      }
+      return
+    }
     const answer = data.activityAnswers.find(
       (item) => item.attempt === displayAttempt.id && item.question === question.id,
     )
-    nextDrafts[question.id] = answerToDraft(question, answer, data)
+    nextDrafts[question.id] = answerToDraft(question, answer, data, displayAttempt)
   })
   return nextDrafts
 }
 
-function emptyDraft(question: ModuleActivityQuestion, data: RouteData): ActivityDraft {
-  const choices = data.activityChoices
-    .filter((choice) => choice.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
+function emptyDraft(question: ModuleActivityQuestion, data: RouteData, attempt?: ModuleActivityAttempt): ActivityDraft {
+  const choices = choicesForQuestion(question, data, attempt)
 
   return {
     selected_choice: null,
@@ -560,4 +654,67 @@ function moveChoice(draft: ActivityDraft, index: number, direction: -1 | 1) {
   nextOrder[index] = nextOrder[target]
   nextOrder[target] = currentValue
   return { ...draft, choice_order: nextOrder }
+}
+
+function questionsForAttempt(
+  attempt: ModuleActivityAttempt | null,
+  fallback: ModuleActivityQuestion[],
+  activityId: number,
+) {
+  if (!attempt?.question_snapshot?.length) return fallback
+  return attempt.question_snapshot
+    .map((question) => ({
+      ...question,
+      activity: activityId,
+      matching_options: question.matching_options ?? question.matching_pairs
+        .map((pair) => pair.right_text)
+        .filter((value): value is string => Boolean(value)),
+    }))
+    .sort((first, second) => first.order - second.order || first.id - second.id)
+}
+
+function snapshotQuestion(attempt: ModuleActivityAttempt | undefined, questionId: number) {
+  return attempt?.question_snapshot?.find((question) => question.id === questionId)
+}
+
+function choicesForQuestion(
+  question: ModuleActivityQuestion,
+  data: RouteData,
+  attempt?: ModuleActivityAttempt,
+) {
+  const snapshot = snapshotQuestion(attempt, question.id)
+  return snapshot
+    ? [...snapshot.choices].sort((first, second) => first.order - second.order || first.id - second.id)
+    : data.activityChoices
+        .filter((choice) => choice.question === question.id)
+        .sort((first, second) => first.order - second.order || first.id - second.id)
+}
+
+function pairsForQuestion(
+  question: ModuleActivityQuestion,
+  data: RouteData,
+  attempt?: ModuleActivityAttempt,
+) {
+  const snapshot = snapshotQuestion(attempt, question.id)
+  return snapshot
+    ? [...snapshot.matching_pairs].sort((first, second) => first.order - second.order || first.id - second.id)
+    : data.activityMatchingPairs
+        .filter((pair) => pair.question === question.id)
+        .sort((first, second) => first.order - second.order || first.id - second.id)
+}
+
+function isAnswered(question: ModuleActivityQuestion, draft?: ActivityDraft) {
+  if (!draft) return false
+  if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
+    return draft.selected_choice !== null
+  }
+  if (question.question_type === 'matching') {
+    return Object.values(draft.matching_answer).filter(Boolean).length >= question.matching_options.length
+  }
+  if (question.question_type === 'ordering') return draft.choice_order.length > 0
+  return Boolean(draft.text_answer.trim())
+}
+
+function formatDateTime(value: string | null) {
+  return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : ''
 }

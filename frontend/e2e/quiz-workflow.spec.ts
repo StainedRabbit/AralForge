@@ -42,7 +42,18 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
   const editor = page.locator('#lesson-editor-main-activity')
   await expect(editor.getByRole('heading', { name: 'Main Activity' })).toBeVisible()
+  await expect(editor.getByLabel('Points (from published questions)')).toBeDisabled()
+  await expect(editor.getByLabel('Opens at')).toBeVisible()
+  await expect(editor.getByLabel('Due at')).toBeVisible()
+  const atomicSave = page.waitForResponse(
+    (response) => response.url().includes('/api/modules/activities/atomic-save/') && response.request().method() === 'PUT',
+  )
+  await editor.getByLabel('Passing score').fill('8')
+  await expect(editor.getByText('Unsaved changes', { exact: true })).toBeVisible()
+  await atomicSave
+  await expect(editor.getByText('Saved', { exact: true }).first()).toBeVisible()
   await editor.getByRole('button', { name: /^Grading/ }).click()
+  await expect(editor.getByRole('heading', { name: 'Student extensions' })).toBeVisible()
 
   const classRows = editor.locator('.activity-grading-row')
   await expect(classRows).toHaveCount(2)

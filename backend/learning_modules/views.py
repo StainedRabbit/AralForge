@@ -1,8 +1,10 @@
+from decimal import Decimal, InvalidOperation
+
 from django.http import FileResponse
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
-from rest_framework import decorators, permissions, response, status, viewsets
+from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
@@ -19,6 +21,7 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
+    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -40,6 +43,7 @@ from .serializers import (
     ModuleActivitySerializer,
     ModuleActivityAnswerSerializer,
     ModuleActivityAttemptSerializer,
+    ModuleActivityExtensionSerializer,
     ModuleActivityMatchingPairSerializer,
     ModuleActivityQuestionChoiceSerializer,
     ModuleActivityQuestionSerializer,
@@ -56,7 +60,92 @@ from .serializers import (
     ModuleTopicSerializer,
 )
 from .services.activity_grading import submit_activity_attempt
+from .services.activity_snapshots import (
+    ensure_attempt_snapshot,
+    normalize_draft_answers,
+    validate_activity_window,
+)
 from .services.pdf_generation import generate_lesson_pdf, generate_module_pdf
+
+
+def validate_atomic_question(item, index, enforce_readiness=False):
+    if not isinstance(item, dict):
+        raise serializers.ValidationError({'questions': {index: 'Question must be an object.'}})
+    question_type = item.get('question_type')
+    valid_types = {choice for choice, _ in ModuleActivityQuestion.QuestionType.choices}
+    if question_type not in valid_types:
+        raise serializers.ValidationError({'questions': {index: 'Select a valid question type.'}})
+    prompt = str(item.get('prompt') or '').strip()
+    published = bool(item.get('is_published', True))
+    if enforce_readiness and published and not prompt:
+        raise serializers.ValidationError({'questions': {index: 'Question prompt is required.'}})
+    try:
+        points = Decimal(str(item.get('points') or '0'))
+    except InvalidOperation as error:
+        raise serializers.ValidationError({'questions': {index: 'Points must be a number.'}}) from error
+    if points <= 0:
+        raise serializers.ValidationError({'questions': {index: 'Points must be greater than zero.'}})
+
+    choices = []
+    for choice_index, choice in enumerate(item.get('choices') or []):
+        text = str(choice.get('text') or '').strip()
+        if text:
+            choices.append({
+                'text': text,
+                'is_correct': bool(choice.get('is_correct', False)),
+                'order': int(choice.get('order', choice_index)),
+            })
+    pairs = []
+    for pair_index, pair in enumerate(item.get('matching_pairs') or []):
+        left_text = str(pair.get('left_text') or '').strip()
+        right_text = str(pair.get('right_text') or '').strip()
+        if left_text or right_text:
+            if not left_text or not right_text:
+                raise serializers.ValidationError({
+                    'questions': {index: 'Every matching pair needs both sides.'},
+                })
+            pairs.append({
+                'left_text': left_text,
+                'right_text': right_text,
+                'order': int(pair.get('order', pair_index)),
+            })
+
+    if enforce_readiness and published and question_type in {
+        ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+        ModuleActivityQuestion.QuestionType.TRUE_FALSE,
+    }:
+        if len(choices) < 2 or sum(choice['is_correct'] for choice in choices) != 1:
+            raise serializers.ValidationError({
+                'questions': {index: 'Published choice questions need at least two choices and exactly one correct answer.'},
+            })
+    if enforce_readiness and published and question_type == ModuleActivityQuestion.QuestionType.ORDERING and len(choices) < 2:
+        raise serializers.ValidationError({'questions': {index: 'Ordering questions need at least two items.'}})
+    correct_text_answers = [
+        str(value).strip() for value in (item.get('correct_text_answers') or []) if str(value).strip()
+    ]
+    if enforce_readiness and published and question_type == ModuleActivityQuestion.QuestionType.FILL_BLANK and not correct_text_answers:
+        raise serializers.ValidationError({'questions': {index: 'Fill blank questions need an accepted answer.'}})
+    if enforce_readiness and published and question_type == ModuleActivityQuestion.QuestionType.MATCHING and len(pairs) < 2:
+        raise serializers.ValidationError({'questions': {index: 'Matching questions need at least two complete pairs.'}})
+    expected_output = str(item.get('expected_output') or '')
+    if enforce_readiness and published and question_type == ModuleActivityQuestion.QuestionType.CODE_OUTPUT and not expected_output.strip():
+        raise serializers.ValidationError({'questions': {index: 'Code output questions need an expected output.'}})
+
+    return {
+        'id': item.get('id'),
+        'question_type': question_type,
+        'prompt': prompt,
+        'points': points,
+        'order': int(item.get('order') or index + 1),
+        'explanation': str(item.get('explanation') or ''),
+        'correct_text_answers': correct_text_answers,
+        'case_sensitive': bool(item.get('case_sensitive', False)),
+        'code_snippet': str(item.get('code_snippet') or ''),
+        'expected_output': expected_output,
+        'is_published': published,
+        'choices': choices,
+        'matching_pairs': pairs,
+    }
 
 
 class ModuleViewSet(viewsets.ModelViewSet):
@@ -86,7 +175,7 @@ class ModuleViewSet(viewsets.ModelViewSet):
         module = self.get_object()
         topics = ModuleTopic.objects.filter(module=module)
         lessons = ModuleLesson.objects.filter(topic__module=module)
-        activities = ModuleActivity.objects.filter(module=module)
+        activities = ModuleActivity.objects.filter(module=module).prefetch_related('extensions')
         if not request.user.is_admin_teacher:
             topics = topics.filter(is_published=True)
             lessons = lessons.filter(is_published=True, topic__is_published=True)
@@ -611,7 +700,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             'lesson__topic',
             'lesson__topic__module',
             'programming_problem',
-        )
+        ).prefetch_related('extensions')
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -622,6 +711,136 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
         ).distinct()
+
+    @decorators.action(detail=False, methods=['put'], url_path='atomic-save')
+    @transaction.atomic
+    def atomic_save(self, request):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can edit Main Activities.')
+
+        payload = request.data
+        questions = payload.get('questions')
+        if not isinstance(questions, list):
+            raise serializers.ValidationError({'questions': 'Provide the complete question list.'})
+
+        activity_id = payload.get('id')
+        activity = None
+        if activity_id:
+            activity = ModuleActivity.objects.select_for_update().filter(pk=activity_id).first()
+            if not activity:
+                raise serializers.ValidationError({'id': 'Main Activity was not found.'})
+
+        is_published = bool(payload.get('is_published', False))
+        prepared_questions = []
+        published_points = Decimal('0')
+        published_count = 0
+        for index, item in enumerate(questions):
+            prepared = validate_atomic_question(item, index, is_published)
+            prepared_questions.append(prepared)
+            if prepared['is_published']:
+                published_count += 1
+                published_points += prepared['points']
+
+        if is_published and not published_count:
+            raise serializers.ValidationError({
+                'questions': 'Publish at least one complete question before publishing the activity.',
+            })
+
+        activity_data = {
+            key: payload.get(key)
+            for key in (
+                'module', 'topic', 'lesson', 'programming_problem', 'title', 'instructions',
+                'activity_type', 'order', 'opens_at', 'due_at', 'allow_late_submissions',
+                'max_attempts', 'passing_score', 'accepts_text', 'accepts_file',
+                'accepts_code', 'is_published',
+            )
+            if key in payload
+        }
+        activity_data['points_possible'] = str(published_points)
+        activity_serializer = self.get_serializer(
+            activity,
+            data=activity_data,
+            partial=bool(activity),
+        )
+        activity_serializer.is_valid(raise_exception=True)
+        activity = activity_serializer.save()
+
+        retained_ids = []
+        for item in prepared_questions:
+            question_id = item.pop('id', None)
+            choices = item.pop('choices')
+            pairs = item.pop('matching_pairs')
+            question = None
+            if question_id:
+                question = activity.questions.select_for_update().filter(pk=question_id).first()
+                if not question:
+                    raise serializers.ValidationError({
+                        'questions': f'Question {question_id} does not belong to this activity.',
+                    })
+            if question:
+                for field, value in item.items():
+                    setattr(question, field, value)
+                question.save()
+            else:
+                question = ModuleActivityQuestion.objects.create(activity=activity, **item)
+            retained_ids.append(question.id)
+            question.choices.all().delete()
+            question.matching_pairs.all().delete()
+            ModuleActivityQuestionChoice.objects.bulk_create([
+                ModuleActivityQuestionChoice(question=question, **choice)
+                for choice in choices
+            ])
+            ModuleActivityMatchingPair.objects.bulk_create([
+                ModuleActivityMatchingPair(question=question, **pair)
+                for pair in pairs
+            ])
+
+        activity.questions.exclude(pk__in=retained_ids).delete()
+        return response.Response(
+            self.get_serializer(activity).data,
+            status=status.HTTP_200_OK if activity_id else status.HTTP_201_CREATED,
+        )
+
+    @decorators.action(detail=True, methods=['get', 'put', 'delete'], url_path='extensions')
+    def extensions(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can manage activity extensions.')
+        activity = self.get_object()
+        if request.method == 'GET':
+            extensions = activity.extensions.select_related('student').all()
+            return response.Response(ModuleActivityExtensionSerializer(extensions, many=True).data)
+
+        student_id = request.data.get('student')
+        if not student_id:
+            raise serializers.ValidationError({'student': 'Select a student.'})
+        if request.method == 'DELETE':
+            activity.extensions.filter(student_id=student_id).delete()
+            return response.Response(status=status.HTTP_204_NO_CONTENT)
+
+        entry = ModuleActivityExtensionSerializer(data=request.data)
+        entry.is_valid(raise_exception=True)
+        subject_ids = set(activity.module.subjects.values_list('id', flat=True))
+        if activity.module.subject_id:
+            subject_ids.add(activity.module.subject_id)
+        if not ScheduleStudent.objects.filter(
+            student_id=student_id,
+            schedule__subject_id__in=subject_ids,
+            schedule__is_active=True,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError({
+                'student': 'This student is not actively enrolled in a class for this module.',
+            })
+        if activity.due_at and entry.validated_data['due_at'] <= activity.due_at:
+            raise serializers.ValidationError({
+                'due_at': 'An extension must be later than the activity due date.',
+            })
+        extension, _ = ModuleActivityExtension.objects.update_or_create(
+            activity=activity,
+            student_id=student_id,
+            defaults={'due_at': entry.validated_data['due_at'], 'granted_by': request.user},
+        )
+        return response.Response(ModuleActivityExtensionSerializer(extension).data)
 
     @decorators.action(detail=True, methods=['get'])
     def workspace(self, request, pk=None):
@@ -761,12 +980,13 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
-        serializer.save(
+        attempt = serializer.save(
             student=student,
             submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
             recorded_by=None,
             paper_grade_item=None,
         )
+        ensure_attempt_snapshot(attempt)
 
     def destroy(self, request, *args, **kwargs):
         attempt = self.get_object()
@@ -795,9 +1015,28 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(attempt)
             return response.Response(serializer.data)
 
+        validate_activity_window(attempt.activity, attempt.student)
+
         attempt = submit_activity_attempt(attempt)
         serializer = self.get_serializer(attempt)
         return response.Response(serializer.data)
+
+    @decorators.action(detail=True, methods=['put'], url_path='draft')
+    @transaction.atomic
+    def save_draft(self, request, pk=None):
+        attempt = self.get_object()
+        if not request.user.is_admin_teacher and attempt.student_id != request.user.id:
+            raise PermissionDenied('Students can only save their own answers.')
+        if attempt.is_submitted:
+            raise serializers.ValidationError({'detail': 'Submitted attempts cannot be edited.'})
+        validate_activity_window(attempt.activity, attempt.student)
+        ensure_attempt_snapshot(attempt)
+        answers = request.data.get('answers')
+        if not isinstance(answers, dict):
+            raise serializers.ValidationError({'answers': 'Answers must be an object keyed by question.'})
+        attempt.draft_answers = normalize_draft_answers(attempt.question_snapshot, answers)
+        attempt.save(update_fields=['draft_answers'])
+        return response.Response(self.get_serializer(attempt).data)
 
     @decorators.action(detail=False, methods=['post'], url_path='paper-scores')
     @transaction.atomic

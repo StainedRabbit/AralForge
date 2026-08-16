@@ -14,6 +14,7 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
+    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -29,6 +30,7 @@ from .models import (
     user_has_module_access,
     user_has_module_class_access,
 )
+from .services.activity_snapshots import effective_activity_due_at, validate_activity_window
 
 
 def activity_review_unlocked_for_user(user, activity):
@@ -40,7 +42,14 @@ def activity_review_unlocked_for_user(user, activity):
         student=user,
         is_submitted=True,
     )
-    if submitted_attempts.filter(score__isnull=False, max_score__gt=0, score__gte=models.F('max_score')).exists():
+    passing_score = activity.passing_score
+    if passing_score is not None and submitted_attempts.filter(score__gte=passing_score).exists():
+        return True
+    if passing_score is None and submitted_attempts.filter(
+        score__isnull=False,
+        max_score__gt=0,
+        score__gte=models.F('max_score'),
+    ).exists():
         return True
     return submitted_attempts.count() >= activity.max_attempts
 
@@ -388,13 +397,20 @@ class ModuleLessonProgressSerializer(serializers.ModelSerializer):
                     activity_type=ModuleActivity.ActivityType.INTERACTIVE,
                     is_published=True,
                 ).first()
-                if main_activity and not ModuleActivityAttempt.objects.filter(
+                qualifying_attempts = ModuleActivityAttempt.objects.filter(
                     activity=main_activity,
                     student=request.user,
                     is_submitted=True,
-                ).exists():
+                ) if main_activity else ModuleActivityAttempt.objects.none()
+                if main_activity and main_activity.passing_score is not None:
+                    qualifying_attempts = qualifying_attempts.filter(
+                        score__gte=main_activity.passing_score,
+                    )
+                if main_activity and not qualifying_attempts.exists():
                     raise serializers.ValidationError(
-                        'Finish the Main Activity before marking this lesson complete.'
+                        'Pass the Main Activity before marking this lesson complete.'
+                        if main_activity.passing_score is not None
+                        else 'Finish the Main Activity before marking this lesson complete.'
                     )
         return attrs
 
@@ -450,6 +466,8 @@ class ModuleLessonAssetSerializer(serializers.ModelSerializer):
 
 
 class ModuleActivitySerializer(serializers.ModelSerializer):
+    effective_due_at = serializers.SerializerMethodField()
+
     class Meta:
         model = ModuleActivity
         fields = (
@@ -463,7 +481,10 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'activity_type',
             'order',
             'points_possible',
+            'opens_at',
             'due_at',
+            'effective_due_at',
+            'allow_late_submissions',
             'accepts_text',
             'accepts_file',
             'accepts_code',
@@ -472,7 +493,13 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'is_published',
             'created_at',
         )
-        read_only_fields = ('id', 'created_at')
+        read_only_fields = ('id', 'created_at', 'effective_due_at')
+
+    def get_effective_due_at(self, obj):
+        request = self.context.get('request')
+        if not request or request.user.is_anonymous or request.user.is_admin_teacher:
+            return obj.due_at
+        return effective_activity_due_at(obj, request.user)
 
     def validate(self, attrs):
         lesson = attrs.get('lesson') or getattr(self.instance, 'lesson', None)
@@ -483,6 +510,28 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             attrs['accepts_text'] = False
             attrs['accepts_file'] = False
             attrs['accepts_code'] = False
+        points_possible = attrs.get(
+            'points_possible',
+            getattr(self.instance, 'points_possible', None),
+        )
+        passing_score = attrs.get(
+            'passing_score',
+            getattr(self.instance, 'passing_score', None),
+        )
+        opens_at = attrs.get('opens_at', getattr(self.instance, 'opens_at', None))
+        due_at = attrs.get('due_at', getattr(self.instance, 'due_at', None))
+        if passing_score is not None and points_possible is not None and passing_score > points_possible:
+            raise serializers.ValidationError({
+                'passing_score': 'Passing score cannot exceed points possible.',
+            })
+        if passing_score is not None and passing_score < 0:
+            raise serializers.ValidationError({
+                'passing_score': 'Passing score cannot be negative.',
+            })
+        if opens_at and due_at and opens_at >= due_at:
+            raise serializers.ValidationError({
+                'due_at': 'Due date must be after the opening date.',
+            })
         return attrs
 
 
@@ -635,6 +684,8 @@ class ModuleActivityMatchingPairSerializer(serializers.ModelSerializer):
 
 
 class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
+    question_snapshot = serializers.SerializerMethodField()
+    draft_answers = serializers.SerializerMethodField()
     class Meta:
         model = ModuleActivityAttempt
         fields = (
@@ -650,6 +701,8 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'started_at',
             'submitted_at',
             'is_submitted',
+            'question_snapshot',
+            'draft_answers',
         )
         read_only_fields = (
             'id',
@@ -661,6 +714,8 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'started_at',
             'submitted_at',
             'is_submitted',
+            'question_snapshot',
+            'draft_answers',
         )
         validators = []
 
@@ -686,6 +741,9 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
                 )
+
+            if activity:
+                validate_activity_window(activity, request.user)
 
             if activity and (
                 not activity.is_published
@@ -718,6 +776,73 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 attrs['attempt_number'] = existing_count + 1
 
         return attrs
+
+    def get_question_snapshot(self, obj):
+        snapshot = obj.question_snapshot or []
+        request = self.context.get('request')
+        if not request or request.user.is_admin_teacher or student_can_review_activity(
+            request,
+            obj.activity,
+        ):
+            return snapshot
+        redacted = []
+        for question in snapshot:
+            safe = dict(question)
+            safe.pop('explanation', None)
+            safe.pop('correct_text_answers', None)
+            safe.pop('expected_output', None)
+            choices = []
+            for choice in safe.get('choices', []):
+                visible_choice = dict(choice)
+                visible_choice.pop('is_correct', None)
+                choices.append(visible_choice)
+            if safe.get('question_type') == ModuleActivityQuestion.QuestionType.ORDERING:
+                choices.sort(key=lambda choice: hashlib.sha256(
+                    f"snapshot:{safe.get('id')}:{choice.get('id')}:{choice.get('text')}".encode('utf-8'),
+                ).hexdigest())
+            safe['choices'] = choices
+            original_pairs = safe.get('matching_pairs', [])
+            safe['matching_options'] = sorted(
+                str(pair.get('right_text') or '') for pair in original_pairs
+            )
+            pairs = []
+            for pair in original_pairs:
+                visible_pair = dict(pair)
+                visible_pair.pop('right_text', None)
+                pairs.append(visible_pair)
+            safe['matching_pairs'] = pairs
+            redacted.append(safe)
+        return redacted
+
+    def get_draft_answers(self, obj):
+        answers = obj.draft_answers or {}
+        request = self.context.get('request')
+        if not request or request.user.is_admin_teacher or student_can_review_activity(
+            request,
+            obj.activity,
+        ):
+            return answers
+        return {
+            question_id: {
+                key: value
+                for key, value in answer.items()
+                if key not in {'is_correct', 'points_earned', 'feedback'}
+            }
+            for question_id, answer in answers.items()
+        }
+
+
+class ModuleActivityExtensionSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ModuleActivityExtension
+        fields = ('id', 'activity', 'student', 'student_name', 'due_at', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'activity', 'student_name', 'created_at', 'updated_at')
+
+    def get_student_name(self, obj):
+        full_name = obj.student.get_full_name().strip()
+        return full_name or obj.student.username
 
 
 class PaperActivityScoreRowSerializer(serializers.Serializer):
@@ -887,6 +1012,8 @@ class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('Students can only answer their own attempts.')
             if attempt and attempt.is_submitted:
                 raise serializers.ValidationError('Submitted attempts cannot be edited.')
+            if attempt:
+                validate_activity_window(attempt.activity, request.user)
             if question and not question.is_published:
                 raise serializers.ValidationError('This question is not available.')
 

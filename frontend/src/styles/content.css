@@ -1485,6 +1485,46 @@
   gap: 14px;
 }
 
+.activity-draft-status {
+  align-self: flex-end;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.activity-draft-status--error {
+  color: var(--danger);
+}
+
+.activity-submission-review {
+  background: color-mix(in srgb, var(--surface) 92%, var(--primary) 8%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.activity-submission-review h3,
+.activity-submission-review p {
+  margin: 0.2rem 0;
+}
+
+.activity-unanswered-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.activity-unanswered-links button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 0.45rem 0.75rem;
+}
+
 .lesson-main-activity__header h2 {
   margin: 0 0 6px;
   color: var(--text);

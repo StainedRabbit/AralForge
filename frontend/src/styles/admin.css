@@ -4098,6 +4098,34 @@
   gap: 16px;
 }
 
+.activity-extensions {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding-top: 1.25rem;
+}
+
+.activity-extensions h3,
+.activity-extensions p {
+  margin: 0.2rem 0;
+}
+
+.activity-extension-row {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem;
+}
+
+.activity-extension-row span {
+  display: grid;
+  gap: 0.2rem;
+}
+
 .main-activity-editor {
   padding-top: 18px;
   border-top: 1px solid var(--border);

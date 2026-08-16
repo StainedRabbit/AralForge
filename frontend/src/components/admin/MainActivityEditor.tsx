@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type {
@@ -30,6 +30,18 @@ type QuestionDraft = {
   matching_text: string
   is_published: boolean
   deleted?: boolean
+}
+
+type RecoveredEditorDraft = {
+  title: string
+  instructions: string
+  maxAttempts: string
+  passingScore: string
+  opensAt: string
+  dueAt: string
+  allowLateSubmissions: boolean
+  isPublished: boolean
+  questionDrafts: QuestionDraft[]
 }
 
 type PreviewMode = 'not_started' | 'score_only' | 'review'
@@ -98,13 +110,20 @@ export function MainActivityEditor({
     () => createQuestionDrafts(data, activity),
     [activity, data],
   )
-  const [title, setTitle] = useState(activity?.title ?? 'Main Activity')
-  const [instructions, setInstructions] = useState(activity?.instructions ?? '')
-  const [pointsPossible, setPointsPossible] = useState(activity?.points_possible ?? '10')
-  const [maxAttempts, setMaxAttempts] = useState(String(activity?.max_attempts ?? 3))
-  const [passingScore, setPassingScore] = useState(activity?.passing_score ?? '')
-  const [isPublished, setIsPublished] = useState(activity?.is_published ?? false)
-  const [questionDrafts, setQuestionDrafts] = useState<QuestionDraft[]>(initialDrafts)
+  const recoveryKey = `ezoryx.main-activity-draft.${lesson.id}`
+  const recoveredDraft = useMemo(() => readRecoveredDraft(recoveryKey), [recoveryKey])
+  const [title, setTitle] = useState(recoveredDraft?.title ?? activity?.title ?? 'Main Activity')
+  const [instructions, setInstructions] = useState(recoveredDraft?.instructions ?? activity?.instructions ?? '')
+  const [maxAttempts, setMaxAttempts] = useState(recoveredDraft?.maxAttempts ?? String(activity?.max_attempts ?? 3))
+  const [passingScore, setPassingScore] = useState(recoveredDraft?.passingScore ?? activity?.passing_score ?? '')
+  const [opensAt, setOpensAt] = useState(recoveredDraft?.opensAt ?? toLocalDateTime(activity?.opens_at))
+  const [dueAt, setDueAt] = useState(recoveredDraft?.dueAt ?? toLocalDateTime(activity?.due_at))
+  const [allowLateSubmissions, setAllowLateSubmissions] = useState(
+    recoveredDraft?.allowLateSubmissions ?? activity?.allow_late_submissions ?? false,
+  )
+  const [isPublished, setIsPublished] = useState(recoveredDraft?.isPublished ?? activity?.is_published ?? false)
+  const [questionDrafts, setQuestionDrafts] = useState<QuestionDraft[]>(recoveredDraft?.questionDrafts ?? initialDrafts)
+  const [savedActivityId, setSavedActivityId] = useState(activity?.id ?? null)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('not_started')
@@ -112,10 +131,58 @@ export function MainActivityEditor({
   const [showImportExample, setShowImportExample] = useState(false)
   const [activeTab, setActiveTab] = useState<EditorTab>('setup')
   const activeDrafts = questionDrafts.filter((question) => !question.deleted)
+  const publishedPoints = activeDrafts
+    .filter((question) => question.is_published)
+    .reduce((total, question) => total + (Number(question.points) || 0), 0)
   const readinessWarnings = useMemo(
-    () => getReadinessWarnings(activeDrafts),
-    [activeDrafts],
+    () => getReadinessWarnings(activeDrafts, title, passingScore, publishedPoints, opensAt, dueAt),
+    [activeDrafts, dueAt, opensAt, passingScore, publishedPoints, title],
   )
+  const draftSignature = JSON.stringify({
+    title,
+    instructions,
+    maxAttempts,
+    passingScore,
+    opensAt,
+    dueAt,
+    allowLateSubmissions,
+    isPublished,
+    questionDrafts,
+  })
+  const savedSignature = useRef(JSON.stringify({
+    title: activity?.title ?? 'Main Activity',
+    instructions: activity?.instructions ?? '',
+    maxAttempts: String(activity?.max_attempts ?? 3),
+    passingScore: activity?.passing_score ?? '',
+    opensAt: toLocalDateTime(activity?.opens_at),
+    dueAt: toLocalDateTime(activity?.due_at),
+    allowLateSubmissions: activity?.allow_late_submissions ?? false,
+    isPublished: activity?.is_published ?? false,
+    questionDrafts: initialDrafts,
+  }))
+  const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
+  const dirty = draftSignature !== savedSignature.current
+
+  useEffect(() => {
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (!dirty && saveState !== 'saving') return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warnBeforeLeaving)
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
+  }, [dirty, saveState])
+
+  useEffect(() => {
+    if (dirty) window.localStorage.setItem(recoveryKey, draftSignature)
+  }, [dirty, draftSignature, recoveryKey])
+
+  useEffect(() => {
+    if (!dirty || saving || (isPublished && readinessWarnings.length > 0)) return
+    const timer = window.setTimeout(() => void saveActivity(undefined, true), 1200)
+    return () => window.clearTimeout(timer)
+    // saveActivity intentionally uses the complete signature captured by this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSignature, dirty, isPublished, readinessWarnings.length, saving])
 
   function addQuestion(questionType: ModuleActivityQuestionType = 'multiple_choice') {
     setQuestionDrafts((current) => [
@@ -207,7 +274,7 @@ export function MainActivityEditor({
     URL.revokeObjectURL(url)
   }
 
-  async function saveActivity(nextTab?: EditorTab) {
+  async function saveActivity(nextTab?: EditorTab, silent = false) {
     if (!module || !topic) {
       setMessage('Lesson module context is missing.')
       return
@@ -218,13 +285,15 @@ export function MainActivityEditor({
     }
 
     setSaving(true)
-    setMessage('')
+    setSaveState('saving')
+    if (!silent) setMessage('')
     try {
       const savedActivity = await api<ModuleActivity>(
-        activity ? `/modules/activities/${activity.id}/` : '/modules/activities/',
+        '/modules/activities/atomic-save/',
         {
-          method: activity ? 'PATCH' : 'POST',
+          method: 'PUT',
           body: JSON.stringify({
+            id: savedActivityId,
             module: module.id,
             topic: topic.id,
             lesson: lesson.id,
@@ -232,22 +301,29 @@ export function MainActivityEditor({
             instructions,
             activity_type: 'INTERACTIVE',
             order: lesson.order,
-            points_possible: pointsPossible || '0',
             max_attempts: Number(maxAttempts || 3),
             passing_score: passingScore || null,
+            opens_at: fromLocalDateTime(opensAt),
+            due_at: fromLocalDateTime(dueAt),
+            allow_late_submissions: allowLateSubmissions,
             accepts_text: false,
             accepts_file: false,
             accepts_code: false,
             is_published: isPublished,
+            questions: activeDrafts.map(toAtomicQuestion),
           }),
         },
       )
-      await syncQuestions(api, data, savedActivity.id, questionDrafts, initialDrafts)
+      setSavedActivityId(savedActivity.id)
+      savedSignature.current = draftSignature
+      window.localStorage.removeItem(recoveryKey)
+      setSaveState('saved')
       await refresh()
-      setMessage('Main Activity saved.')
+      if (!silent) setMessage('Main Activity saved atomically.')
       if (nextTab) setActiveTab(nextTab)
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      setSaveState('error')
+      setMessage(`Changes are still in this browser. ${toErrorMessage(caughtError)}`)
     } finally {
       setSaving(false)
     }
@@ -261,9 +337,6 @@ export function MainActivityEditor({
       ).size
     : 0
   const publishedQuestionCount = activeDrafts.filter((question) => question.is_published).length
-  const publishedPoints = activeDrafts
-    .filter((question) => question.is_published)
-    .reduce((total, question) => total + (Number(question.points) || 0), 0)
   const nextTab = ({
     setup: 'questions',
     questions: 'import',
@@ -280,8 +353,8 @@ export function MainActivityEditor({
       />
 
       <div className="activity-readiness-strip" aria-label="Main Activity readiness summary">
-        <span className={activity ? 'status-badge status-badge--ready' : 'status-badge'}>
-          {activity ? 'Saved' : 'Not saved'}
+        <span className={!dirty && saveState === 'saved' ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : dirty ? 'Unsaved changes' : 'Saved'}
         </span>
         <span className={isPublished ? 'status-badge status-badge--ready' : 'status-badge'}>
           {isPublished ? 'Published' : 'Draft'}
@@ -338,8 +411,8 @@ export function MainActivityEditor({
               <input onChange={(event) => setTitle(event.target.value)} type="text" value={title} />
             </label>
             <label className="admin-field">
-              <span>Points</span>
-              <input onChange={(event) => setPointsPossible(event.target.value)} type="number" value={pointsPossible} />
+              <span>Points (from published questions)</span>
+              <input disabled type="number" value={publishedPoints} />
             </label>
             <label className="admin-field">
               <span>Max attempts</span>
@@ -347,7 +420,19 @@ export function MainActivityEditor({
             </label>
             <label className="admin-field">
               <span>Passing score</span>
-              <input onChange={(event) => setPassingScore(event.target.value)} type="number" value={passingScore} />
+              <input max={publishedPoints} min={0} onChange={(event) => setPassingScore(event.target.value)} type="number" value={passingScore} />
+            </label>
+            <label className="admin-field">
+              <span>Opens at</span>
+              <input onChange={(event) => setOpensAt(event.target.value)} type="datetime-local" value={opensAt} />
+            </label>
+            <label className="admin-field">
+              <span>Due at</span>
+              <input onChange={(event) => setDueAt(event.target.value)} type="datetime-local" value={dueAt} />
+            </label>
+            <label className="admin-check">
+              <input checked={allowLateSubmissions} onChange={(event) => setAllowLateSubmissions(event.target.checked)} type="checkbox" />
+              <span>Allow late submissions</span>
             </label>
             <label className="admin-check">
               <input checked={isPublished} onChange={(event) => setIsPublished(event.target.checked)} type="checkbox" />
@@ -474,7 +559,7 @@ export function MainActivityEditor({
       <div className="lesson-editor__actions">
         <button className="button button--secondary" disabled={saving} onClick={() => void saveActivity()} type="button">
           <Icon name="save" />
-          <span>{saving ? 'Saving...' : 'Save Main Activity'}</span>
+          <span>{saving ? 'Saving...' : dirty ? 'Save changes' : 'Saved'}</span>
         </button>
         {nextTab ? (
           <button className="button button--primary" disabled={saving} onClick={() => void saveActivity(nextTab)} type="button">
@@ -763,6 +848,129 @@ function ActivityGradingAssignments({
           <span>{saving ? 'Applying assignments...' : 'Apply selected assignments'}</span>
         </button>
       </div>
+      <ActivityExtensions activity={activity} api={api} data={data} schedules={schedules} />
+    </section>
+  )
+}
+
+type ActivityExtension = {
+  id: number
+  activity: number
+  student: number
+  student_name: string
+  due_at: string
+}
+
+function ActivityExtensions({
+  activity,
+  api,
+  data,
+  schedules,
+}: {
+  activity: ModuleActivity
+  api: AuthedRequest
+  data: RouteData
+  schedules: RouteData['schedules']
+}) {
+  const eligibleStudentIds = new Set(
+    data.enrollments
+      .filter((entry) => entry.is_active && schedules.some((schedule) => schedule.id === entry.schedule))
+      .map((entry) => entry.student),
+  )
+  const students = data.users
+    .filter((user) => user.role === 'STUDENT' && eligibleStudentIds.has(user.id))
+    .sort((first, second) => `${first.last_name} ${first.first_name}`.localeCompare(`${second.last_name} ${second.first_name}`))
+  const [extensions, setExtensions] = useState<ActivityExtension[]>([])
+  const [studentId, setStudentId] = useState('')
+  const [extensionDueAt, setExtensionDueAt] = useState('')
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function loadExtensions() {
+    const rows = await api<ActivityExtension[]>(`/modules/activities/${activity.id}/extensions/`)
+    setExtensions(rows)
+  }
+
+  useEffect(() => {
+    let active = true
+    void api<ActivityExtension[]>(`/modules/activities/${activity.id}/extensions/`)
+      .then((rows) => {
+        if (active) setExtensions(rows)
+      })
+      .catch((error) => {
+        if (active) setMessage(toErrorMessage(error))
+      })
+    return () => { active = false }
+  }, [activity.id, api])
+
+  async function saveExtension() {
+    if (!studentId || !extensionDueAt) {
+      setMessage('Select a student and an extended due date.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      await api(`/modules/activities/${activity.id}/extensions/`, {
+        method: 'PUT',
+        body: JSON.stringify({ student: Number(studentId), due_at: fromLocalDateTime(extensionDueAt) }),
+      })
+      await loadExtensions()
+      setStudentId('')
+      setExtensionDueAt('')
+      setMessage('Student extension saved.')
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeExtension(student: number) {
+    setSaving(true)
+    setMessage('')
+    try {
+      await api(`/modules/activities/${activity.id}/extensions/`, {
+        method: 'DELETE',
+        body: JSON.stringify({ student }),
+      })
+      await loadExtensions()
+      setMessage('Student extension removed.')
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="activity-extensions">
+      <div>
+        <p className="eyebrow">Individual due dates</p>
+        <h3>Student extensions</h3>
+        <p>Override the activity due date for a student in one of the linked classes.</p>
+      </div>
+      <div className="lesson-editor__grid">
+        <label className="admin-field">
+          <span>Student</span>
+          <select onChange={(event) => setStudentId(event.target.value)} value={studentId}>
+            <option value="">Select student</option>
+            {students.map((student) => <option key={student.id} value={student.id}>{student.last_name}, {student.first_name}</option>)}
+          </select>
+        </label>
+        <label className="admin-field">
+          <span>Extended due date</span>
+          <input onChange={(event) => setExtensionDueAt(event.target.value)} type="datetime-local" value={extensionDueAt} />
+        </label>
+      </div>
+      <button className="button button--secondary button--compact" disabled={saving} onClick={() => void saveExtension()} type="button">Save extension</button>
+      {extensions.map((extension) => (
+        <div className="activity-extension-row" key={extension.id}>
+          <span><strong>{extension.student_name}</strong><small>{new Date(extension.due_at).toLocaleString()}</small></span>
+          <button className="button button--secondary button--compact" disabled={saving} onClick={() => void removeExtension(extension.student)} type="button">Remove</button>
+        </div>
+      ))}
+      {message ? <p className="admin-message" role="status">{message}</p> : null}
     </section>
   )
 }
@@ -945,8 +1153,23 @@ function createEmptyQuestionDraft(
   }
 }
 
-function getReadinessWarnings(drafts: QuestionDraft[]) {
+function getReadinessWarnings(
+  drafts: QuestionDraft[],
+  title: string,
+  passingScore: string,
+  publishedPoints: number,
+  opensAt: string,
+  dueAt: string,
+) {
   const warnings: string[] = []
+  if (!title.trim()) warnings.push('Add an activity title.')
+  if (passingScore && Number(passingScore) > publishedPoints) {
+    warnings.push('Passing score cannot exceed published question points.')
+  }
+  if (Number(passingScore) < 0) warnings.push('Passing score cannot be negative.')
+  if (opensAt && dueAt && new Date(opensAt) >= new Date(dueAt)) {
+    warnings.push('Due date must be after the opening date.')
+  }
   const publishedDrafts = drafts.filter((draft) => draft.is_published)
   if (!publishedDrafts.length) {
     warnings.push('Add at least one published question.')
@@ -962,8 +1185,8 @@ function getReadinessWarnings(drafts: QuestionDraft[]) {
       if (choices.length < 2) {
         warnings.push(`${label}: add at least two choices.`)
       }
-      if (!choices.some((choice) => choice.isCorrect)) {
-        warnings.push(`${label}: mark one correct choice with *.`)
+      if (choices.filter((choice) => choice.isCorrect).length !== 1) {
+        warnings.push(`${label}: mark exactly one correct choice with *.`)
       }
     }
     if (draft.question_type === 'fill_blank' && !lineValues(draft.correct_text_answers).length) {
@@ -981,6 +1204,57 @@ function getReadinessWarnings(drafts: QuestionDraft[]) {
   })
 
   return warnings
+}
+
+function toAtomicQuestion(draft: QuestionDraft) {
+  const choiceLines = parseChoiceLines(draft.choices_text)
+  return {
+    id: draft.serverId,
+    question_type: draft.question_type,
+    prompt: draft.prompt,
+    points: draft.points || '1',
+    order: Number(draft.order || 0),
+    explanation: draft.explanation,
+    correct_text_answers: lineValues(draft.correct_text_answers),
+    case_sensitive: draft.case_sensitive,
+    code_snippet: draft.code_snippet,
+    expected_output: draft.expected_output,
+    is_published: draft.is_published,
+    choices: ['multiple_choice', 'true_false', 'ordering'].includes(draft.question_type)
+      ? choiceLines.map((choice, index) => ({
+          text: choice.text,
+          is_correct: draft.question_type === 'ordering' ? false : choice.isCorrect,
+          order: index,
+        }))
+      : [],
+    matching_pairs: draft.question_type === 'matching'
+      ? parseMatchingLines(draft.matching_text).map((pair, index) => ({
+          left_text: pair.left,
+          right_text: pair.right,
+          order: index,
+        }))
+      : [],
+  }
+}
+
+function toLocalDateTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16)
+}
+
+function fromLocalDateTime(value: string) {
+  return value ? new Date(value).toISOString() : null
+}
+
+function readRecoveredDraft(key: string): RecoveredEditorDraft | null {
+  try {
+    const value = window.localStorage.getItem(key)
+    return value ? JSON.parse(value) as RecoveredEditorDraft : null
+  } catch {
+    return null
+  }
 }
 
 function lineValues(value: string) {
@@ -1226,121 +1500,4 @@ function matchingText(data: RouteData, question: ModuleActivityQuestion) {
     .sort((first, second) => first.order - second.order || first.id - second.id)
     .map((pair) => `${pair.left_text} => ${pair.right_text ?? ''}`)
     .join('\n')
-}
-
-async function syncQuestions(
-  api: AuthedRequest,
-  data: RouteData,
-  activityId: number,
-  drafts: QuestionDraft[],
-  initialDrafts: QuestionDraft[],
-) {
-  const activeServerIds = new Set(
-    drafts
-      .filter((draft) => draft.serverId && !draft.deleted)
-      .map((draft) => draft.serverId),
-  )
-  const deletedIds = initialDrafts
-    .map((draft) => draft.serverId)
-    .filter((id): id is number => Boolean(id) && !activeServerIds.has(id))
-
-  await Promise.all(
-    deletedIds.map((id) =>
-      api(`/modules/activity-questions/${id}/`, { method: 'DELETE' }),
-    ),
-  )
-
-  for (const draft of drafts.filter((item) => !item.deleted && item.prompt.trim())) {
-    const question = await api<ModuleActivityQuestion>(
-      draft.serverId
-        ? `/modules/activity-questions/${draft.serverId}/`
-        : '/modules/activity-questions/',
-      {
-        method: draft.serverId ? 'PATCH' : 'POST',
-        body: JSON.stringify({
-          activity: activityId,
-          question_type: draft.question_type,
-          prompt: draft.prompt,
-          points: draft.points || '1',
-          order: Number(draft.order || 0),
-          explanation: draft.explanation,
-          correct_text_answers: draft.correct_text_answers
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean),
-          case_sensitive: draft.case_sensitive,
-          code_snippet: draft.code_snippet,
-          expected_output: draft.expected_output,
-          is_published: draft.is_published,
-        }),
-      },
-    )
-    await replaceChoices(api, data, question.id, draft)
-    await replaceMatchingPairs(api, data, question.id, draft)
-  }
-}
-
-async function replaceChoices(
-  api: AuthedRequest,
-  data: RouteData,
-  questionId: number,
-  draft: QuestionDraft,
-) {
-  const existingChoices = data.activityChoices.filter((choice) => choice.question === questionId)
-  await Promise.all(
-    existingChoices.map((choice) =>
-      api(`/modules/activity-choices/${choice.id}/`, { method: 'DELETE' }),
-    ),
-  )
-  if (!['multiple_choice', 'true_false', 'ordering'].includes(draft.question_type)) {
-    return
-  }
-  const lines = draft.choices_text.split('\n').map((line) => line.trim()).filter(Boolean)
-  await Promise.all(
-    lines.map((line, index) => {
-      const isCorrect = line.startsWith('*')
-      const text = line.replace(/^\*\s*/, '')
-      return api('/modules/activity-choices/', {
-        method: 'POST',
-        body: JSON.stringify({
-          question: questionId,
-          text,
-          is_correct: draft.question_type === 'ordering' ? false : isCorrect,
-          order: index,
-        }),
-      })
-    }),
-  )
-}
-
-async function replaceMatchingPairs(
-  api: AuthedRequest,
-  data: RouteData,
-  questionId: number,
-  draft: QuestionDraft,
-) {
-  const existingPairs = data.activityMatchingPairs.filter((pair) => pair.question === questionId)
-  await Promise.all(
-    existingPairs.map((pair) =>
-      api(`/modules/activity-matching-pairs/${pair.id}/`, { method: 'DELETE' }),
-    ),
-  )
-  if (draft.question_type !== 'matching') {
-    return
-  }
-  const lines = draft.matching_text.split('\n').map((line) => line.trim()).filter(Boolean)
-  await Promise.all(
-    lines.map((line, index) => {
-      const [left, right] = line.split('=>')
-      return api('/modules/activity-matching-pairs/', {
-        method: 'POST',
-        body: JSON.stringify({
-          question: questionId,
-          left_text: (left ?? '').trim(),
-          right_text: (right ?? '').trim(),
-          order: index,
-        }),
-      })
-    }),
-  )
 }
