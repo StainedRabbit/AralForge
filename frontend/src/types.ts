@@ -585,6 +585,7 @@ export type AttendanceSession = {
   date: string
   points_possible: string
   notes: string
+  roster_students: number[]
   created_at: string
 }
 
