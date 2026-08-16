@@ -7,6 +7,10 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+
+def result_rows(response):
+    return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+
 from accounts.models import StudentProfile
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
@@ -256,8 +260,8 @@ class SubjectScheduleApiTests(APITestCase):
         response = self.client.get(reverse('subjects:subject-schedule-list'))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual([item['id'] for item in response.data], [own_schedule.id])
-        self.assertNotIn(other_schedule.id, [item['id'] for item in response.data])
+        self.assertEqual([item['id'] for item in result_rows(response)], [own_schedule.id])
+        self.assertNotIn(other_schedule.id, [item['id'] for item in result_rows(response)])
 
     def test_roster_action_pages_students_with_numeric_offsets(self):
         schedule = self.create_schedule()

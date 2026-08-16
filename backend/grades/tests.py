@@ -3,6 +3,10 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
+
+def result_rows(response):
+    return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+
 from accounts.models import User
 from assessments.models import Answer, Assessment, AssessmentAttempt, Choice, Question
 from grades.models import (
@@ -274,7 +278,7 @@ class GradeItemAccessTests(APITestCase):
         response = self.client.get('/api/grades/items/')
 
         self.assertEqual(response.status_code, 200)
-        ids = {item['id'] for item in response.data}
+        ids = {item['id'] for item in result_rows(response)}
         self.assertEqual(ids, {self.visible_item.id})
 
 
@@ -556,7 +560,7 @@ class ClassScopedGradeTests(APITestCase):
             '&source_type=MANUAL&period=PRELIM&date=2027-08-03'
         )
         self.assertEqual(filtered.status_code, 200)
-        self.assertEqual({item['id'] for item in filtered.data}, set(created_ids))
+        self.assertEqual({item['id'] for item in result_rows(filtered)}, set(created_ids))
 
     def test_score_sheet_rejects_attendance_categories_and_archived_classes(self):
         attendance_category = GradeCategory.objects.create(

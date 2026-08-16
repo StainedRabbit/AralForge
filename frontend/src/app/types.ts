@@ -55,7 +55,7 @@ export type AuthedRequest = <T>(
   options?: RequestOptions,
 ) => Promise<T>
 
-export type WorkspaceData = {
+export type RouteData = {
   users: User[]
   currentUser: User | null
   profiles: StudentProfile[]
@@ -110,7 +110,7 @@ export type WorkspaceData = {
   error: string
 }
 
-export type WorkspaceDataWithRefresh = WorkspaceData & {
+export type RouteDataWithRefresh = RouteData & {
   refresh: () => Promise<void>
 }
 

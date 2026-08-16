@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../app/types'
+import type { AuthedRequest, RouteData } from '../app/types'
 import type {
   ModuleActivity,
   ModuleActivityAnswer,
@@ -26,7 +26,7 @@ export function LessonMainActivityPanel({
 }: {
   activity: ModuleActivity | null
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   onSubmitted: () => Promise<void>
 }) {
   const [activeAttemptId, setActiveAttemptId] = useState<number | null>(null)
@@ -258,7 +258,7 @@ function ActivityQuestionForm({
   reviewUnlocked,
   saving,
 }: {
-  data: WorkspaceData
+  data: RouteData
   displayAttempt: ModuleActivityAttempt
   initialDrafts: Record<number, ActivityDraft>
   onSubmit: (
@@ -318,7 +318,7 @@ function ActivityQuestionCard({
   readonly,
   reviewUnlocked,
 }: {
-  data: WorkspaceData
+  data: RouteData
   draft: ActivityDraft
   number: number
   onChange: (draft: ActivityDraft) => void
@@ -437,7 +437,7 @@ function AnswerReview({
   draft,
   question,
 }: {
-  data: WorkspaceData
+  data: RouteData
   draft: ActivityDraft
   question: ModuleActivityQuestion
 }) {
@@ -464,7 +464,7 @@ function AnswerReview({
 function studentAnswerText(
   question: ModuleActivityQuestion,
   draft: ActivityDraft,
-  data: WorkspaceData,
+  data: RouteData,
 ) {
   const choices = data.activityChoices.filter((choice) => choice.question === question.id)
   const pairs = data.activityMatchingPairs.filter((pair) => pair.question === question.id)
@@ -485,7 +485,7 @@ function studentAnswerText(
   return draft.text_answer
 }
 
-function correctAnswerText(question: ModuleActivityQuestion, data: WorkspaceData) {
+function correctAnswerText(question: ModuleActivityQuestion, data: RouteData) {
   const choices = data.activityChoices
     .filter((choice) => choice.question === question.id)
     .sort((first, second) => first.order - second.order || first.id - second.id)
@@ -512,7 +512,7 @@ function correctAnswerText(question: ModuleActivityQuestion, data: WorkspaceData
 function answerToDraft(
   question: ModuleActivityQuestion,
   answer: ModuleActivityAnswer | undefined,
-  data: WorkspaceData,
+  data: RouteData,
 ): ActivityDraft {
   if (answer) {
     return {
@@ -528,7 +528,7 @@ function answerToDraft(
 function buildActivityDrafts(
   displayAttempt: ModuleActivityAttempt,
   questions: ModuleActivityQuestion[],
-  data: WorkspaceData,
+  data: RouteData,
 ) {
   const nextDrafts: Record<number, ActivityDraft> = {}
   questions.forEach((question) => {
@@ -540,7 +540,7 @@ function buildActivityDrafts(
   return nextDrafts
 }
 
-function emptyDraft(question: ModuleActivityQuestion, data: WorkspaceData): ActivityDraft {
+function emptyDraft(question: ModuleActivityQuestion, data: RouteData): ActivityDraft {
   const choices = data.activityChoices
     .filter((choice) => choice.question === question.id)
     .sort((first, second) => first.order - second.order || first.id - second.id)

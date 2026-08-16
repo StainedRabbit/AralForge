@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, SubjectSchedule, User } from '../../types'
 import { formatDate, numeric, percent, toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
@@ -13,7 +13,7 @@ export type AttendanceDialogTab = 'history' | 'take'
 
 export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh, schedule }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   initialTab: AttendanceDialogTab
   onClose: () => void
   refresh: () => Promise<void>
@@ -156,7 +156,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
 function ClassAttendanceHistory({ api, data, refresh, schedule }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
   schedule: SubjectSchedule
 }) {
@@ -196,7 +196,7 @@ function ClassAttendanceHistory({ api, data, refresh, schedule }: {
   </div>
 }
 
-function getScheduleStudents(data: WorkspaceData, scheduleId: number) {
+function getScheduleStudents(data: RouteData, scheduleId: number) {
   const studentIds = new Set(data.enrollments.filter((item) => item.schedule === scheduleId && item.is_active).map((item) => item.student))
   return data.users.filter((user) => user.role === 'STUDENT' && studentIds.has(user.id))
     .sort((first, second) => studentDisplayName(first).localeCompare(studentDisplayName(second), undefined, { sensitivity: 'base' }))

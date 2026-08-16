@@ -1,5 +1,5 @@
 import { useParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../app/types'
+import type { AuthedRequest, RouteData } from '../app/types'
 import { CodingBlankPanel, ModuleSubmissionForm } from '../components/activityForms'
 import { Icon } from '../components/Icon'
 import { MetaStrip, NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
@@ -12,7 +12,7 @@ export function ActivityDetailPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const { activityId } = useParams()

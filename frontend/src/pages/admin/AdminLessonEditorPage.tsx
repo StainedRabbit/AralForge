@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { MainActivityEditor } from '../../components/admin/MainActivityEditor'
 import { MarkdownEditor } from '../../components/MarkdownEditor'
-import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
-import type { ModuleLesson, ModuleLessonAsset, ModuleLessonExample } from '../../types'
+import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatusBanner } from '../../components/ui'
+import { usePaginatedResource } from '../../queries/useScopedWorkspace'
+import { queryKeys } from '../../queries/queryKeys'
+import type { Module, ModuleLesson, ModuleLessonAsset, ModuleLessonExample, ModuleTopic } from '../../types'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
@@ -61,10 +64,81 @@ export function AdminLessonEditorPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
+  refresh: () => Promise<void>
+}) {
+  const { lessonId, moduleId, topicId } = useParams()
+  const numericModuleId = Number(moduleId)
+  const numericTopicId = Number(topicId)
+  const numericLessonId = Number(lessonId)
+  const moduleQuery = useQuery({
+    queryKey: queryKeys.resource(`/modules/modules/${numericModuleId}/`),
+    queryFn: ({ signal }) => api<Module>(`/modules/modules/${numericModuleId}/`, { signal }),
+    enabled: Boolean(numericModuleId),
+    staleTime: 60_000,
+  })
+  const topicQuery = useQuery({
+    queryKey: queryKeys.resource(`/modules/topics/${numericTopicId}/`),
+    queryFn: ({ signal }) => api<ModuleTopic>(`/modules/topics/${numericTopicId}/`, { signal }),
+    enabled: Boolean(numericTopicId),
+    staleTime: 60_000,
+  })
+  const lessonQuery = useQuery({
+    queryKey: queryKeys.resource(`/modules/lessons/${numericLessonId}/`),
+    queryFn: ({ signal }) => api<ModuleLesson>(`/modules/lessons/${numericLessonId}/`, { signal }),
+    enabled: Boolean(numericLessonId),
+    staleTime: 60_000,
+  })
+  const examplesQuery = usePaginatedResource<ModuleLessonExample>(
+    api,
+    numericLessonId
+      ? `/modules/lesson-examples/?lesson=${numericLessonId}`
+      : null,
+  )
+  const isEditing = Boolean(lessonId)
+  const isPending = moduleQuery.isPending || topicQuery.isPending ||
+    (isEditing && (lessonQuery.isPending || examplesQuery.isPending))
+  const queryError = moduleQuery.error || topicQuery.error ||
+    (isEditing ? lessonQuery.error || examplesQuery.error : null)
+
+  if (isPending) {
+    return <Page><section aria-label="Loading lesson editor"><SkeletonList count={5} /></section></Page>
+  }
+
+  if (queryError) {
+    return (
+      <Page>
+        <StatusBanner
+          message={toErrorMessage(queryError)}
+          title="Lesson editor could not load"
+          tone="warning"
+        />
+      </Page>
+    )
+  }
+
+  const scopedData = {
+    ...data,
+    lessonExamples: examplesQuery.data ?? [],
+    moduleLessons: lessonQuery.data ? [lessonQuery.data] : [],
+    moduleTopics: topicQuery.data ? [topicQuery.data] : [],
+    modules: moduleQuery.data ? [moduleQuery.data] : [],
+  }
+
+  return <AdminLessonEditorForm api={api} data={scopedData} refresh={refresh} />
+}
+
+function AdminLessonEditorForm({
+  api,
+  data,
+  refresh,
+}: {
+  api: AuthedRequest
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { lessonId, moduleId, topicId } = useParams()
   const module = data.modules.find((item) => item.id === Number(moduleId))
   const topic = data.moduleTopics.find((item) => item.id === Number(topicId))
@@ -194,7 +268,15 @@ export function AdminLessonEditorPage({
         },
       )
       await syncLessonExamples(api, saved.id, exampleDrafts, initialExamples)
-      await refresh()
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.resource(`/modules/lessons/?topic=${saved.topic}`),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.resource(`/modules/lesson-examples/?lesson=${saved.id}`),
+        }),
+      ])
       removeLessonDraft(storageKey)
       setSaveState('saved')
       const params = new URLSearchParams()
@@ -392,7 +474,12 @@ export function AdminLessonEditorPage({
     setMessage('')
     try {
       await api(`/modules/lessons/${editingLesson.id}/`, { method: 'DELETE' })
-      await refresh()
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.resource(`/modules/lessons/?topic=${editingLesson.topic}`),
+        }),
+      ])
       removeLessonDraft(storageKey)
       navigate(backUrl)
     } catch (caughtError) {

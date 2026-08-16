@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import type { AuthedRequest, AnswerDraft, WorkspaceData } from '../app/types'
+import type { AuthedRequest, AnswerDraft, RouteData } from '../app/types'
 import { AssessmentRow } from '../components/cards'
 import { Icon } from '../components/Icon'
 import { QuestionCard } from '../components/QuestionCard'
@@ -22,7 +22,7 @@ export function AssessmentsPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const [savingId, setSavingId] = useState<number | null>(null)
@@ -118,7 +118,7 @@ export function AssessmentDetailPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const { assessmentId } = useParams()
@@ -442,7 +442,7 @@ function MockTopicPicker({
   topics,
 }: {
   canStart: boolean
-  data: WorkspaceData
+  data: RouteData
   isSaving: boolean
   onStart: () => void
   selectedTopicIds: number[]
@@ -501,7 +501,7 @@ function MockTopicPicker({
   )
 }
 
-function mockTopicParentLabel(data: WorkspaceData, moduleId: number) {
+function mockTopicParentLabel(data: RouteData, moduleId: number) {
   const module = data.modules.find((item) => item.id === moduleId)
   const subject = module?.subject
     ? data.subjects.find((item) => item.id === module.subject)

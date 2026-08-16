@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import type {
   GradeCategory,
   MainActivityBulkAssignmentRequest,
@@ -87,7 +87,7 @@ export function MainActivityEditor({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   lesson: ModuleLesson
   refresh: () => Promise<void>
 }) {
@@ -511,7 +511,7 @@ function ActivityGradingAssignments({
 }: {
   activity: ModuleActivity
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   moduleSubject: number | null
   moduleSubjects: number[]
   refresh: () => Promise<void>
@@ -767,7 +767,7 @@ function ActivityGradingAssignments({
   )
 }
 
-function quizCategoriesFor(data: WorkspaceData, scheduleId: number, period: GradingPeriod): GradeCategory[] {
+function quizCategoriesFor(data: RouteData, scheduleId: number, period: GradingPeriod): GradeCategory[] {
   const schedule = data.schedules.find((candidate) => candidate.id === scheduleId)
   if (!schedule) return []
   return data.gradeCategories.filter(
@@ -894,7 +894,7 @@ function QuestionEditorCard({
   )
 }
 
-function createQuestionDrafts(data: WorkspaceData, activity: ModuleActivity | null): QuestionDraft[] {
+function createQuestionDrafts(data: RouteData, activity: ModuleActivity | null): QuestionDraft[] {
   if (!activity) return []
   return data.activityQuestions
     .filter((question) => question.activity === activity.id)
@@ -1212,7 +1212,7 @@ function StructuredImportExampleModal({
   )
 }
 
-function choicesText(data: WorkspaceData, question: ModuleActivityQuestion) {
+function choicesText(data: RouteData, question: ModuleActivityQuestion) {
   return data.activityChoices
     .filter((choice) => choice.question === question.id)
     .sort((first, second) => first.order - second.order || first.id - second.id)
@@ -1220,7 +1220,7 @@ function choicesText(data: WorkspaceData, question: ModuleActivityQuestion) {
     .join('\n')
 }
 
-function matchingText(data: WorkspaceData, question: ModuleActivityQuestion) {
+function matchingText(data: RouteData, question: ModuleActivityQuestion) {
   return data.activityMatchingPairs
     .filter((pair) => pair.question === question.id)
     .sort((first, second) => first.order - second.order || first.id - second.id)
@@ -1230,7 +1230,7 @@ function matchingText(data: WorkspaceData, question: ModuleActivityQuestion) {
 
 async function syncQuestions(
   api: AuthedRequest,
-  data: WorkspaceData,
+  data: RouteData,
   activityId: number,
   drafts: QuestionDraft[],
   initialDrafts: QuestionDraft[],
@@ -1282,7 +1282,7 @@ async function syncQuestions(
 
 async function replaceChoices(
   api: AuthedRequest,
-  data: WorkspaceData,
+  data: RouteData,
   questionId: number,
   draft: QuestionDraft,
 ) {
@@ -1315,7 +1315,7 @@ async function replaceChoices(
 
 async function replaceMatchingPairs(
   api: AuthedRequest,
-  data: WorkspaceData,
+  data: RouteData,
   questionId: number,
   draft: QuestionDraft,
 ) {

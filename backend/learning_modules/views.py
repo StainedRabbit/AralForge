@@ -6,7 +6,12 @@ from rest_framework import decorators, permissions, response, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from subjects.models import ScheduleStudent
+from assessments.models import Assessment
+from assessments.serializers import AssessmentSerializer
+from coding.models import ProgrammingProblem
+from coding.serializers import ProgrammingProblemSerializer
+from subjects.models import ScheduleStudent, Subject
+from subjects.serializers import SubjectSerializer
 
 from .models import (
     Module,
@@ -57,6 +62,7 @@ from .services.pdf_generation import generate_lesson_pdf, generate_module_pdf
 class ModuleViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'description', 'slug')
 
     def get_queryset(self):
         queryset = Module.objects.select_related('subject').prefetch_related('subjects')
@@ -70,6 +76,49 @@ class ModuleViewSet(viewsets.ModelViewSet):
             module_enrollment_filter(self.request.user)
             | active_module_access_filter(self.request.user),
         ).distinct()
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def workspace(self, request, pk=None):
+        module = self.get_object()
+        topics = ModuleTopic.objects.filter(module=module)
+        lessons = ModuleLesson.objects.filter(topic__module=module)
+        activities = ModuleActivity.objects.filter(module=module)
+        if not request.user.is_admin_teacher:
+            topics = topics.filter(is_published=True)
+            lessons = lessons.filter(is_published=True, topic__is_published=True)
+            activities = activities.filter(is_published=True)
+        examples = ModuleLessonExample.objects.filter(lesson__in=lessons)
+        lesson_progress = ModuleLessonProgress.objects.filter(
+            lesson__in=lessons, student=request.user,
+        ) if not request.user.is_admin_teacher else ModuleLessonProgress.objects.none()
+        attempts = ModuleActivityAttempt.objects.filter(
+            activity__in=activities, student=request.user,
+        ) if not request.user.is_admin_teacher else ModuleActivityAttempt.objects.none()
+        context = {'request': request}
+        return response.Response({
+            'module': ModuleSerializer(module, context=context).data,
+            'topics': ModuleTopicSerializer(topics, many=True, context=context).data,
+            'lessons': ModuleLessonSerializer(lessons, many=True, context=context).data,
+            'lesson_examples': ModuleLessonExampleSerializer(examples, many=True, context=context).data,
+            'lesson_progress': ModuleLessonProgressSerializer(lesson_progress, many=True, context=context).data,
+            'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
+            'activity_attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'assessments': AssessmentSerializer(
+                Assessment.objects.filter(module=module), many=True, context=context,
+            ).data,
+            'problems': ProgrammingProblemSerializer(
+                ProgrammingProblem.objects.filter(module=module).prefetch_related('test_cases', 'blanks'),
+                many=True, context=context,
+            ).data,
+            'subjects': SubjectSerializer(
+                Subject.objects.filter(modules=module) | Subject.objects.filter(learning_module=module),
+                many=True, context=context,
+            ).data,
+        })
 
     @decorators.action(
         detail=True,
@@ -345,6 +394,7 @@ class ModuleAccessViewSet(viewsets.ModelViewSet):
 class ModuleTopicViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleTopicSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'competency_code', 'competency_text')
 
     def get_queryset(self):
         queryset = ModuleTopic.objects.select_related('module', 'legacy_module')
@@ -363,9 +413,14 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
 class ModuleLessonViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleLessonSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'overview', 'learning_targets')
 
     def get_queryset(self):
         queryset = ModuleLesson.objects.select_related('topic', 'topic__module')
+
+        module_id = self.request.query_params.get('module')
+        if module_id:
+            queryset = queryset.filter(topic__module_id=module_id)
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -545,6 +600,7 @@ class ModuleLessonAssetViewSet(viewsets.ModelViewSet):
 class ModuleActivityViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivitySerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'instructions')
 
     def get_queryset(self):
         queryset = ModuleActivity.objects.select_related(
@@ -566,6 +622,32 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
         ).distinct()
+
+    @decorators.action(detail=True, methods=['get'])
+    def workspace(self, request, pk=None):
+        activity = self.get_object()
+        questions = ModuleActivityQuestion.objects.filter(activity=activity).prefetch_related(
+            'choices', 'matching_pairs',
+        )
+        if not request.user.is_admin_teacher:
+            questions = questions.filter(is_published=True)
+        attempts = ModuleActivityAttempt.objects.filter(activity=activity)
+        submissions = ModuleActivitySubmission.objects.filter(activity=activity)
+        if not request.user.is_admin_teacher:
+            attempts = attempts.filter(student=request.user)
+            submissions = submissions.filter(student=request.user)
+        context = {'request': request}
+        return response.Response({
+            'activity': ModuleActivitySerializer(activity, context=context).data,
+            'module': ModuleSerializer(activity.module, context=context).data,
+            'problem': (
+                ProgrammingProblemSerializer(activity.programming_problem, context=context).data
+                if activity.programming_problem_id else None
+            ),
+            'questions': ModuleActivityQuestionSerializer(questions, many=True, context=context).data,
+            'attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,
+        })
 
 
 class ModuleActivityQuestionViewSet(viewsets.ModelViewSet):

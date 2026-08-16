@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import type { WorkspaceData } from '../../app/types'
+import type { RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { LessonExampleCards } from '../../components/LessonExampleCards'
 import { RichLessonText } from '../../components/RichLessonText'
@@ -24,7 +24,7 @@ type PresentationTextSize = 'default' | 'large' | 'small'
 
 const TEXT_SIZE_KEY = 'ezoryx:presentation-text-size'
 
-export function LessonPresentationPage({ data }: { data: WorkspaceData }) {
+export function LessonPresentationPage({ data }: { data: RouteData }) {
   const { moduleId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const shellRef = useRef<HTMLDivElement | null>(null)
@@ -708,7 +708,7 @@ function PresentationContent({
   data,
   section,
 }: {
-  data: WorkspaceData
+  data: RouteData
   section: PresentationSection
 }) {
   const examples = section.lessonId

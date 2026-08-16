@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import {
   AdminResourcePanel,
   type AdminField,
@@ -33,7 +33,7 @@ export function AdminStudentsPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const [managedStudentId, setManagedStudentId] = useState<number | null>(null)
@@ -371,7 +371,7 @@ function BulkModuleAccessPanel({
   scheduleOptions,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   moduleOptions: { label: string; value: number | string }[]
   refresh: () => Promise<void>
   scheduleOptions: { label: string; value: number | string }[]

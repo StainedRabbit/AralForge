@@ -1,10 +1,10 @@
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import { getApiBaseUrl } from '../api'
 import { EmptyState, MetaStrip, Page, PageHeader, SectionHeading } from '../components/ui'
 import { formatDateTime } from '../utils/format'
 import { fullName, initials } from '../utils/student'
 
-export function ProfilePage({ data }: { data: WorkspaceData }) {
+export function ProfilePage({ data }: { data: RouteData }) {
   const user = data.currentUser
   const profile = data.profile
 

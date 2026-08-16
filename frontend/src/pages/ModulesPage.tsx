@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../app/types'
+import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { RichLessonText } from '../components/RichLessonText'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard } from '../components/ui'
@@ -29,7 +29,7 @@ export function ModulesPage({
   data,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
 }) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -322,7 +322,7 @@ function LockedModuleSummary({
   module,
 }: {
   api: AuthedRequest
-  module: WorkspaceData['modules'][number]
+  module: RouteData['modules'][number]
 }) {
   const [downloading, setDownloading] = useState(false)
   const [message, setMessage] = useState('')

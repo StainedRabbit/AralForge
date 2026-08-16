@@ -3,7 +3,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { asArray } from '../../api'
 import { Icon } from '../../components/Icon'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
@@ -121,7 +121,7 @@ export function AdminClassesPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -372,7 +372,7 @@ function ScheduleForm({
   setSelectedScheduleId,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   defaultTermId: number | null
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
@@ -712,7 +712,7 @@ function ClassRoster({
   selectedSchedule,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
 }) {
@@ -1413,7 +1413,7 @@ function GradeDetailsModal({
   row,
   schedule,
 }: {
-  data: WorkspaceData
+  data: RouteData
   onClose: () => void
   row: RosterRowData
   schedule: SubjectSchedule
@@ -2346,7 +2346,7 @@ function buildAvailableStudentsPath(
   return `/accounts/users/available_students/?${params.toString()}`
 }
 
-function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterRowData {
+function getRosterRow(enrollment: ScheduleStudent, data: RouteData): RosterRowData {
   const profile = data.profiles.find((candidate) => candidate.user === enrollment.student)
   const user = data.users.find((candidate) => candidate.id === enrollment.student)
 
@@ -2360,7 +2360,7 @@ function getRosterRow(enrollment: ScheduleStudent, data: WorkspaceData): RosterR
 }
 
 function getPrimaryGradeSummary(
-  data: WorkspaceData,
+  data: RouteData,
   scheduleId: number,
   studentId: number,
 ): PrimaryGradeSummary {
@@ -2384,14 +2384,14 @@ function getPrimaryGradeSummary(
   }
 }
 
-function findFinalGrade(data: WorkspaceData, scheduleId: number, studentId: number) {
+function findFinalGrade(data: RouteData, scheduleId: number, studentId: number) {
   return data.finalGrades.find(
     (grade) => grade.schedule === scheduleId && grade.student === studentId,
   )
 }
 
 function findPeriodGrade(
-  data: WorkspaceData,
+  data: RouteData,
   scheduleId: number,
   studentId: number,
   period: (typeof gradingPeriods)[number],

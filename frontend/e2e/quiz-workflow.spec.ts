@@ -16,9 +16,16 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
     const session = JSON.parse(localStorage.getItem('ezoryx.session') ?? '{}') as { access?: string }
     const headers = { Authorization: `Bearer ${session.access}` }
     const load = async (path: string) => {
-      const response = await fetch(`http://127.0.0.1:8001/api${path}`, { headers })
-      const payload = await response.json()
-      return Array.isArray(payload) ? payload : payload.results
+      const rows = []
+      let next: string | null = `http://127.0.0.1:8001/api${path}`
+      while (next) {
+        const response = await fetch(next, { headers })
+        const payload = await response.json()
+        if (Array.isArray(payload)) return payload
+        rows.push(...payload.results)
+        next = payload.next
+      }
+      return rows
     }
     const [modules, topics, lessons] = await Promise.all([
       load('/modules/modules/'),

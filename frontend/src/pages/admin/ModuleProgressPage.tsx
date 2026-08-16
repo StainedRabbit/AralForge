@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { EmptyState, Page, PageHeader } from '../../components/ui'
 import type {
@@ -17,7 +17,7 @@ export function ModuleProgressPage({
   data,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
 }) {
   const { moduleId } = useParams()
   const [searchParams] = useSearchParams()

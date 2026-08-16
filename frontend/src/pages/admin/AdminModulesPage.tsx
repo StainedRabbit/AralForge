@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { LessonExampleCards } from '../../components/LessonExampleCards'
 import { RichLessonText } from '../../components/RichLessonText'
-import { EmptyState, Page, SearchBox } from '../../components/ui'
+import { EmptyState, Page, SearchBox, SkeletonList, StatusBanner } from '../../components/ui'
 import { useActiveLessonSection } from '../../hooks/useActiveLessonSection'
+import { usePaginatedResource } from '../../queries/useScopedWorkspace'
 import type {
   Module,
   ModuleLesson,
@@ -21,8 +22,6 @@ import {
   lessonsForTopic,
   modulesForSubject,
   topicOwnSearchText,
-  topicsForModule,
-  topicSearchText,
 } from '../../utils/modules'
 
 export function AdminModulesPage({
@@ -31,7 +30,7 @@ export function AdminModulesPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const location = useLocation()
@@ -54,35 +53,38 @@ export function AdminModulesPage({
 
   const selectedModule =
     modulesForSubject(data.modules, selectedSubjectId)[0] ?? null
-  const moduleTopics = useMemo(
-    () => selectedModule
-      ? topicsForModule(data.moduleTopics, selectedModule.id)
-      : [],
-    [data.moduleTopics, selectedModule],
-  )
+  const topicsPath = selectedModule
+    ? `/modules/topics/?module=${selectedModule.id}`
+    : null
+  const topicsQuery = usePaginatedResource<ModuleTopic>(api, topicsPath)
+  const moduleTopics = useMemo(() => topicsQuery.data ?? [], [topicsQuery.data])
   const normalizedQuery = query.trim().toLowerCase()
-  const visibleTopics = useMemo(() => {
-    if (!selectedModule) {
-      return []
-    }
-
-    return moduleTopics.filter((topic) => {
-      const topicLessons = lessonsForTopic(data.moduleLessons, topic.id)
-      return !normalizedQuery || topicSearchText(topic, topicLessons)
-        .toLowerCase()
-        .includes(normalizedQuery)
-    })
-  }, [data.moduleLessons, moduleTopics, normalizedQuery, selectedModule])
   const selectedTopic = normalizedQuery
-    ? visibleTopics.find((topic) => topic.id === selectedTopicId) ??
-      visibleTopics[0] ??
+    ? moduleTopics.find((topic) => topic.id === selectedTopicId) ??
+      moduleTopics.find((topic) => topicOwnSearchText(topic).toLowerCase().includes(normalizedQuery)) ??
       null
     : moduleTopics.find((topic) => topic.id === selectedTopicId) ??
       moduleTopics[0] ??
       null
-  const selectedLessons = selectedTopic
-    ? lessonsForTopic(data.moduleLessons, selectedTopic.id)
-    : []
+  const lessonsPath = selectedTopic
+    ? `/modules/lessons/?topic=${selectedTopic.id}`
+    : null
+  const lessonsQuery = usePaginatedResource<ModuleLesson>(api, lessonsPath)
+  const selectedLessons = useMemo(() => lessonsQuery.data ?? [], [lessonsQuery.data])
+  const visibleTopics = useMemo(
+    () => moduleTopics.filter((topic) => {
+      if (!normalizedQuery) {
+        return true
+      }
+      if (topicOwnSearchText(topic).toLowerCase().includes(normalizedQuery)) {
+        return true
+      }
+      return topic.id === selectedTopic?.id && selectedLessons.some((lesson) =>
+        lessonSearchText(lesson).toLowerCase().includes(normalizedQuery),
+      )
+    }),
+    [moduleTopics, normalizedQuery, selectedLessons, selectedTopic?.id],
+  )
   const selectedTopicMatchesQuery = selectedTopic
     ? topicOwnSearchText(selectedTopic).toLowerCase().includes(normalizedQuery)
     : false
@@ -96,6 +98,33 @@ export function AdminModulesPage({
     visibleLessons.find((lesson) => lesson.id === selectedLessonId) ??
     visibleLessons[0] ??
     null
+  const examplesPath = selectedLesson
+    ? `/modules/lesson-examples/?lesson=${selectedLesson.id}`
+    : null
+  const examplesQuery = usePaginatedResource<ModuleLessonExample>(api, examplesPath)
+  const loadFullModule = Boolean(
+    selectedModule && (showModuleOutline || showOutlineImport),
+  )
+  const outlineLessonsPath = loadFullModule && selectedModule
+    ? `/modules/lessons/?module=${selectedModule.id}`
+    : null
+  const outlineLessonsQuery = usePaginatedResource<ModuleLesson>(api, outlineLessonsPath)
+  const scopedData = {
+    ...data,
+    lessonExamples: examplesQuery.data ?? [],
+    moduleLessons: selectedLessons,
+    moduleTopics,
+  }
+
+  async function refreshWorkspace() {
+    await refresh()
+    await Promise.all([
+      topicsQuery.refetch(),
+      lessonsPath ? lessonsQuery.refetch() : Promise.resolve(),
+      examplesPath ? examplesQuery.refetch() : Promise.resolve(),
+      outlineLessonsPath ? outlineLessonsQuery.refetch() : Promise.resolve(),
+    ])
+  }
 
   useEffect(() => {
     if (selectedSubjectId || !data.subjects.length) {
@@ -106,6 +135,9 @@ export function AdminModulesPage({
   }, [data.subjects, selectedSubjectId])
 
   useEffect(() => {
+    if (topicsQuery.isPending) {
+      return
+    }
     if (!selectedTopic && selectedTopicId !== null) {
       queueMicrotask(() => setSelectedTopicId(null))
       return
@@ -114,9 +146,12 @@ export function AdminModulesPage({
     if (selectedTopic?.id && selectedTopic.id !== selectedTopicId) {
       queueMicrotask(() => setSelectedTopicId(selectedTopic.id))
     }
-  }, [selectedTopic, selectedTopicId])
+  }, [selectedTopic, selectedTopicId, topicsQuery.isPending])
 
   useEffect(() => {
+    if (lessonsQuery.isPending) {
+      return
+    }
     if (!visibleLessons.length) {
       if (selectedLessonId !== null) {
         queueMicrotask(() => setSelectedLessonId(null))
@@ -127,7 +162,7 @@ export function AdminModulesPage({
     if (selectedLesson?.id && selectedLesson.id !== selectedLessonId) {
       queueMicrotask(() => setSelectedLessonId(selectedLesson.id))
     }
-  }, [selectedLesson, selectedLessonId, visibleLessons])
+  }, [lessonsQuery.isPending, selectedLesson, selectedLessonId, visibleLessons])
 
   useEffect(() => {
     const nextParams = new URLSearchParams()
@@ -187,7 +222,7 @@ export function AdminModulesPage({
           method: 'PATCH',
         }),
       ])
-      await refresh()
+      await refreshWorkspace()
       setSelectedTopicId(topic.id)
       setWorkspaceMessage('Topic order updated.')
     } catch (caughtError) {
@@ -198,7 +233,8 @@ export function AdminModulesPage({
   }
 
   async function moveLesson(lesson: ModuleLesson, direction: -1 | 1) {
-    const lessonGroup = lessonsForTopic(data.moduleLessons, lesson.topic)
+    const lessonSource = outlineLessonsQuery.data ?? selectedLessons
+    const lessonGroup = lessonsForTopic(lessonSource, lesson.topic)
     const lessonIndex = lessonGroup.findIndex((item) => item.id === lesson.id)
     const targetLesson = lessonGroup[lessonIndex + direction]
     if (lessonIndex < 0 || !targetLesson) {
@@ -222,7 +258,7 @@ export function AdminModulesPage({
           method: 'PATCH',
         }),
       ])
-      await refresh()
+      await refreshWorkspace()
       navigateLesson(lesson.id)
       setWorkspaceMessage('Lesson order updated.')
     } catch (caughtError) {
@@ -233,7 +269,7 @@ export function AdminModulesPage({
   }
 
   async function bulkSetTopicPublished(topic: ModuleTopic, isPublished: boolean) {
-    const topicLessons = lessonsForTopic(data.moduleLessons, topic.id)
+    const topicLessons = lessonsForTopic(selectedLessons, topic.id)
     setWorkspaceBusy(true)
     setWorkspaceMessage('')
     try {
@@ -249,7 +285,7 @@ export function AdminModulesPage({
           }),
         ),
       ])
-      await refresh()
+      await refreshWorkspace()
       setWorkspaceMessage(isPublished ? 'Topic and lessons published.' : 'Topic and lessons unpublished.')
     } catch (caughtError) {
       setWorkspaceMessage(toErrorMessage(caughtError))
@@ -282,12 +318,28 @@ export function AdminModulesPage({
           selectedModule={selectedModule}
           selectedSubjectId={selectedSubjectId}
           selectedTopic={selectedTopic}
+          topicsLoading={topicsQuery.isPending}
           visibleTopics={visibleTopics}
         />
 
-        {showModuleOutline && selectedModule ? (
+        {showModuleOutline && selectedModule && outlineLessonsQuery.isPending ? (
+          <ModuleDataStateModal
+            onClose={() => setShowModuleOutline(false)}
+            title="Loading Module Outline"
+          />
+        ) : null}
+
+        {showModuleOutline && selectedModule && outlineLessonsQuery.error ? (
+          <ModuleDataStateModal
+            error={toErrorMessage(outlineLessonsQuery.error)}
+            onClose={() => setShowModuleOutline(false)}
+            title="Module Outline Could Not Load"
+          />
+        ) : null}
+
+        {showModuleOutline && selectedModule && outlineLessonsQuery.data ? (
           <ModuleOutlineModal
-            lessons={data.moduleLessons}
+            lessons={outlineLessonsQuery.data}
             moduleTopics={moduleTopics}
             onClose={() => setShowModuleOutline(false)}
             onMoveLesson={moveLesson}
@@ -305,10 +357,25 @@ export function AdminModulesPage({
           />
         ) : null}
 
-        {showOutlineImport && selectedModule ? (
+        {showOutlineImport && selectedModule && outlineLessonsQuery.isPending ? (
+          <ModuleDataStateModal
+            onClose={() => setShowOutlineImport(false)}
+            title="Loading Outline Import"
+          />
+        ) : null}
+
+        {showOutlineImport && selectedModule && outlineLessonsQuery.error ? (
+          <ModuleDataStateModal
+            error={toErrorMessage(outlineLessonsQuery.error)}
+            onClose={() => setShowOutlineImport(false)}
+            title="Outline Import Could Not Load"
+          />
+        ) : null}
+
+        {showOutlineImport && selectedModule && outlineLessonsQuery.data ? (
           <ModuleOutlineImportModal
             api={api}
-            data={data}
+            data={{ ...scopedData, moduleLessons: outlineLessonsQuery.data }}
             module={selectedModule}
             moduleTopics={moduleTopics}
             onApplied={(topicId) => {
@@ -317,14 +384,38 @@ export function AdminModulesPage({
               setSelectedLessonId(null)
             }}
             onClose={() => setShowOutlineImport(false)}
-            refresh={refresh}
+            refresh={refreshWorkspace}
           />
         ) : null}
 
-        {selectedModule ? (
+        {selectedModule && topicsQuery.error ? (
+          <StatusBanner
+            message={toErrorMessage(topicsQuery.error)}
+            title="Topics could not load"
+            tone="warning"
+          />
+        ) : selectedModule && topicsQuery.isPending ? (
+          <section aria-label="Loading topics"><SkeletonList count={4} /></section>
+        ) : selectedModule && selectedTopic && lessonsQuery.error ? (
+          <StatusBanner
+            message={toErrorMessage(lessonsQuery.error)}
+            title="Lessons could not load"
+            tone="warning"
+          />
+        ) : selectedModule && selectedTopic && lessonsQuery.isPending ? (
+          <section aria-label="Loading lessons"><SkeletonList count={4} /></section>
+        ) : selectedModule && selectedLesson && examplesQuery.error ? (
+          <StatusBanner
+            message={toErrorMessage(examplesQuery.error)}
+            title="Lesson examples could not load"
+            tone="warning"
+          />
+        ) : selectedModule && selectedLesson && examplesQuery.isPending ? (
+          <section aria-label="Loading lesson examples"><SkeletonList count={2} /></section>
+        ) : selectedModule ? (
           <ModuleLessonWorkspace
             api={api}
-            data={data}
+            data={scopedData}
             lessons={visibleLessons}
             module={selectedModule}
             onBulkPublishTopic={bulkSetTopicPublished}
@@ -332,7 +423,7 @@ export function AdminModulesPage({
             navigateLesson={navigateLesson}
             onSelectLesson={navigateLesson}
             query={query}
-            refresh={refresh}
+            refresh={refreshWorkspace}
             selectedLesson={selectedLesson}
             topicLessons={selectedLessons}
             selectedTopic={selectedTopic}
@@ -370,9 +461,10 @@ function ModuleWorkspaceTopBar({
   selectedModule,
   selectedSubjectId,
   selectedTopic,
+  topicsLoading,
   visibleTopics,
 }: {
-  data: WorkspaceData
+  data: RouteData
   moduleTopics: ModuleTopic[]
   onImportClick: () => void
   onOutlineClick: () => void
@@ -385,6 +477,7 @@ function ModuleWorkspaceTopBar({
   selectedModule: Module | null
   selectedSubjectId: number | null
   selectedTopic: ModuleTopic | null
+  topicsLoading: boolean
   visibleTopics: ModuleTopic[]
 }) {
   return (
@@ -415,11 +508,12 @@ function ModuleWorkspaceTopBar({
         <label className="admin-field">
           <span>Topic</span>
           <select
-            disabled={!moduleTopics.length}
+            disabled={topicsLoading || !moduleTopics.length}
             onChange={(event) => onSelectedTopicChange(Number(event.target.value) || null)}
             value={selectedTopic?.id ?? ''}
           >
-            {!moduleTopics.length ? <option value="">No topics yet</option> : null}
+            {topicsLoading ? <option value="">Loading topics...</option> : null}
+            {!topicsLoading && !moduleTopics.length ? <option value="">No topics yet</option> : null}
             {moduleTopics.length && !visibleTopics.length ? (
               <option value="">No matching topics</option>
             ) : null}
@@ -462,6 +556,37 @@ function ModuleWorkspaceTopBar({
         </div>
       </div>
     </header>
+  )
+}
+
+function ModuleDataStateModal({
+  error,
+  onClose,
+  title,
+}: {
+  error?: string
+  onClose: () => void
+  title: string
+}) {
+  return (
+    <div className="lesson-focus-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="lesson-focus-modal__backdrop" />
+      <div className="lesson-focus-modal__panel">
+        <div className="lesson-focus-modal__header">
+          <strong>{title}</strong>
+          <button className="button button--secondary button--compact" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        <div className="lesson-import-modal__body">
+          {error ? (
+            <StatusBanner message={error} title="Data could not load" tone="warning" />
+          ) : (
+            <section aria-label={title}><SkeletonList count={4} /></section>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -521,7 +646,7 @@ function ModuleOutlineImportModal({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   module: Module
   moduleTopics: ModuleTopic[]
   onApplied: (topicId: number) => void
@@ -803,7 +928,7 @@ function ModuleLessonWorkspace({
   workspaceMessage,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   lessons: ModuleLesson[]
   module: Module
   navigateLesson: (lessonId: number) => void
@@ -1041,7 +1166,7 @@ function TopicSummaryCard({
   workspaceMessage,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   module: Module
   onBulkPublishTopic: (topic: ModuleTopic, isPublished: boolean) => Promise<void>
   refresh: () => Promise<void>
@@ -1823,6 +1948,6 @@ function scrollToLessonSection(sectionId: string) {
   })
 }
 
-function subjectCode(data: WorkspaceData, subjectId: number) {
+function subjectCode(data: RouteData, subjectId: number) {
   return data.subjects.find((subject) => subject.id === subjectId)?.code ?? 'Subject'
 }

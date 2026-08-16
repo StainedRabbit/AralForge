@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, User } from '../../types'
 import { numeric, percent, toErrorMessage } from '../../utils/format'
 import { studentDisplayName, summarizeAttendance } from './attendanceHelpers'
@@ -8,7 +8,7 @@ type AttendanceStatus = AttendanceRecord['status']
 
 export function AttendanceSessionDetails({ api, data, refresh, session }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
   session: AttendanceSession
 }) {
@@ -94,7 +94,7 @@ function AttendanceStat({ label, value }: { label: string; value: number | strin
   return <div className="attendance-breakdown__stat"><strong>{value}</strong><span>{label}</span></div>
 }
 
-function historyStudents(data: WorkspaceData, session: AttendanceSession, records: AttendanceRecord[]) {
+function historyStudents(data: RouteData, session: AttendanceSession, records: AttendanceRecord[]) {
   const studentIds = new Set(records.map((record) => record.student))
   if (session.schedule) {
     data.enrollments

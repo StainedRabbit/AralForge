@@ -39,6 +39,7 @@ class AttendanceSession(models.Model):
             ),
         ]
         ordering = ['-date']
+        indexes = [models.Index(fields=['schedule', 'date'], name='attendance_schedule_date_idx')]
 
     def clean(self):
         super().clean()

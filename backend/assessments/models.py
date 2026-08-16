@@ -137,6 +137,7 @@ class AssessmentAttempt(models.Model):
             ),
         ]
         ordering = ['-started_at']
+        indexes = [models.Index(fields=['student', 'assessment', 'is_submitted'], name='attempt_student_state_idx')]
 
     def __str__(self):
         return f'{self.student} - {self.assessment} attempt {self.attempt_number}'

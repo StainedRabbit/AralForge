@@ -1,5 +1,7 @@
 from django.db.models import Q
 from rest_framework import permissions, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from learning_modules.models import active_module_access_filter
@@ -18,6 +20,7 @@ from .serializers import (
 class ProgrammingProblemViewSet(viewsets.ModelViewSet):
     serializer_class = ProgrammingProblemSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'description', 'slug')
 
     def get_queryset(self):
         queryset = ProgrammingProblem.objects.select_related(
@@ -34,6 +37,20 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
         return queryset.filter(is_published=True).filter(
             problem_access_filter(self.request.user)
         ).distinct()
+
+    @action(detail=True, methods=['get'])
+    def workspace(self, request, pk=None):
+        problem = self.get_object()
+        submissions = CodeSubmission.objects.filter(problem=problem).prefetch_related('blank_answers')
+        if not request.user.is_admin_teacher:
+            submissions = submissions.filter(student=request.user)
+        context = {'request': request}
+        return Response({
+            'problem': ProgrammingProblemSerializer(problem, context=context).data,
+            'submissions': CodeSubmissionSerializer(
+                submissions[:50], many=True, context=context,
+            ).data,
+        })
 
 
 class TestCaseViewSet(viewsets.ModelViewSet):

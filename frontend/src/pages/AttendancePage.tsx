@@ -1,10 +1,10 @@
 import { useSearchParams } from 'react-router-dom'
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard } from '../components/ui'
 import { attendanceStatusLabel, attendanceSummary, hasActiveSubjectAccess, subjectLabel } from '../utils/student'
 import { formatDate, numeric } from '../utils/format'
 
-export function AttendancePage({ data }: { data: WorkspaceData }) {
+export function AttendancePage({ data }: { data: RouteData }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedScheduleId = Number(searchParams.get('schedule')) || null
   const selectedSchedule = requestedScheduleId

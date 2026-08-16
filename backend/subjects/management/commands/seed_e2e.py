@@ -68,6 +68,8 @@ class Command(BaseCommand):
         )
         programming = Subject.objects.create(code='E2E101', name='Programming Fundamentals')
         databases = Subject.objects.create(code='E2E102', name='Database Systems')
+        overflow_subject = Subject.objects.create(code='E2EO1', name='Lesson Overflow Fixtures')
+        authoring_subject = Subject.objects.create(code='E2EL1', name='Lesson Authoring')
         GradeCategory.objects.create(
             subject=programming,
             grading_period=GradingPeriod.PRELIM,
@@ -95,6 +97,40 @@ class Command(BaseCommand):
         )
         for student in students[:2]:
             ScheduleStudent.objects.create(schedule=class_a, student=student)
+
+        overflow_module = Module.objects.create(
+            title='E2E Lesson Overflow Module',
+            slug='e2e-lesson-overflow-module',
+            subject=overflow_subject,
+            is_published=False,
+        )
+        overflow_topic = ModuleTopic.objects.create(
+            module=overflow_module,
+            title='Overflow Topic',
+            order=1,
+            is_published=False,
+        )
+        ModuleLesson.objects.bulk_create([
+            ModuleLesson(
+                topic=overflow_topic,
+                title=f'Overflow Lesson {index}',
+                order=index,
+                is_published=False,
+            )
+            for index in range(1, 106)
+        ])
+        authoring_module = Module.objects.create(
+            title='E2E Lesson Authoring Module',
+            slug='e2e-lesson-authoring-module',
+            subject=authoring_subject,
+            is_published=False,
+        )
+        ModuleTopic.objects.create(
+            module=authoring_module,
+            title='Scoped Authoring Topic',
+            order=1,
+            is_published=False,
+        )
 
         resume_module = Module.objects.create(
             title='E2E Resume Learning Module',

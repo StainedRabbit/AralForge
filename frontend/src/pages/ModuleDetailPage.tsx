@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../app/types'
+import type { AuthedRequest, RouteData } from '../app/types'
 import { ActivityCard } from '../components/cards'
 import { Icon } from '../components/Icon'
 import { LessonExampleCards } from '../components/LessonExampleCards'
@@ -31,7 +31,7 @@ export function ModuleDetailPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const { moduleId } = useParams()
@@ -311,7 +311,7 @@ function LockedModuleDetail({
   module,
 }: {
   api: AuthedRequest
-  module: WorkspaceData['modules'][number]
+  module: RouteData['modules'][number]
 }) {
   return (
     <section className="locked-module-detail section-block">
@@ -338,7 +338,7 @@ function ModulePdfButton({
   module,
 }: {
   api: AuthedRequest
-  module: WorkspaceData['modules'][number]
+  module: RouteData['modules'][number]
 }) {
   const [downloading, setDownloading] = useState(false)
   const [message, setMessage] = useState('')
@@ -406,7 +406,7 @@ function ModuleContents({
 }: {
   completedLessonIds: Set<number>
   completionPercent: number
-  data: WorkspaceData
+  data: RouteData
   moduleId: number
   moduleOutcomes: string
   moduleOverview: string
@@ -542,7 +542,7 @@ function TopicOverview({
   topic,
 }: {
   completedLessonIds: Set<number>
-  data: WorkspaceData
+  data: RouteData
   onOpenContents: () => void
   onOpenLesson: (lesson: ModuleLesson) => void
   startedLessonIds: Set<number>
@@ -710,7 +710,7 @@ function StudentLessonReader({
   apiMessage: string
   completed: boolean
   completedLessonIds: Set<number>
-  data: WorkspaceData
+  data: RouteData
   lesson: ModuleLesson
   onOpenContents: () => void
   onOpenTopic: () => void
@@ -1166,7 +1166,7 @@ function TopicActivities({
   data,
   topic,
 }: {
-  data: WorkspaceData
+  data: RouteData
   topic: ModuleTopic
 }) {
   const activities = data.activities.filter(
@@ -1204,7 +1204,7 @@ function ModuleMockAssessments({
   data,
   moduleId,
 }: {
-  data: WorkspaceData
+  data: RouteData
   moduleId: number
 }) {
   const assessments = data.assessments.filter(
@@ -1258,7 +1258,7 @@ function scrollToStudentSection(sectionId: string) {
   })
 }
 
-function LessonCodingAssessments({ data, lessonId }: { data: WorkspaceData; lessonId: number }) {
+function LessonCodingAssessments({ data, lessonId }: { data: RouteData; lessonId: number }) {
   const problems = data.problems.filter(
     (problem) => problem.lesson === lessonId && problem.is_published,
   )

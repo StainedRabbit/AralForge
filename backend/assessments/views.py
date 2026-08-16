@@ -8,7 +8,9 @@ from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from learning_modules.models import Module, ModuleTopic, active_module_access_filter, user_has_module_access
-from subjects.models import active_subject_access_filter
+from learning_modules.serializers import ModuleSerializer, ModuleTopicSerializer
+from subjects.models import ScheduleStudent, Subject, active_subject_access_filter
+from subjects.serializers import ScheduleStudentSerializer, SubjectSerializer
 
 from .models import (
     Answer,
@@ -31,12 +33,55 @@ from .serializers import (
 class AssessmentViewSet(viewsets.ModelViewSet):
     serializer_class = AssessmentSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('title', 'instructions')
 
     def get_permissions(self):
         if self.action == 'start_mock':
             return [permissions.IsAuthenticated()]
 
         return super().get_permissions()
+
+    @action(detail=True, methods=['get'])
+    def workspace(self, request, pk=None):
+        assessment = self.get_object()
+        attempts = AssessmentAttempt.objects.filter(
+            assessment=assessment,
+        ).prefetch_related('selected_questions', 'selected_module_topics', 'selected_topics')
+        answers = Answer.objects.filter(attempt__assessment=assessment)
+        if not request.user.is_admin_teacher:
+            attempts = attempts.filter(student=request.user)
+            answers = answers.filter(attempt__student=request.user)
+        questions = Question.objects.filter(assessment=assessment).prefetch_related('choices')
+        if not request.user.is_admin_teacher and assessment.kind in {
+            Assessment.Kind.MOCK_EXAM, Assessment.Kind.MOCK_QUIZ,
+        }:
+            questions = questions.filter(mock_attempts__attempt__student=request.user).distinct()
+        context = {'request': request}
+        modules = Module.objects.filter(
+            Q(pk=assessment.module_id)
+            | Q(subject=assessment.subject)
+            | Q(subjects=assessment.subject),
+        ).distinct()
+        if not request.user.is_admin_teacher:
+            modules = modules.filter(is_published=True).filter(
+                active_module_access_filter(request.user),
+            ).distinct()
+        module_topics = ModuleTopic.objects.filter(module__in=modules)
+        if not request.user.is_admin_teacher:
+            module_topics = module_topics.filter(is_published=True)
+        enrollments = ScheduleStudent.objects.filter(student=request.user, is_active=True)
+        return Response({
+            'assessment': AssessmentSerializer(assessment, context=context).data,
+            'questions': QuestionSerializer(questions, many=True, context=context).data,
+            'attempts': AssessmentAttemptSerializer(attempts, many=True, context=context).data,
+            'answers': AnswerSerializer(answers, many=True, context=context).data,
+            'modules': ModuleSerializer(modules, many=True, context=context).data,
+            'module_topics': ModuleTopicSerializer(module_topics, many=True, context=context).data,
+            'subjects': SubjectSerializer(
+                Subject.objects.filter(pk=assessment.subject_id), many=True, context=context,
+            ).data,
+            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+        })
 
     def get_queryset(self):
         queryset = Assessment.objects.select_related('subject', 'module')

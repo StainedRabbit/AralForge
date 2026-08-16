@@ -360,6 +360,7 @@ class GradeItem(models.Model):
 
     class Meta:
         ordering = ['grade_category__subject__code', 'grade_category__grading_period', 'order', 'id']
+        indexes = [models.Index(fields=['schedule', 'date'], name='gradeitem_schedule_date_idx')]
 
     @property
     def subject(self):

@@ -139,6 +139,7 @@ class SubjectSchedule(models.Model):
             ),
         ]
         ordering = ['school_year_semester', 'subject__code', 'days', 'start_time']
+        indexes = [models.Index(fields=['school_year_semester', 'is_active'], name='schedule_term_active_idx')]
 
     def clean(self):
         super().clean()
@@ -224,6 +225,10 @@ class ScheduleStudent(models.Model):
             ),
         ]
         ordering = ['schedule__school_year_semester', 'schedule__subject__code', 'student__username']
+        indexes = [
+            models.Index(fields=['schedule', 'is_active'], name='enroll_schedule_active_idx'),
+            models.Index(fields=['student', 'is_active'], name='enroll_student_active_idx'),
+        ]
 
     def clean(self):
         super().clean()
