@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import type {
   Assessment,
   AssessmentAttempt,
@@ -19,7 +19,7 @@ import { dueLabel, percent } from '../utils/format'
 import { Icon } from './Icon'
 import { MetaStrip } from './ui'
 
-export function ModuleCard({ data, module }: { data: WorkspaceData; module: Module }) {
+export function ModuleCard({ data, module }: { data: RouteData; module: Module }) {
   const activities = getModuleActivities(data, module.id)
   const completed = Boolean(
     data.progress.find((item) => item.module === module.id && item.completed_at),
@@ -67,7 +67,7 @@ export function ModuleCard({ data, module }: { data: WorkspaceData; module: Modu
   )
 }
 
-export function ModuleRow({ data, module }: { data: WorkspaceData; module: Module }) {
+export function ModuleRow({ data, module }: { data: RouteData; module: Module }) {
   const activities = getModuleActivities(data, module.id)
   const submittedCount = activities.filter((activity) =>
     hasSubmission(data, activity.id),
@@ -96,7 +96,7 @@ export function ActivityCard({
   data,
 }: {
   activity: ModuleActivity
-  data: WorkspaceData
+  data: RouteData
 }) {
   const submitted = hasSubmission(data, activity.id)
 
@@ -121,7 +121,7 @@ export function ActivityTimelineItem({
   data,
 }: {
   activity: ModuleActivity
-  data: WorkspaceData
+  data: RouteData
 }) {
   const module = data.modules.find((item) => item.id === activity.module)
 
@@ -143,7 +143,7 @@ export function ProblemCard({
   data,
   problem,
 }: {
-  data: WorkspaceData
+  data: RouteData
   problem: ProgrammingProblem
 }) {
   const subject = data.subjects.find((item) => item.id === problem.subject)

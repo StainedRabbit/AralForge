@@ -1,4 +1,4 @@
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import {
   AdminResourcePanel,
   type AdminField,
@@ -32,7 +32,7 @@ export function AdminCodingPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const blanks = data.problems.flatMap((problem) => problem.blanks)

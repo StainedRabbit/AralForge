@@ -3,14 +3,18 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Max, Q
 from django.shortcuts import get_object_or_404
-from rest_framework import serializers, status, viewsets
+from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from accounts.permissions import IsAdminTeacherOrReadOnly
+from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from gamification.models import LevelRule, PointLedger
+from gamification.serializers import LevelRuleSerializer, PointLedgerSerializer
 from learning_modules.models import ModuleActivity
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
+from subjects.serializers import ScheduleStudentSerializer, SubjectScheduleSerializer
 
 from .models import (
     FinalGrade,
@@ -36,6 +40,61 @@ from .serializers import (
     StudentGradeItemScoreSerializer,
     SubjectGradingPolicySerializer,
 )
+
+
+class StudentGradeOverviewView(APIView):
+    def get(self, request):
+        if request.user.is_admin_teacher:
+            return Response({'detail': 'Student grade overview is only available to students.'}, status=403)
+        enrollments = ScheduleStudent.objects.select_related(
+            'schedule__subject', 'schedule__school_year_semester__school_year', 'student',
+        ).filter(student=request.user, is_active=True, schedule__is_active=True)
+        schedule_ids = enrollments.values_list('schedule_id', flat=True)
+        categories = GradeCategory.objects.filter(subject__schedules__id__in=schedule_ids).distinct()
+        context = {'request': request}
+        return Response({
+            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+            'schedules': SubjectScheduleSerializer(
+                SubjectSchedule.objects.filter(id__in=schedule_ids), many=True, context=context,
+            ).data,
+            'categories': GradeCategorySerializer(categories, many=True, context=context).data,
+            'category_grades': StudentCategoryGradeSerializer(
+                StudentCategoryGrade.objects.filter(student=request.user, schedule_id__in=schedule_ids), many=True, context=context,
+            ).data,
+            'period_grades': PeriodGradeSerializer(
+                PeriodGrade.objects.filter(student=request.user, schedule_id__in=schedule_ids), many=True, context=context,
+            ).data,
+            'final_grades': FinalGradeSerializer(
+                FinalGrade.objects.filter(student=request.user, schedule_id__in=schedule_ids), many=True, context=context,
+            ).data,
+            'points': PointLedgerSerializer(PointLedger.objects.filter(student=request.user), many=True, context=context).data,
+            'levels': LevelRuleSerializer(LevelRule.objects.all(), many=True, context=context).data,
+        })
+
+
+class TeacherGradebookView(APIView):
+    permission_classes = [IsAdminTeacher]
+
+    def get(self, request):
+        schedule_id = request.query_params.get('schedule')
+        if not schedule_id or not schedule_id.isdigit():
+            return Response({'detail': 'A valid schedule is required.'}, status=400)
+        schedule = get_object_or_404(SubjectSchedule.objects.select_related('subject'), pk=schedule_id)
+        period = request.query_params.get('period', '').strip()
+        categories = GradeCategory.objects.filter(subject=schedule.subject)
+        if period:
+            categories = categories.filter(grading_period=period)
+        items = GradeItem.objects.filter(schedule=schedule, grade_category__in=categories).select_related('grade_category')
+        scores = StudentGradeItemScore.objects.filter(grade_item__in=items).select_related('grade_item', 'student')
+        enrollments = ScheduleStudent.objects.filter(schedule=schedule, is_active=True).select_related('student__student_profile')
+        context = {'request': request}
+        return Response({
+            'schedule': SubjectScheduleSerializer(schedule, context=context).data,
+            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+            'categories': GradeCategorySerializer(categories, many=True, context=context).data,
+            'items': GradeItemSerializer(items, many=True, context=context).data,
+            'scores': StudentGradeItemScoreSerializer(scores, many=True, context=context).data,
+        })
 
 
 class SubjectGradingPolicyViewSet(viewsets.ModelViewSet):

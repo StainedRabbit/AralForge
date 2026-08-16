@@ -1,4 +1,4 @@
-import type { AnswerDraft, WorkspaceData } from '../app/types'
+import type { AnswerDraft, RouteData } from '../app/types'
 import type { Question } from '../types'
 import { getQuestionChoices } from '../utils/student'
 import { numeric } from '../utils/format'
@@ -12,7 +12,7 @@ export function QuestionCard({
   question,
   readonly,
 }: {
-  data: WorkspaceData
+  data: RouteData
   draft: AnswerDraft
   number: number
   onChange: (draft: AnswerDraft) => void

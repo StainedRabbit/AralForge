@@ -12,6 +12,7 @@ from .serializers import AvailableStudentSerializer, StudentProfileSerializer, U
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
+    search_fields = ('username', 'first_name', 'last_name', 'email')
 
     def get_queryset(self):
         if self.request.user.is_admin_teacher:
@@ -24,6 +25,17 @@ class UserViewSet(viewsets.ModelViewSet):
             return [IsAdminTeacher()]
 
         return [IsAdminTeacherOrReadOnly()]
+
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        profile = StudentProfile.objects.select_related('user').filter(user=request.user).first()
+        return Response({
+            'user': UserSerializer(request.user, context={'request': request}).data,
+            'student_profile': (
+                StudentProfileSerializer(profile, context={'request': request}).data
+                if profile else None
+            ),
+        })
 
     @action(detail=False, methods=['get'], permission_classes=[IsAdminTeacher])
     def available_students(self, request):
@@ -80,6 +92,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('student_number', 'section', 'user__username', 'user__first_name', 'user__last_name')
 
     def get_queryset(self):
         if self.request.user.is_admin_teacher:

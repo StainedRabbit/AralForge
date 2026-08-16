@@ -1,4 +1,4 @@
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import {
   AdminResourcePanel,
   type AdminField,
@@ -33,7 +33,7 @@ export function AdminAssessmentsPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const subjectOptions = toOptions(

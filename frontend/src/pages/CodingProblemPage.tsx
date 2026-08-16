@@ -1,5 +1,5 @@
 import { useParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../app/types'
+import type { AuthedRequest, RouteData } from '../app/types'
 import { CodingBlankPanel } from '../components/activityForms'
 import { NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
 import { numeric } from '../utils/format'
@@ -10,7 +10,7 @@ export function CodingProblemPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const { problemId } = useParams()

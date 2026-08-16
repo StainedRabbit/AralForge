@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import {
   AdminResourcePanel,
   type AdminField,
@@ -46,7 +46,7 @@ export function AdminGradesPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const subjectOptions = toOptions(
@@ -296,7 +296,7 @@ export function AdminGradesPage({
 
 function LegacyGradeItemsPanel({ api, data, onRefresh }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   onRefresh: () => Promise<void>
 }) {
   const items = data.gradeItems.filter((item) => item.schedule === null)

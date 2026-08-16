@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import { ProblemCard } from '../components/cards'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard, Toolbar } from '../components/ui'
 
-export function CodingPage({ data }: { data: WorkspaceData }) {
+export function CodingPage({ data }: { data: RouteData }) {
   const [query, setQuery] = useState('')
   const [difficulty, setDifficulty] = useState('all')
   const problems = useMemo(() => {

@@ -300,6 +300,43 @@ Complete the retained practice.
   await expect(page.getByRole('textbox', { name: "Let's Practice", exact: true })).toHaveValue('Complete the retained practice.')
 })
 
+test('creates, selects, and reloads a lesson beyond the global first page', async ({ page }) => {
+  await page.goto('/admin/modules')
+  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL(/\/admin(?:\/)?$/)
+  await page.goto('/admin/modules')
+
+  await page.getByLabel('Subject').selectOption({ label: 'E2EL1 - Lesson Authoring' })
+  const topicSelect = page.locator('label').filter({ hasText: /^Topic/ }).locator('select')
+  await expect(topicSelect).toHaveValue(/\d+/)
+  await page.getByRole('link', { name: 'New Lesson' }).click()
+  await expect(page.getByRole('heading', { name: 'Create Lesson' })).toBeVisible()
+  await page.getByLabel('Lesson Title').fill('Persisted Scoped Lesson')
+  await page.getByLabel('Order').fill('1')
+
+  const createResponse = page.waitForResponse(
+    response => response.url().includes('/api/modules/lessons/') &&
+      response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Save lesson' }).click()
+  await expect((await createResponse).status()).toBe(201)
+  await page.waitForURL(/\/admin\/modules\?subject=\d+&topic=\d+&lesson=\d+/)
+  await expect(page.getByRole('heading', { name: /Persisted Scoped Lesson/ })).toBeVisible()
+
+  const savedUrl = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(savedUrl)
+  await expect(page.getByRole('heading', { name: /Persisted Scoped Lesson/ })).toBeVisible()
+
+  await page.getByLabel('Subject').selectOption({ label: 'E2EO1 - Lesson Overflow Fixtures' })
+  await expect(page.getByText('Overflow Lesson 105', { exact: true })).toBeVisible()
+  await page.getByLabel('Subject').selectOption({ label: 'E2EL1 - Lesson Authoring' })
+  await expect(page.getByRole('heading', { name: /Persisted Scoped Lesson/ })).toBeVisible()
+  await expect(page.getByText('Overflow Lesson 105', { exact: true })).toHaveCount(0)
+})
+
 test('starts, resumes, continues, and reviews lessons from module pages', async ({ page }) => {
   await page.goto('/modules')
   await page.getByLabel('Username').fill('e2e-student-1')

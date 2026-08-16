@@ -46,6 +46,8 @@ def database_config(database_url, sqlite_path):
             'HOST': parsed.hostname or '',
             'PORT': str(parsed.port or ''),
             'OPTIONS': dict(parse_qsl(parsed.query)),
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+            'CONN_HEALTH_CHECKS': True,
         }
 
     raise RuntimeError(f'Unsupported DATABASE_URL scheme: {parsed.scheme}')
@@ -96,11 +98,13 @@ INSTALLED_APPS = [
     'grades.apps.GradesConfig',
     'coding',
     'gamification',
+    'overview',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'config.middleware.RequestTimingMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -186,7 +190,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.EzoryxLimitOffsetPagination',
+    'DEFAULT_FILTER_BACKENDS': ('config.filters.EzoryxQueryFilterBackend',),
+    'PAGE_SIZE': 50,
 }
+
+CORS_EXPOSE_HEADERS = ['Server-Timing', 'X-Response-Time-Ms']
 
 
 if not DEBUG:

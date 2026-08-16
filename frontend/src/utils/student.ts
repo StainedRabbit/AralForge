@@ -1,4 +1,4 @@
-import type { AnswerDraft, WorkspaceData } from '../app/types'
+import type { AnswerDraft, RouteData } from '../app/types'
 import type {
   AttendanceRecord,
   Assessment,
@@ -13,7 +13,7 @@ import type {
 } from '../types'
 import { formatTime, numeric, percent } from './format'
 
-export function buildDashboardMetrics(data: WorkspaceData) {
+export function buildDashboardMetrics(data: RouteData) {
   const completedModules = data.progress.filter((item) => item.completed_at).length
   const submittedActivities = data.submissions.length
   const pendingActivities = countPendingActivities(data)
@@ -34,7 +34,7 @@ export function buildDashboardMetrics(data: WorkspaceData) {
   }
 }
 
-export function getStudentEnrollments(data: WorkspaceData) {
+export function getStudentEnrollments(data: RouteData) {
   if (!data.currentUser) {
     return data.enrollments
   }
@@ -44,18 +44,18 @@ export function getStudentEnrollments(data: WorkspaceData) {
   )
 }
 
-export function getActiveStudentEnrollments(data: WorkspaceData) {
+export function getActiveStudentEnrollments(data: RouteData) {
   return getStudentEnrollments(data).filter((enrollment) => enrollment.is_active)
 }
 
-export function getActiveStudentSubjectIds(data: WorkspaceData) {
+export function getActiveStudentSubjectIds(data: RouteData) {
   return new Set(
     getActiveStudentEnrollments(data).map((enrollment) => enrollment.subject),
   )
 }
 
 export function hasActiveSubjectAccess(
-  data: WorkspaceData,
+  data: RouteData,
   subjectId: number | null,
 ) {
   if (!subjectId) {
@@ -65,11 +65,11 @@ export function hasActiveSubjectAccess(
   return getActiveStudentSubjectIds(data).has(subjectId)
 }
 
-export function hasActiveModuleAccess(_data: WorkspaceData, module: Module) {
+export function hasActiveModuleAccess(_data: RouteData, module: Module) {
   return module.is_accessible
 }
 
-export function getStudentModuleSubjectIds(data: WorkspaceData) {
+export function getStudentModuleSubjectIds(data: RouteData) {
   const subjectIds = getActiveStudentSubjectIds(data)
   data.modules.forEach((module) => {
     if (!hasActiveModuleAccess(data, module)) {
@@ -83,12 +83,12 @@ export function getStudentModuleSubjectIds(data: WorkspaceData) {
   return subjectIds
 }
 
-export function isModuleGrantAvailable(grant: WorkspaceData['moduleAccess'][number]) {
+export function isModuleGrantAvailable(grant: RouteData['moduleAccess'][number]) {
   return grant.is_available
 }
 
 export function hasActiveAssessmentAccess(
-  data: WorkspaceData,
+  data: RouteData,
   assessment: Assessment,
 ) {
   if (assessment.module) {
@@ -103,7 +103,7 @@ export function isMockAssessment(assessment: Assessment) {
   return assessment.kind === 'MOCK_EXAM' || assessment.kind === 'MOCK_QUIZ'
 }
 
-export function getMockTopicModules(data: WorkspaceData, assessment: Assessment) {
+export function getMockTopicModules(data: RouteData, assessment: Assessment) {
   return data.moduleTopics
     .filter((topic) => {
       const module = data.modules.find((item) => item.id === topic.module)
@@ -121,7 +121,7 @@ export function getMockTopicModules(data: WorkspaceData, assessment: Assessment)
 }
 
 export function getAssessmentQuestions(
-  data: WorkspaceData,
+  data: RouteData,
   assessment: Assessment,
   attempt?: AssessmentAttempt | null,
 ) {
@@ -175,7 +175,7 @@ export function attendanceStatusLabel(status: AttendanceRecord['status']) {
   return labels[status]
 }
 
-export function getQuestionChoices(data: WorkspaceData, question: Question) {
+export function getQuestionChoices(data: RouteData, question: Question) {
   const nestedChoices = question.choices ?? []
 
   if (nestedChoices.length) {
@@ -219,21 +219,21 @@ export function gradeCategoryLabel(category: GradeCategory) {
   return `${category.grading_period} ${category.category} · ${numeric(category.weight)}%`
 }
 
-export function countPendingActivities(data: WorkspaceData) {
+export function countPendingActivities(data: RouteData) {
   return data.activities.filter((activity) => !hasSubmission(data, activity.id)).length
 }
 
-export function hasSubmission(data: WorkspaceData, activityId: number) {
+export function hasSubmission(data: RouteData, activityId: number) {
   return data.submissions.some((submission) => submission.activity === activityId)
 }
 
-export function getModuleActivities(data: WorkspaceData, moduleId: number) {
+export function getModuleActivities(data: RouteData, moduleId: number) {
   return data.activities
     .filter((activity) => activity.module === moduleId)
     .sort((first, second) => first.order - second.order || first.id - second.id)
 }
 
-export function moduleSubjectLabel(data: WorkspaceData, module: Module) {
+export function moduleSubjectLabel(data: RouteData, module: Module) {
   if (module.subject) {
     const subject = data.subjects.find((item) => item.id === module.subject)
     return subject?.code ?? 'General'
@@ -250,14 +250,14 @@ export function moduleSubjectLabel(data: WorkspaceData, module: Module) {
   return subjects.map((subject) => subject?.code).join(' / ')
 }
 
-export function moduleAccessLabel(_data: WorkspaceData, module: Module) {
+export function moduleAccessLabel(_data: RouteData, module: Module) {
   if (module.access_status === 'ADVANCE_PAID') return 'Advance module'
   if (module.access_status === 'ENROLLED_PAID') return 'Paid access'
   if (module.access_status === 'LOCKED') return 'Payment required'
   return module.is_accessible ? 'Active access' : 'Locked'
 }
 
-export function subjectLabel(data: WorkspaceData, subjectId: number) {
+export function subjectLabel(data: RouteData, subjectId: number) {
   const subject = data.subjects.find((item) => item.id === subjectId)
   return subject ? `${subject.code} ${subject.name}` : 'Subject'
 }

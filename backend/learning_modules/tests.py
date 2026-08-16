@@ -10,6 +10,10 @@ from django.test.utils import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+
+def result_rows(response):
+    return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+
 from accounts.models import User
 from assessments.models import Assessment
 from coding.models import ProgrammingProblem
@@ -105,9 +109,9 @@ class ModuleAccessApiTests(APITestCase):
         response = self.client.get('/api/modules/modules/')
 
         self.assertEqual(response.status_code, 200)
-        ids = {module['id'] for module in response.data}
+        ids = {module['id'] for module in result_rows(response)}
         self.assertEqual(ids, {self.free_module.id, self.paid_module.id})
-        statuses = {module['id']: module['access_status'] for module in response.data}
+        statuses = {module['id']: module['access_status'] for module in result_rows(response)}
         self.assertEqual(statuses[self.free_module.id], 'LOCKED')
         self.assertEqual(statuses[self.paid_module.id], 'LOCKED')
 
@@ -124,7 +128,7 @@ class ModuleAccessApiTests(APITestCase):
         response = self.client.get('/api/modules/modules/')
 
         self.assertEqual(response.status_code, 200)
-        ids = {module['id'] for module in response.data}
+        ids = {module['id'] for module in result_rows(response)}
         self.assertEqual(ids, {self.free_module.id, self.paid_module.id})
         self.assertEqual(
             grant.expires_at.date(),
@@ -148,7 +152,7 @@ class ModuleAccessApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(
             self.advance_module.id,
-            {module['id'] for module in response.data},
+            {module['id'] for module in result_rows(response)},
         )
         grant.refresh_from_db()
         self.assertEqual(grant.amount_paid, 500)
@@ -170,7 +174,7 @@ class ModuleAccessApiTests(APITestCase):
 
         self.assertNotIn(
             self.advance_module.id,
-            {module['id'] for module in response.data},
+            {module['id'] for module in result_rows(response)},
         )
 
     def test_payment_and_advance_grants_can_coexist(self):
@@ -259,15 +263,15 @@ class ModuleAccessApiTests(APITestCase):
         assessment_response = self.client.get('/api/assessments/assessments/')
         progress_response = self.client.get('/api/modules/lesson-progress/')
 
-        self.assertNotIn(topic.id, {item['id'] for item in topic_response.data})
-        self.assertNotIn(lesson.id, {item['id'] for item in lesson_response.data})
-        self.assertNotIn(activity.id, {item['id'] for item in activity_response.data})
-        self.assertNotIn(problem.id, {item['id'] for item in coding_response.data})
+        self.assertNotIn(topic.id, {item['id'] for item in result_rows(topic_response)})
+        self.assertNotIn(lesson.id, {item['id'] for item in result_rows(lesson_response)})
+        self.assertNotIn(activity.id, {item['id'] for item in result_rows(activity_response)})
+        self.assertNotIn(problem.id, {item['id'] for item in result_rows(coding_response)})
         self.assertNotIn(
             assessment.id,
-            {item['id'] for item in assessment_response.data},
+            {item['id'] for item in result_rows(assessment_response)},
         )
-        self.assertNotIn(progress.id, {item['id'] for item in progress_response.data})
+        self.assertNotIn(progress.id, {item['id'] for item in result_rows(progress_response)})
 
     def test_payment_grant_unlocks_web_module_content(self):
         topic = ModuleTopic.objects.create(
@@ -326,7 +330,7 @@ class ModuleAccessApiTests(APITestCase):
         ):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
-            self.assertIn(expected_id, {item['id'] for item in response.data})
+            self.assertIn(expected_id, {item['id'] for item in result_rows(response)})
 
     def test_enrolled_student_can_download_pdf_before_payment(self):
         with tempfile.TemporaryDirectory() as media_root:
@@ -408,14 +412,14 @@ class ModuleAccessApiTests(APITestCase):
         ):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
-            self.assertIn(expected_id, {item['id'] for item in response.data})
+            self.assertIn(expected_id, {item['id'] for item in result_rows(response)})
 
         grant.is_active = False
         grant.save()
         hidden_response = self.client.get('/api/modules/lesson-progress/')
         self.assertNotIn(
             progress.id,
-            {item['id'] for item in hidden_response.data},
+            {item['id'] for item in result_rows(hidden_response)},
         )
 
         grant.is_active = True
@@ -423,8 +427,84 @@ class ModuleAccessApiTests(APITestCase):
         restored_response = self.client.get('/api/modules/lesson-progress/')
         self.assertIn(
             progress.id,
-            {item['id'] for item in restored_response.data},
+            {item['id'] for item in result_rows(restored_response)},
         )
+
+
+class ModuleLessonCrudFilteringApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='lesson-filter-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.subject = Subject.objects.create(
+            code='FLT101',
+            name='Filtered Lessons',
+        )
+        self.module = Module.objects.create(
+            title='Filtered Lesson Module',
+            slug='filtered-lesson-module',
+            subject=self.subject,
+        )
+        self.topic = ModuleTopic.objects.create(
+            module=self.module,
+            title='Selected Topic',
+            order=1,
+        )
+        other_subject = Subject.objects.create(
+            code='FLT102',
+            name='Unrelated Lessons',
+        )
+        other_module = Module.objects.create(
+            title='Unrelated Lesson Module',
+            slug='unrelated-lesson-module',
+            subject=other_subject,
+        )
+        other_topic = ModuleTopic.objects.create(
+            module=other_module,
+            title='Unrelated Topic',
+            order=1,
+        )
+        ModuleLesson.objects.bulk_create([
+            ModuleLesson(
+                topic=other_topic,
+                title=f'Unrelated Lesson {index}',
+                order=index,
+            )
+            for index in range(1, 106)
+        ])
+        self.client.force_authenticate(self.teacher)
+
+    def test_created_lesson_is_returned_by_topic_and_module_filters(self):
+        create_response = self.client.post(
+            '/api/modules/lessons/',
+            {
+                'topic': self.topic.id,
+                'title': 'Saved Through The Editor',
+                'order': 1,
+                'is_published': False,
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        lesson_id = create_response.data['id']
+        self.assertTrue(ModuleLesson.objects.filter(pk=lesson_id).exists())
+
+        topic_response = self.client.get(
+            f'/api/modules/lessons/?topic={self.topic.id}&limit=100',
+        )
+        module_response = self.client.get(
+            f'/api/modules/lessons/?module={self.module.id}&limit=100',
+        )
+
+        self.assertEqual(topic_response.status_code, 200)
+        self.assertEqual(module_response.status_code, 200)
+        self.assertEqual(topic_response.data['count'], 1)
+        self.assertEqual(module_response.data['count'], 1)
+        self.assertEqual(result_rows(topic_response)[0]['id'], lesson_id)
+        self.assertEqual(result_rows(module_response)[0]['id'], lesson_id)
 
 
 class ModuleTeacherSummaryApiTests(APITestCase):
@@ -1280,7 +1360,7 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
         response = self.client.get('/api/modules/lesson-progress/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(result_rows(response)), 1)
 
 
 class ModuleLessonExampleApiTests(APITestCase):
@@ -1389,7 +1469,7 @@ class ModuleLessonExampleApiTests(APITestCase):
         response = self.client.get('/api/modules/lesson-examples/')
 
         self.assertEqual(response.status_code, 200)
-        ids = {item['id'] for item in response.data}
+        ids = {item['id'] for item in result_rows(response)}
         self.assertIn(example.id, ids)
         self.assertEqual(len(ids), 1)
 
@@ -1915,7 +1995,7 @@ class LessonMainActivityApiTests(APITestCase):
         response = self.client.get('/api/modules/activity-questions/')
 
         self.assertEqual(response.status_code, 200)
-        row = next(item for item in response.data if item['id'] == question.id)
+        row = next(item for item in result_rows(response) if item['id'] == question.id)
         self.assertNotIn('correct_text_answers', row)
         self.assertNotIn('expected_output', row)
         self.assertNotIn('explanation', row)
@@ -1966,9 +2046,9 @@ class LessonMainActivityApiTests(APITestCase):
             f'/api/modules/activity-answers/{answer_response.data["id"]}/',
         )
 
-        question_row = next(item for item in question_response.data if item['id'] == question.id)
+        question_row = next(item for item in result_rows(question_response) if item['id'] == question.id)
         correct_choice_row = next(
-            item for item in choice_response.data if item['id'] == correct_choice.id
+            item for item in result_rows(choice_response) if item['id'] == correct_choice.id
         )
         self.assertNotIn('explanation', question_row)
         self.assertNotIn('is_correct', correct_choice_row)
@@ -2006,7 +2086,7 @@ class LessonMainActivityApiTests(APITestCase):
 
         response = self.client.get('/api/modules/activity-questions/')
 
-        row = next(item for item in response.data if item['id'] == question.id)
+        row = next(item for item in result_rows(response) if item['id'] == question.id)
         self.assertEqual(row['correct_text_answers'], ['JVM'])
         self.assertEqual(row['expected_output'], 'JVM')
         self.assertEqual(row['explanation'], 'The JVM runs bytecode.')
@@ -2043,8 +2123,8 @@ class LessonMainActivityApiTests(APITestCase):
         question_response = self.client.get('/api/modules/activity-questions/')
         choice_response = self.client.get('/api/modules/activity-choices/')
 
-        question_row = next(item for item in question_response.data if item['id'] == question.id)
-        choice_row = next(item for item in choice_response.data if item['id'] == correct_choice.id)
+        question_row = next(item for item in result_rows(question_response) if item['id'] == question.id)
+        choice_row = next(item for item in result_rows(choice_response) if item['id'] == correct_choice.id)
         self.assertEqual(question_row['explanation'], 'The JDK compiles Java.')
         self.assertTrue(choice_row['is_correct'])
 

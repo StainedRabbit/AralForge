@@ -1,4 +1,4 @@
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import type {
   Module,
   ModuleLesson,
@@ -211,7 +211,7 @@ export function getLessonSections(lesson: Pick<
   return sections
 }
 
-export function subjectName(data: WorkspaceData, subjectId: number | null) {
+export function subjectName(data: RouteData, subjectId: number | null) {
   const subject = data.subjects.find((item) => item.id === subjectId)
   return subject ? `${subject.code} - ${subject.name}` : 'All subjects'
 }

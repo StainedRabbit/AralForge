@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import type { GradeItem, SubjectSchedule } from '../../types'
 import { formatDate, numeric, toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
@@ -40,7 +40,7 @@ type ScoreSheetResponse = {
 
 export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   onClose: () => void
   refresh: () => Promise<void>
   schedule: SubjectSchedule

@@ -11,6 +11,8 @@ from .views import (
     StudentCategoryGradeViewSet,
     StudentGradeItemScoreViewSet,
     SubjectGradingPolicyViewSet,
+    StudentGradeOverviewView,
+    TeacherGradebookView,
 )
 
 app_name = 'grades'
@@ -27,5 +29,7 @@ router.register('periods', PeriodGradeViewSet, basename='period-grade')
 router.register('finals', FinalGradeViewSet, basename='final-grade')
 
 urlpatterns = [
+    path('overview/', StudentGradeOverviewView.as_view(), name='student-grade-overview'),
+    path('gradebook/', TeacherGradebookView.as_view(), name='teacher-gradebook'),
     path('', include(router.urls)),
 ]

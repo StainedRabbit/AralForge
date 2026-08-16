@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import type { Module, ModuleAccess } from '../../types'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { moduleSubjectLabel } from '../../utils/student'
@@ -16,7 +16,7 @@ export function ManageStudentModulesDialog({
   studentName,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   defaultSubjectId?: number
   onClose: () => void
   refresh: () => Promise<void>

@@ -90,8 +90,18 @@ test('persists class selection and keeps class links scoped', async ({ page }) =
   await page.keyboard.press('Escape')
 
   await page.getByRole('button', { name: 'Attendance' }).click()
-  await expect(page.getByRole('dialog')).toContainText('E2E101')
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  const attendanceDialog = page.getByRole('dialog', { name: 'Class attendance' })
+  await expect(attendanceDialog).toContainText('E2E101')
+  await attendanceDialog.getByRole('button', { name: 'Start session' }).click()
+  await expect(attendanceDialog).toContainText('Attendance session started.')
+  const attendanceRows = attendanceDialog.locator('tbody tr')
+  await attendanceRows.nth(0).getByRole('combobox').selectOption('PRESENT')
+  await attendanceRows.nth(1).getByRole('combobox').selectOption('LATE')
+  await attendanceDialog.getByRole('button', { name: 'Save attendance' }).click()
+  await expect(attendanceDialog).toContainText('Attendance saved.')
+  await attendanceDialog.getByRole('tab', { name: 'History' }).click()
+  await expect(attendanceDialog.locator('tbody tr')).toHaveCount(1)
+  await attendanceDialog.getByRole('button', { name: 'Close' }).click()
 
   await page.setViewportSize({ width: 390, height: 844 })
   for (const chip of await rosterTotals.locator('.class-roster-summary__item').all()) {

@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { completePasswordSetup, getApiBaseUrl, login as loginRequest } from '../api'
 import type { Session } from '../api'
-import heroImage from '../assets/academic-dashboard.png'
+import heroImage from '../assets/academic-dashboard.webp'
 import { BrandMark } from '../components/navigation'
 import { Icon } from '../components/Icon'
 import { toErrorMessage } from '../utils/format'
@@ -57,7 +57,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
   return (
     <main className="login-page">
       <section className="login-visual" aria-label="Ezoryx preview">
-        <img src={heroImage} alt="" />
+        <img src={heroImage} alt="" decoding="async" fetchPriority="high" height="640" width="1280" />
         <div className="login-visual__content">
           <BrandMark />
           <div>

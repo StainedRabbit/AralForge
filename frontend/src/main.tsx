@@ -9,6 +9,11 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       staleTime: 30_000,
+      retry: (failureCount, error) => {
+        const status = typeof error === 'object' && error && 'status' in error
+          ? Number(error.status) : 0
+        return ![400, 401, 403, 404, 409, 422].includes(status) && failureCount < 2
+      },
     },
   },
 })

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { EmptyState, MetaStrip, Page, PageHeader, SkeletonCard, StatCard } from '../components/ui'
 import type { ScheduleStudent, SubjectSchedule } from '../types'
@@ -21,7 +21,7 @@ type ClassEntry = {
   schedule: SubjectSchedule
 }
 
-export function ClassesPage({ data }: { data: WorkspaceData }) {
+export function ClassesPage({ data }: { data: RouteData }) {
   const entries = getStudentEnrollments(data)
     .map((enrollment) => ({
       enrollment,

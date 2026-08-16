@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { AttendanceSessionDetails } from '../../components/admin/AttendanceSessionDetails'
 import { studentDisplayName, summarizeAttendance } from '../../components/admin/attendanceHelpers'
@@ -10,7 +10,7 @@ import { formatDate, percent } from '../../utils/format'
 
 export function AdminAttendancePage({ api, data, refresh }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const [searchParams] = useSearchParams()
@@ -106,7 +106,7 @@ export function AdminAttendancePage({ api, data, refresh }: {
 
 function AttendanceHistoryDialog({ api, data, onClose, refresh, session }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   onClose: () => void
   refresh: () => Promise<void>
   session: AttendanceSession
@@ -125,7 +125,7 @@ function AttendanceHistoryDialog({ api, data, onClose, refresh, session }: {
   )
 }
 
-function filterSessions(data: WorkspaceData, termId: string, scheduleId: string, query: string) {
+function filterSessions(data: RouteData, termId: string, scheduleId: string, query: string) {
   const normalized = query.trim().toLowerCase()
   return data.attendanceSessions.filter((session) => {
     const schedule = session.schedule ? data.schedules.find((item) => item.id === session.schedule) : null
@@ -137,7 +137,7 @@ function filterSessions(data: WorkspaceData, termId: string, scheduleId: string,
   }).sort((first, second) => second.date.localeCompare(first.date) || second.id - first.id)
 }
 
-function sessionClassLabel(data: WorkspaceData, session: AttendanceSession) {
+function sessionClassLabel(data: RouteData, session: AttendanceSession) {
   const schedule = session.schedule ? data.schedules.find((item) => item.id === session.schedule) : null
   if (schedule) return classLabel(schedule)
   const subject = data.subjects.find((item) => item.id === session.subject)
@@ -148,7 +148,7 @@ function classLabel(schedule: SubjectSchedule) {
   return [schedule.subject_code, schedule.section || 'No section', schedule.days].join(' · ')
 }
 
-function exportAttendance(data: WorkspaceData, sessions: AttendanceSession[]) {
+function exportAttendance(data: RouteData, sessions: AttendanceSession[]) {
   const rows = [['Date', 'Class', 'Session', 'Student', 'Status', 'Points earned', 'Remarks']]
   sessions.forEach((session) => {
     data.attendanceRecords.filter((record) => record.session === session.id).forEach((record) => {

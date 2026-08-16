@@ -645,6 +645,7 @@ class ModuleActivity(models.Model):
     class Meta:
         ordering = ['module', 'order', 'id']
         verbose_name_plural = 'module activities'
+        indexes = [models.Index(fields=['module', 'is_published', 'due_at'], name='activity_module_due_idx')]
 
     def __str__(self):
         return f'{self.module}: {self.title}'
@@ -1072,6 +1073,7 @@ class ModuleActivitySubmission(models.Model):
             ),
         ]
         ordering = ['-submitted_at']
+        indexes = [models.Index(fields=['student', 'score'], name='submission_student_score_idx')]
 
     def __str__(self):
         return f'{self.student} - {self.activity}'

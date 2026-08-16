@@ -90,6 +90,16 @@ class ProgrammingProblemSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if not request or not request.user.is_admin_teacher:
+            data['test_cases'] = [
+                test_case for test_case in data.get('test_cases', [])
+                if not test_case.get('is_hidden')
+            ]
+        return data
+
 
 class CodeBlankAnswerSerializer(serializers.ModelSerializer):
     class Meta:

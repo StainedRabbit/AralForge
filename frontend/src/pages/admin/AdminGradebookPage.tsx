@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
@@ -39,7 +39,7 @@ export function AdminGradebookPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1118,7 +1118,7 @@ function PaperActivityScoreDialog({
   target,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   onClose: () => void
   onSaved: (attempt: ModuleActivityAttempt) => Promise<void>
   target: PaperScoreTarget
@@ -1294,7 +1294,7 @@ function MatrixScorePanel({
   studentQuery,
   visibleRoster,
 }: {
-  data: WorkspaceData
+  data: RouteData
   filter: RosterFilter
   items: GradeItem[]
   onSave: () => void
@@ -1474,7 +1474,7 @@ function filterScoreRoster({
   roster,
   studentId,
 }: {
-  data: WorkspaceData
+  data: RouteData
   filter: RosterFilter
   item: GradeItem | null
   query: string
@@ -1511,7 +1511,7 @@ function filterScoreRoster({
 }
 
 function getRosterStatus(
-  data: WorkspaceData,
+  data: RouteData,
   item: GradeItem | null,
   studentId: number,
 ): Exclude<RosterFilter, 'ALL'> {
@@ -1542,7 +1542,7 @@ function getRosterStatus(
 }
 
 function getRosterStatusCounts(
-  data: WorkspaceData,
+  data: RouteData,
   item: GradeItem | null,
   roster: Array<{ student: number }>,
 ): Record<Exclude<RosterFilter, 'ALL'>, number> {
@@ -1554,7 +1554,7 @@ function getRosterStatusCounts(
 }
 
 function findNextPendingPaperTarget(
-  data: WorkspaceData,
+  data: RouteData,
   item: GradeItem,
   currentStudentId: number,
 ): PaperScoreTarget | null {
@@ -1602,14 +1602,14 @@ function setUrlValue(params: URLSearchParams, key: string, value: string | numbe
   else params.set(key, String(value))
 }
 
-function findItemScore(data: WorkspaceData, itemId: number, studentId: number) {
+function findItemScore(data: RouteData, itemId: number, studentId: number) {
   return data.gradeItemScores.find(
     (score) => score.grade_item === itemId && score.student === studentId,
   )
 }
 
 function findCategoryGrade(
-  data: WorkspaceData,
+  data: RouteData,
   categoryId: number,
   studentId: number,
   scheduleId: number,
@@ -1635,7 +1635,7 @@ function formatNumber(value: number) {
 }
 
 function getSourceOptions(
-  data: WorkspaceData,
+  data: RouteData,
   subjectId: number | null,
   scheduleId: number | null,
   sourceType: GradeItemSourceType,

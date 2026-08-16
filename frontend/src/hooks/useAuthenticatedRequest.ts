@@ -4,6 +4,8 @@ import type { RequestOptions, Session } from '../api'
 import type { AuthedRequest } from '../app/types'
 import { saveSession } from '../services/session'
 
+let refreshInFlight: Promise<{ access: string }> | null = null
+
 export function useAuthenticatedRequest(
   session: Session,
   setSession: (session: Session) => void,
@@ -19,7 +21,10 @@ export function useAuthenticatedRequest(
         }
 
         try {
-          const refreshed = await refreshToken(session.refresh)
+          refreshInFlight ??= refreshToken(session.refresh).finally(() => {
+            refreshInFlight = null
+          })
+          const refreshed = await refreshInFlight
           const nextSession = { ...session, access: refreshed.access }
           saveSession(nextSession)
           setSession(nextSession)

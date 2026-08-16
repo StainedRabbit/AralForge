@@ -1,11 +1,11 @@
-import type { WorkspaceData } from '../app/types'
+import type { RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading, StatCard } from '../components/ui'
 import type { SubjectSchedule } from '../types'
 import { calculateLevelState, gradeCategoryLabel, subjectLabel } from '../utils/student'
 import { displayScore, formatDateTime, numeric, percent } from '../utils/format'
 
-export function GradesPage({ data }: { data: WorkspaceData }) {
+export function GradesPage({ data }: { data: RouteData }) {
   const totalPoints = data.points.reduce((sum, item) => sum + item.points, 0)
   const levelState = calculateLevelState(data.levels, totalPoints)
   const schedules = data.schedules.filter((schedule) => hasScheduleGrades(data, schedule.id))
@@ -73,7 +73,7 @@ export function GradesPage({ data }: { data: WorkspaceData }) {
   )
 }
 
-function ClassGradeSection({ data, schedule }: { data: WorkspaceData; schedule: SubjectSchedule }) {
+function ClassGradeSection({ data, schedule }: { data: RouteData; schedule: SubjectSchedule }) {
   const finalGrade = data.finalGrades.find((grade) => grade.schedule === schedule.id)
   const periods = data.periodGrades.filter((grade) => grade.schedule === schedule.id)
   const categories = data.categoryGrades.filter((grade) => grade.schedule === schedule.id)
@@ -106,7 +106,7 @@ function ClassGradeSection({ data, schedule }: { data: WorkspaceData; schedule: 
   )
 }
 
-function LegacyGradeSection({ data }: { data: WorkspaceData }) {
+function LegacyGradeSection({ data }: { data: RouteData }) {
   const finals = data.finalGrades.filter((grade) => grade.schedule === null)
   const periods = data.periodGrades.filter((grade) => grade.schedule === null)
   const categories = data.categoryGrades.filter((grade) => grade.schedule === null)
@@ -142,7 +142,7 @@ function LegacyGradeSection({ data }: { data: WorkspaceData }) {
   )
 }
 
-function CategoryBreakdown({ data, grades }: { data: WorkspaceData; grades: WorkspaceData['categoryGrades'] }) {
+function CategoryBreakdown({ data, grades }: { data: RouteData; grades: RouteData['categoryGrades'] }) {
   if (!grades.length) return <p className="admin-empty-line">No category grades recorded yet.</p>
 
   return (
@@ -177,7 +177,7 @@ function GradeSummary({ label, value, pending }: { label: string; value: string 
   </div>
 }
 
-function hasScheduleGrades(data: WorkspaceData, scheduleId: number) {
+function hasScheduleGrades(data: RouteData, scheduleId: number) {
   return data.finalGrades.some((grade) => grade.schedule === scheduleId)
     || data.periodGrades.some((grade) => grade.schedule === scheduleId)
     || data.categoryGrades.some((grade) => grade.schedule === scheduleId)

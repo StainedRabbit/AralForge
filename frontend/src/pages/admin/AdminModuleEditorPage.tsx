@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, WorkspaceData } from '../../app/types'
+import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
 import type { Module } from '../../types'
@@ -29,7 +29,7 @@ export function AdminModuleEditorPage({
   refresh,
 }: {
   api: AuthedRequest
-  data: WorkspaceData
+  data: RouteData
   refresh: () => Promise<void>
 }) {
   const navigate = useNavigate()
