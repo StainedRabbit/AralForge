@@ -633,7 +633,9 @@ class ModuleActivity(models.Model):
     )
     order = models.PositiveIntegerField(default=0)
     points_possible = models.DecimalField(max_digits=6, decimal_places=2, default=100)
+    opens_at = models.DateTimeField(null=True, blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
+    allow_late_submissions = models.BooleanField(default=False)
     accepts_text = models.BooleanField(default=True)
     accepts_file = models.BooleanField(default=False)
     accepts_code = models.BooleanField(default=False)
@@ -774,6 +776,8 @@ class ModuleActivityAttempt(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     is_submitted = models.BooleanField(default=False)
+    question_snapshot = models.JSONField(default=list, blank=True)
+    draft_answers = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [
@@ -791,6 +795,41 @@ class ModuleActivityAttempt(models.Model):
 
     def __str__(self):
         return f'{self.student} - {self.activity} attempt {self.attempt_number}'
+
+
+class ModuleActivityExtension(models.Model):
+    activity = models.ForeignKey(
+        ModuleActivity,
+        on_delete=models.CASCADE,
+        related_name='extensions',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='module_activity_extensions',
+    )
+    due_at = models.DateTimeField()
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='granted_module_activity_extensions',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['activity', 'student'],
+                name='unique_module_activity_extension_student',
+            ),
+        ]
+        ordering = ['due_at', 'student_id']
+
+    def __str__(self):
+        return f'{self.activity} extension for {self.student}'
 
 
 class ModuleActivityAnswer(models.Model):

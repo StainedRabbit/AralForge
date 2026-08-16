@@ -33,6 +33,7 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
+    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -2285,3 +2286,190 @@ class LessonMainActivityApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_atomic_editor_save_updates_activity_and_questions_together(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'module': self.module.id,
+                'topic': self.topic.id,
+                'lesson': self.lesson.id,
+                'title': 'Reliable Main Activity',
+                'instructions': 'Complete every question.',
+                'activity_type': 'INTERACTIVE',
+                'order': 1,
+                'max_attempts': 3,
+                'passing_score': '1.00',
+                'is_published': True,
+                'questions': [{
+                    'question_type': 'fill_blank',
+                    'prompt': 'Name the runtime.',
+                    'points': '2.00',
+                    'order': 1,
+                    'correct_text_answers': ['JVM'],
+                    'is_published': True,
+                    'choices': [],
+                    'matching_pairs': [],
+                }],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.title, 'Reliable Main Activity')
+        self.assertEqual(self.activity.points_possible, Decimal('2.00'))
+        self.assertEqual(self.activity.questions.count(), 1)
+
+    def test_atomic_editor_save_rolls_back_when_publishing_invalid_question(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'title': 'Should not persist',
+                'is_published': True,
+                'questions': [{
+                    'question_type': 'multiple_choice',
+                    'prompt': 'Broken item',
+                    'points': '1.00',
+                    'is_published': True,
+                    'choices': [{'text': 'Only choice', 'is_correct': True}],
+                }],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.title, 'Main Activity')
+        self.assertEqual(self.activity.questions.count(), 0)
+
+    def test_student_cannot_use_atomic_editor_save(self):
+        self.client.force_authenticate(self.student)
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {'id': self.activity.id, 'title': 'Unauthorized', 'questions': []},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_teacher_can_create_and_remove_an_enrolled_student_extension(self):
+        school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='M',
+            start_time='09:00',
+            end_time='10:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        self.activity.due_at = timezone.now() + timezone.timedelta(hours=1)
+        self.activity.save(update_fields=['due_at'])
+        extended_due_at = timezone.now() + timezone.timedelta(hours=2)
+        self.client.force_authenticate(self.teacher)
+
+        created = self.client.put(
+            f'/api/modules/activities/{self.activity.id}/extensions/',
+            {'student': self.student.id, 'due_at': extended_due_at.isoformat()},
+            format='json',
+        )
+        removed = self.client.delete(
+            f'/api/modules/activities/{self.activity.id}/extensions/',
+            {'student': self.student.id},
+            format='json',
+        )
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(removed.status_code, 204)
+        self.assertFalse(ModuleActivityExtension.objects.filter(activity=self.activity).exists())
+
+    def test_attempt_draft_is_saved_once_and_graded_from_frozen_snapshot(self):
+        question = self.create_question(ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE, 1)
+        original = ModuleActivityQuestionChoice.objects.create(
+            question=question, text='JVM', is_correct=True, order=1,
+        )
+        replacement = ModuleActivityQuestionChoice.objects.create(
+            question=question, text='Browser', is_correct=False, order=2,
+        )
+        self.client.force_authenticate(self.student)
+        created = self.client.post(
+            '/api/modules/activity-attempts/',
+            {'activity': self.activity.id, 'student': self.student.id},
+            format='json',
+        )
+        attempt_id = created.data['id']
+
+        original.is_correct = False
+        original.save(update_fields=['is_correct'])
+        replacement.is_correct = True
+        replacement.save(update_fields=['is_correct'])
+        draft = self.client.put(
+            f'/api/modules/activity-attempts/{attempt_id}/draft/',
+            {'answers': {str(question.id): {
+                'selected_choice': original.id,
+                'text_answer': '',
+                'choice_order': [],
+                'matching_answer': {},
+            }}},
+            format='json',
+        )
+        submitted = self.client.post(f'/api/modules/activity-attempts/{attempt_id}/submit/')
+
+        self.assertEqual(draft.status_code, 200)
+        self.assertEqual(submitted.status_code, 200)
+        self.assertEqual(Decimal(submitted.data['score']), Decimal('1.00'))
+
+    def test_activity_window_and_student_extension_are_enforced(self):
+        self.activity.due_at = timezone.now() - timezone.timedelta(hours=1)
+        self.activity.save(update_fields=['due_at'])
+        self.client.force_authenticate(self.student)
+        closed = self.client.post(
+            '/api/modules/activity-attempts/',
+            {'activity': self.activity.id, 'student': self.student.id},
+            format='json',
+        )
+        ModuleActivityExtension.objects.create(
+            activity=self.activity,
+            student=self.student,
+            due_at=timezone.now() + timezone.timedelta(hours=1),
+            granted_by=self.teacher,
+        )
+        extended = self.client.post(
+            '/api/modules/activity-attempts/',
+            {'activity': self.activity.id, 'student': self.student.id},
+            format='json',
+        )
+
+        self.assertEqual(closed.status_code, 400)
+        self.assertEqual(extended.status_code, 201)
+
+    def test_passing_score_unlocks_review_without_exhausting_attempts(self):
+        self.activity.passing_score = Decimal('0.50')
+        self.activity.save(update_fields=['passing_score'])
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            1,
+            correct_text_answers=['JVM'],
+            explanation='Runtime explanation.',
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            attempt_number=1,
+            score=Decimal('1.00'),
+            max_score=Decimal('1.00'),
+            is_submitted=True,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.student)
+        response = self.client.get('/api/modules/activity-questions/')
+        row = next(item for item in result_rows(response) if item['id'] == question.id)
+        self.assertEqual(row['explanation'], 'Runtime explanation.')

@@ -3,9 +3,40 @@ from decimal import Decimal
 from django.utils import timezone
 
 from learning_modules.models import ModuleActivityQuestion
+from learning_modules.services.activity_snapshots import (
+    ensure_attempt_snapshot,
+    grade_snapshot_attempt,
+)
 
 
 def submit_activity_attempt(attempt):
+    ensure_attempt_snapshot(attempt)
+    if not attempt.draft_answers:
+        relational_answers = list(attempt.answers.all())
+        if relational_answers:
+            attempt.draft_answers = {
+                str(answer.question_id): {
+                    'selected_choice': answer.selected_choice_id,
+                    'text_answer': answer.text_answer,
+                    'choice_order': answer.choice_order,
+                    'matching_answer': answer.matching_answer,
+                }
+                for answer in relational_answers
+            }
+            attempt.save(update_fields=['draft_answers'])
+    if attempt.question_snapshot:
+        attempt = grade_snapshot_attempt(attempt)
+        answers_by_question = {answer.question_id: answer for answer in attempt.answers.all()}
+        for question_id, result in attempt.draft_answers.items():
+            answer = answers_by_question.get(int(question_id))
+            if not answer:
+                continue
+            answer.is_correct = result.get('is_correct')
+            answer.points_earned = Decimal(str(result.get('points_earned') or 0))
+            answer.feedback = result.get('feedback') or ''
+            answer.save(update_fields=['is_correct', 'points_earned', 'feedback'])
+        return attempt
+
     questions = list(
         attempt.activity.questions.filter(is_published=True).prefetch_related(
             'choices',

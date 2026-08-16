@@ -755,17 +755,26 @@ function StudentLessonReader({
   const mainActivitySubmitted = mainActivityAttempts.some(
     (attempt) => attempt.is_submitted,
   )
+  const mainActivityRequirementMet = Boolean(
+    mainActivity && submittedMainActivityAttempts.some((attempt) =>
+      mainActivity.passing_score === null
+        ? true
+        : Number(attempt.score ?? 0) >= Number(mainActivity.passing_score),
+    ),
+  )
   const mainActivityReviewUnlocked = Boolean(
     mainActivity &&
       (submittedMainActivityAttempts.length >= mainActivity.max_attempts ||
         submittedMainActivityAttempts.some(
           (attempt) =>
-            Number(attempt.max_score) > 0 &&
-            Number(attempt.score ?? 0) >= Number(attempt.max_score),
+            mainActivity.passing_score !== null
+              ? Number(attempt.score ?? 0) >= Number(mainActivity.passing_score)
+              : Number(attempt.max_score) > 0 &&
+                Number(attempt.score ?? 0) >= Number(attempt.max_score),
         )),
   )
   const completionBlocked = Boolean(
-    mainActivity && !mainActivitySubmitted && !completed,
+    mainActivity && !mainActivityRequirementMet && !completed,
   )
   const challengeSection =
     lessonSections.find((section) => section.title === 'Challenge Task') ?? null
@@ -915,7 +924,11 @@ function StudentLessonReader({
           <section className="lesson-content-section lesson-content-section--locked">
             <p className="eyebrow">Challenge locked</p>
             <h2>Challenge Task</h2>
-            <p>Review Answers unlocks after a full score or after all Main Activity attempts are used.</p>
+            <p>
+              {mainActivity.passing_score !== null
+                ? 'Review Answers unlocks after reaching the passing score or after all Main Activity attempts are used.'
+                : 'Review Answers unlocks after a full score or after all Main Activity attempts are used.'}
+            </p>
           </section>
         )
       ) : null}

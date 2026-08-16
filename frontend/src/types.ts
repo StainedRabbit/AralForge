@@ -252,7 +252,10 @@ export type ModuleActivity = {
   activity_type: ModuleActivityType
   order: number
   points_possible: string
+  opens_at: string | null
   due_at: string | null
+  effective_due_at: string | null
+  allow_late_submissions: boolean
   accepts_text: boolean
   accepts_file: boolean
   accepts_code: boolean
@@ -315,6 +318,37 @@ export type ModuleActivityAttempt = {
   started_at: string
   submitted_at: string | null
   is_submitted: boolean
+  question_snapshot: ModuleActivityQuestionSnapshot[]
+  draft_answers: Record<string, ModuleActivityDraftAnswer>
+}
+
+export type ModuleActivityDraftAnswer = {
+  selected_choice: number | null
+  text_answer: string
+  choice_order: number[]
+  matching_answer: Record<string, string>
+  is_correct?: boolean
+  points_earned?: string
+  feedback?: string
+}
+
+export type ModuleActivityQuestionSnapshot = Omit<
+  ModuleActivityQuestion,
+  'activity' | 'matching_options'
+> & {
+  matching_options?: string[]
+  choices: Array<{
+    id: number
+    text: string
+    is_correct?: boolean
+    order: number
+  }>
+  matching_pairs: Array<{
+    id: number
+    left_text: string
+    right_text?: string
+    order: number
+  }>
 }
 
 export type PaperActivityScoreInput = {
