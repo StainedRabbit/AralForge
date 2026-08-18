@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+services:
+  - type: web
+    name: ezoryx-api-staging
+    runtime: docker
+    branch: main
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --workers 3 --timeout 120 config.wsgi:application
+    preDeployCommand: python manage.py migrate --noinput
+    healthCheckPath: /api/health/
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: SUPABASE_S3_REGION
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: ezoryx-media-staging
+      - key: DB_CONN_MAX_AGE
+        value: "60"
+      - key: API_SLOW_REQUEST_MS
+        value: "750"
+
+  - type: web
+    name: ezoryx-api-production
+    runtime: docker
+    branch: production
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --workers 3 --timeout 120 config.wsgi:application
+    preDeployCommand: python manage.py migrate --noinput
+    healthCheckPath: /api/health/
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: SUPABASE_S3_REGION
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: ezoryx-media-production
+      - key: DB_CONN_MAX_AGE
+        value: "60"
+      - key: API_SLOW_REQUEST_MS
+        value: "750"

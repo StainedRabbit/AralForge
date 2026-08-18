@@ -7,6 +7,9 @@ backend/e2e_media/
 frontend/playwright-report/
 frontend/test-results/
 backend/backups/
+backend/*export*.json
+backend/data-export*.json
+*.fixture.json
 __pycache__/
 *.pyc
 .vscode/

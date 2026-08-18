@@ -53,6 +53,15 @@ def database_config(database_url, sqlite_path):
     raise RuntimeError(f'Unsupported DATABASE_URL scheme: {parsed.scheme}')
 
 
+def require_production_values(names):
+    missing = [name for name in names if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(
+            'Missing required production environment variables: '
+            + ', '.join(sorted(missing))
+        )
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -70,11 +79,15 @@ SECRET_KEY = os.getenv(
 DEBUG = env_bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS')
+render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if render_hostname and render_hostname not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_hostname)
 
 CORS_ALLOWED_ORIGINS = env_list(
     'CORS_ALLOWED_ORIGINS',
     default=['http://localhost:5173', 'http://127.0.0.1:5173'],
 )
+CORS_ALLOWED_ORIGIN_REGEXES = env_list('CORS_ALLOWED_ORIGIN_REGEXES')
 
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
 
@@ -90,6 +103,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'storages',
     'accounts',
     'subjects',
     'learning_modules',
@@ -103,6 +117,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'config.middleware.RequestTimingMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -136,9 +151,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': database_config(os.getenv('DATABASE_URL'), BASE_DIR / 'db.sqlite3')
-}
+DATABASE_URL = os.getenv('DATABASE_URL', '')
+DATABASES = {'default': database_config(DATABASE_URL, BASE_DIR / 'db.sqlite3')}
 
 
 # Password validation
@@ -175,11 +189,49 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = os.getenv('STATIC_URL', 'static/')
+STATIC_URL = os.getenv('STATIC_URL', '/static/')
 STATIC_ROOT = os.getenv('STATIC_ROOT', BASE_DIR / 'staticfiles')
 
 MEDIA_URL = os.getenv('MEDIA_URL', '/media/')
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', BASE_DIR / 'media')
+
+SUPABASE_STORAGE_ENV_VARS = (
+    'SUPABASE_S3_ENDPOINT',
+    'SUPABASE_S3_REGION',
+    'SUPABASE_S3_ACCESS_KEY_ID',
+    'SUPABASE_S3_SECRET_ACCESS_KEY',
+    'SUPABASE_STORAGE_BUCKET',
+)
+USE_SUPABASE_STORAGE = all(os.getenv(name) for name in SUPABASE_STORAGE_ENV_VARS)
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
+
+if USE_SUPABASE_STORAGE:
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'access_key': os.environ['SUPABASE_S3_ACCESS_KEY_ID'],
+            'secret_key': os.environ['SUPABASE_S3_SECRET_ACCESS_KEY'],
+            'bucket_name': os.environ['SUPABASE_STORAGE_BUCKET'],
+            'endpoint_url': os.environ['SUPABASE_S3_ENDPOINT'],
+            'region_name': os.environ['SUPABASE_S3_REGION'],
+            'addressing_style': 'path',
+            'signature_version': 's3v4',
+            'default_acl': None,
+            'querystring_auth': True,
+            'querystring_expire': int(
+                os.getenv('SUPABASE_STORAGE_SIGNED_URL_SECONDS', '3600')
+            ),
+            'file_overwrite': False,
+        },
+    }
 
 AUTH_USER_MODEL = 'accounts.User'
 
@@ -203,6 +255,14 @@ if not DEBUG:
         raise RuntimeError('SECRET_KEY must be set when DEBUG=False.')
     if not ALLOWED_HOSTS:
         raise RuntimeError('ALLOWED_HOSTS must be set when DEBUG=False.')
+    require_production_values((
+        'DATABASE_URL',
+        'CORS_ALLOWED_ORIGINS',
+        'CSRF_TRUSTED_ORIGINS',
+        *SUPABASE_STORAGE_ENV_VARS,
+    ))
+    if urlparse(DATABASE_URL).scheme not in {'postgres', 'postgresql'}:
+        raise RuntimeError('Production DATABASE_URL must use PostgreSQL.')
 
     SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', default=True)
     CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', default=True)
@@ -213,3 +273,20 @@ if not DEBUG:
         default=True,
     )
     SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', default=True)
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Render accepts redirects as healthy, so this probe must reach the database
+    # check even when the internal request arrives over plain HTTP.
+    SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': 'INFO'},
+        'ezoryx.performance': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}

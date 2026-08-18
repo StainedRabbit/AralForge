@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlparse
 
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.text import slugify
@@ -528,11 +529,18 @@ def resolve_media_source(source):
 
     path = parsed.path or source
     candidate_paths = []
-    media_url = settings.MEDIA_URL if settings.MEDIA_URL.startswith('/') else f'/{settings.MEDIA_URL}'
-    if path.startswith(media_url):
-        candidate_paths.append(Path(settings.MEDIA_ROOT) / path.removeprefix(media_url).lstrip('/\\'))
+    storage_names = []
+    media_url_path = urlparse(str(settings.MEDIA_URL)).path or '/media/'
+    if not media_url_path.startswith('/'):
+        media_url_path = f'/{media_url_path}'
+    if path.startswith(media_url_path):
+        storage_name = path.removeprefix(media_url_path).lstrip('/\\')
+        candidate_paths.append(Path(settings.MEDIA_ROOT) / storage_name)
+        storage_names.append(storage_name)
     if path.startswith('/media/'):
-        candidate_paths.append(Path(settings.MEDIA_ROOT) / path.removeprefix('/media/').lstrip('/\\'))
+        storage_name = path.removeprefix('/media/').lstrip('/\\')
+        candidate_paths.append(Path(settings.MEDIA_ROOT) / storage_name)
+        storage_names.append(storage_name)
     if path.startswith('/lesson-assets/'):
         candidate_paths.append(settings.BASE_DIR.parent / 'frontend' / 'public' / path.lstrip('/\\'))
     if path.startswith('lesson-assets/'):
@@ -544,6 +552,16 @@ def resolve_media_source(source):
     for candidate in candidate_paths:
         if candidate.exists():
             return candidate.resolve().as_uri()
+
+    if not path.startswith('/lesson-assets/') and not path.startswith('lesson-assets/'):
+        storage_names.append(path.lstrip('/\\'))
+
+    for storage_name in dict.fromkeys(name for name in storage_names if name):
+        try:
+            if default_storage.exists(storage_name):
+                return default_storage.url(storage_name)
+        except Exception:
+            logger.exception('Remote media lookup failed for %s', storage_name)
 
     return ''
 

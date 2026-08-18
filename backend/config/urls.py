@@ -21,9 +21,11 @@ from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from accounts.auth import CompletePasswordSetupView, EzoryxTokenObtainPairView
+from config.health import health_check
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/health/', health_check, name='health-check'),
     path('api/auth/token/', EzoryxTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/complete-password-setup/', CompletePasswordSetupView.as_view(), name='complete_password_setup'),
