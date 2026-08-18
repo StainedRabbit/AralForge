@@ -683,6 +683,26 @@ class ModuleActivityMatchingPairSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class ModuleActivityAttemptSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleActivityAttempt
+        fields = (
+            'id',
+            'activity',
+            'student',
+            'submission_method',
+            'recorded_by',
+            'paper_grade_item',
+            'attempt_number',
+            'score',
+            'max_score',
+            'started_at',
+            'submitted_at',
+            'is_submitted',
+        )
+        read_only_fields = fields
+
+
 class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
     question_snapshot = serializers.SerializerMethodField()
     draft_answers = serializers.SerializerMethodField()

@@ -184,13 +184,12 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['days'], 'TU,TH')
 
-    def test_api_rejects_shared_day_time_overlap(self):
+    def test_api_allows_shared_day_time_overlap(self):
         self.create_schedule()
 
         response = self.post_schedule(days='MO,WE', start_time='09:30', end_time='10:30')
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('CC104', str(response.data))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_api_allows_adjacent_schedule(self):
         self.create_schedule()

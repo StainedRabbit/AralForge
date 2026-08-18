@@ -2,18 +2,25 @@ from decimal import Decimal, InvalidOperation
 
 from django.http import FileResponse
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Prefetch
 from django.utils import timezone
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
+from accounts.serializers import UserSerializer
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from assessments.models import Assessment
 from assessments.serializers import AssessmentSerializer
 from coding.models import ProgrammingProblem
 from coding.serializers import ProgrammingProblemSerializer
-from subjects.models import ScheduleStudent, Subject
-from subjects.serializers import SubjectSerializer
+from grades.models import GradeCategory, GradeItem
+from grades.serializers import GradeCategorySerializer, GradeItemSerializer
+from subjects.models import ScheduleStudent, Subject, SubjectSchedule
+from subjects.serializers import (
+    ScheduleStudentSerializer,
+    SubjectScheduleSerializer,
+    SubjectSerializer,
+)
 
 from .models import (
     Module,
@@ -43,6 +50,7 @@ from .serializers import (
     ModuleActivitySerializer,
     ModuleActivityAnswerSerializer,
     ModuleActivityAttemptSerializer,
+    ModuleActivityAttemptSummarySerializer,
     ModuleActivityExtensionSerializer,
     ModuleActivityMatchingPairSerializer,
     ModuleActivityQuestionChoiceSerializer,
@@ -66,6 +74,47 @@ from .services.activity_snapshots import (
     validate_activity_window,
 )
 from .services.pdf_generation import generate_lesson_pdf, generate_module_pdf
+
+
+def serialize_main_activity_editor_workspace(activity, request):
+    if not activity:
+        return {
+            'activity': None,
+            'questions': [],
+            'choices': [],
+            'matching_pairs': [],
+            'linked_class_count': 0,
+        }
+    questions = list(
+        activity.questions.prefetch_related('choices', 'matching_pairs').order_by('order', 'id'),
+    )
+    choices = [choice for question in questions for choice in question.choices.all()]
+    matching_pairs = [
+        pair for question in questions for pair in question.matching_pairs.all()
+    ]
+    context = {'request': request}
+    return {
+        'activity': ModuleActivitySerializer(activity, context=context).data,
+        'questions': ModuleActivityQuestionSerializer(
+            questions,
+            many=True,
+            context=context,
+        ).data,
+        'choices': ModuleActivityQuestionChoiceSerializer(
+            choices,
+            many=True,
+            context=context,
+        ).data,
+        'matching_pairs': ModuleActivityMatchingPairSerializer(
+            matching_pairs,
+            many=True,
+            context=context,
+        ).data,
+        'linked_class_count': GradeItem.objects.filter(
+            module_activity=activity,
+            schedule__isnull=False,
+        ).values('schedule_id').distinct().count(),
+    }
 
 
 def validate_atomic_question(item, index, enforce_readiness=False):
@@ -175,17 +224,23 @@ class ModuleViewSet(viewsets.ModelViewSet):
         module = self.get_object()
         topics = ModuleTopic.objects.filter(module=module)
         lessons = ModuleLesson.objects.filter(topic__module=module)
-        activities = ModuleActivity.objects.filter(module=module).prefetch_related('extensions')
+        activities = ModuleActivity.objects.filter(module=module)
         if not request.user.is_admin_teacher:
             topics = topics.filter(is_published=True)
             lessons = lessons.filter(is_published=True, topic__is_published=True)
             activities = activities.filter(is_published=True)
+            activities = activities.prefetch_related(Prefetch(
+                'extensions',
+                queryset=ModuleActivityExtension.objects.filter(student=request.user),
+            ))
         examples = ModuleLessonExample.objects.filter(lesson__in=lessons)
         lesson_progress = ModuleLessonProgress.objects.filter(
             lesson__in=lessons, student=request.user,
         ) if not request.user.is_admin_teacher else ModuleLessonProgress.objects.none()
         attempts = ModuleActivityAttempt.objects.filter(
             activity__in=activities, student=request.user,
+        ).defer(
+            'question_snapshot', 'draft_answers',
         ) if not request.user.is_admin_teacher else ModuleActivityAttempt.objects.none()
         context = {'request': request}
         return response.Response({
@@ -195,7 +250,11 @@ class ModuleViewSet(viewsets.ModelViewSet):
             'lesson_examples': ModuleLessonExampleSerializer(examples, many=True, context=context).data,
             'lesson_progress': ModuleLessonProgressSerializer(lesson_progress, many=True, context=context).data,
             'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
-            'activity_attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'activity_attempts': ModuleActivityAttemptSummarySerializer(
+                attempts,
+                many=True,
+                context=context,
+            ).data,
             'assessments': AssessmentSerializer(
                 Assessment.objects.filter(module=module), many=True, context=context,
             ).data,
@@ -522,6 +581,18 @@ class ModuleLessonViewSet(viewsets.ModelViewSet):
             active_module_access_filter(self.request.user, prefix='topic__module__'),
         ).distinct()
 
+    @decorators.action(detail=True, methods=['get'], url_path='main-activity-workspace')
+    def main_activity_workspace(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can open the Main Activity editor workspace.')
+        lesson = self.get_object()
+        activity = ModuleActivity.objects.filter(lesson=lesson).select_related(
+            'module',
+            'topic',
+            'lesson',
+        ).first()
+        return response.Response(serialize_main_activity_editor_workspace(activity, request))
+
     @decorators.action(
         detail=True,
         methods=['get'],
@@ -700,7 +771,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             'lesson__topic',
             'lesson__topic__module',
             'programming_problem',
-        ).prefetch_related('extensions')
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -710,7 +781,10 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             module__is_published=True,
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
-        ).distinct()
+        ).distinct().prefetch_related(Prefetch(
+            'extensions',
+            queryset=ModuleActivityExtension.objects.filter(student=self.request.user),
+        ))
 
     @decorators.action(detail=False, methods=['put'], url_path='atomic-save')
     @transaction.atomic
@@ -797,9 +871,61 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
 
         activity.questions.exclude(pk__in=retained_ids).delete()
         return response.Response(
-            self.get_serializer(activity).data,
+            serialize_main_activity_editor_workspace(activity, request),
             status=status.HTTP_200_OK if activity_id else status.HTTP_201_CREATED,
         )
+
+    @decorators.action(detail=True, methods=['get'], url_path='grading-workspace')
+    def grading_workspace(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can open activity grading settings.')
+        activity = self.get_object()
+        subject_ids = module_subject_ids(activity.module)
+        schedules = list(
+            SubjectSchedule.objects.filter(
+                subject_id__in=subject_ids,
+                is_active=True,
+            ).select_related('subject', 'school_year_semester', 'school_year_semester__school_year'),
+        )
+        enrollments = list(
+            ScheduleStudent.objects.filter(
+                schedule__in=schedules,
+                is_active=True,
+            ).select_related(
+                'student',
+                'student__student_profile',
+                'schedule',
+                'schedule__subject',
+                'schedule__school_year_semester',
+                'schedule__school_year_semester__school_year',
+            ),
+        )
+        students = sorted(
+            {enrollment.student for enrollment in enrollments},
+            key=lambda student: (student.last_name, student.first_name, student.id),
+        )
+        categories = GradeCategory.objects.filter(subject_id__in=subject_ids).order_by(
+            'subject_id', 'grading_period', 'category', 'name',
+        )
+        items = GradeItem.objects.filter(
+            module_activity=activity,
+            schedule__in=schedules,
+        ).select_related(
+            'schedule',
+            'grade_category',
+            'module_activity',
+        )
+        extensions = activity.extensions.select_related('student').all()
+        context = {'request': request}
+        return response.Response({
+            'users': UserSerializer(students, many=True, context=context).data,
+            'schedules': SubjectScheduleSerializer(schedules, many=True, context=context).data,
+            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+            'grade_categories': GradeCategorySerializer(categories, many=True, context=context).data,
+            'grade_items': GradeItemSerializer(items, many=True, context=context).data,
+            'extensions': ModuleActivityExtensionSerializer(extensions, many=True).data,
+            'linked_class_count': len({item.schedule_id for item in items}),
+        })
 
     @decorators.action(detail=True, methods=['get', 'put', 'delete'], url_path='extensions')
     def extensions(self, request, pk=None):
@@ -958,6 +1084,11 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivityAttemptSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_serializer_class(self):
+        if self.action == 'list' and self.request.query_params.get('view') == 'summary':
+            return ModuleActivityAttemptSummarySerializer
+        return ModuleActivityAttemptSerializer
+
     def get_queryset(self):
         queryset = ModuleActivityAttempt.objects.select_related(
             'activity',
@@ -967,6 +1098,9 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
             'recorded_by',
             'paper_grade_item',
         )
+
+        if self.action == 'list' and self.request.query_params.get('view') == 'summary':
+            queryset = queryset.defer('question_snapshot', 'draft_answers')
 
         if self.request.user.is_admin_teacher:
             return queryset

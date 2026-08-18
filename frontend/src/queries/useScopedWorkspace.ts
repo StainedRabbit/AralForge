@@ -19,7 +19,7 @@ const paths: Record<WorkspaceResource, string> = {
   lessonProgress: '/modules/lesson-progress/', moduleAccess: '/modules/access/',
   activities: '/modules/activities/', activityQuestions: '/modules/activity-questions/',
   activityChoices: '/modules/activity-choices/', activityMatchingPairs: '/modules/activity-matching-pairs/',
-  activityAttempts: '/modules/activity-attempts/', activityAnswers: '/modules/activity-answers/',
+  activityAttempts: '/modules/activity-attempts/?view=summary', activityAnswers: '/modules/activity-answers/',
   submissions: '/modules/submissions/', progress: '/modules/progress/',
   topicProgress: '/modules/topic-progress/', problems: '/coding/problems/',
   testCases: '/coding/test-cases/', codeSubmissions: '/coding/submissions/',

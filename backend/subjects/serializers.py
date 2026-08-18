@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
-from .scheduling import normalize_schedule_days, schedules_share_day
+from .scheduling import normalize_schedule_days
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -92,12 +92,6 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
         days = attrs.get('days', getattr(self.instance, 'days', ''))
         start_time = attrs.get('start_time', getattr(self.instance, 'start_time', None))
         end_time = attrs.get('end_time', getattr(self.instance, 'end_time', None))
-        term = attrs.get(
-            'school_year_semester',
-            getattr(self.instance, 'school_year_semester', None),
-        )
-        is_active = attrs.get('is_active', getattr(self.instance, 'is_active', True))
-
         try:
             normalized_days = normalize_schedule_days(days)
         except ValueError as error:
@@ -107,36 +101,6 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
 
         if start_time and end_time and end_time <= start_time:
             raise serializers.ValidationError('End time must be after start time.')
-
-        if is_active and term and start_time and end_time:
-            schedules = SubjectSchedule.objects.filter(
-                school_year_semester=term,
-                is_active=True,
-                start_time__lt=end_time,
-                end_time__gt=start_time,
-            ).select_related('subject')
-            if self.instance:
-                schedules = schedules.exclude(pk=self.instance.pk)
-
-            conflict = next(
-                (
-                    schedule
-                    for schedule in schedules
-                    if schedules_share_day(normalized_days, schedule.days)
-                ),
-                None,
-            )
-            if conflict:
-                label = ' '.join(
-                    part for part in (conflict.subject.code, conflict.section) if part
-                )
-                raise serializers.ValidationError({
-                    'days': (
-                        f'Conflicts with {label} on {conflict.days}, '
-                        f'{conflict.start_time.strftime("%H:%M")}-'
-                        f'{conflict.end_time.strftime("%H:%M")}.'
-                    ),
-                })
 
         return attrs
 

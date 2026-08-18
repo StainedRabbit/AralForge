@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type {
   GradeCategory,
+  MainActivityEditorWorkspace,
+  MainActivityGradingWorkspace,
   MainActivityBulkAssignmentRequest,
   MainActivityBulkAssignmentResult,
   ModuleActivity,
@@ -13,6 +16,7 @@ import type {
 import { toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 import { SectionHeading } from '../ui'
+import { queryKeys } from '../../queries/queryKeys'
 
 type QuestionDraft = {
   id: string
@@ -95,17 +99,20 @@ Output: Hello
 export function MainActivityEditor({
   api,
   data,
+  linkedClassCount,
   lesson,
-  refresh,
+  onWorkspaceSaved,
 }: {
   api: AuthedRequest
   data: RouteData
+  linkedClassCount: number
   lesson: ModuleLesson
-  refresh: () => Promise<void>
+  onWorkspaceSaved: (workspace: MainActivityEditorWorkspace) => void
 }) {
   const topic = data.moduleTopics.find((item) => item.id === lesson.topic)
   const module = topic ? data.modules.find((item) => item.id === topic.module) : null
   const activity = data.activities.find((item) => item.lesson === lesson.id) ?? null
+  const [currentLinkedClassCount, setCurrentLinkedClassCount] = useState(linkedClassCount)
   const initialDrafts = useMemo(
     () => createQuestionDrafts(data, activity),
     [activity, data],
@@ -288,7 +295,7 @@ export function MainActivityEditor({
     setSaveState('saving')
     if (!silent) setMessage('')
     try {
-      const savedActivity = await api<ModuleActivity>(
+      const workspace = await api<MainActivityEditorWorkspace>(
         '/modules/activities/atomic-save/',
         {
           method: 'PUT',
@@ -314,11 +321,14 @@ export function MainActivityEditor({
           }),
         },
       )
+      const savedActivity = workspace.activity
+      if (!savedActivity) throw new Error('The saved Main Activity was not returned.')
       setSavedActivityId(savedActivity.id)
       savedSignature.current = draftSignature
       window.localStorage.removeItem(recoveryKey)
       setSaveState('saved')
-      await refresh()
+      onWorkspaceSaved(workspace)
+      setCurrentLinkedClassCount(workspace.linked_class_count)
       if (!silent) setMessage('Main Activity saved atomically.')
       if (nextTab) setActiveTab(nextTab)
     } catch (caughtError) {
@@ -329,13 +339,6 @@ export function MainActivityEditor({
     }
   }
 
-  const linkedClassCount = activity
-    ? new Set(
-        data.gradeItems
-          .filter((item) => item.module_activity === activity.id && item.schedule)
-          .map((item) => item.schedule),
-      ).size
-    : 0
   const publishedQuestionCount = activeDrafts.filter((question) => question.is_published).length
   const nextTab = ({
     setup: 'questions',
@@ -363,8 +366,8 @@ export function MainActivityEditor({
           {publishedQuestionCount} published question{publishedQuestionCount === 1 ? '' : 's'}
         </span>
         <span className="status-badge">{publishedPoints} question points</span>
-        <span className={linkedClassCount ? 'status-badge status-badge--ready' : 'status-badge'}>
-          {linkedClassCount} linked class{linkedClassCount === 1 ? '' : 'es'}
+        <span className={currentLinkedClassCount ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {currentLinkedClassCount} linked class{currentLinkedClassCount === 1 ? '' : 'es'}
         </span>
       </div>
 
@@ -390,7 +393,7 @@ export function MainActivityEditor({
           ['questions', `Questions (${activeDrafts.length})`],
           ['import', 'Import'],
           ['preview', 'Preview'],
-          ...(activity ? [['grading', `Grading (${linkedClassCount})`]] : []),
+          ...(activity ? [['grading', `Grading (${currentLinkedClassCount})`]] : []),
         ] as Array<[EditorTab, string]>).map(([tab, label]) => (
           <button
             className={activeTab === tab ? 'active' : ''}
@@ -482,10 +485,7 @@ export function MainActivityEditor({
         <ActivityGradingAssignments
           activity={activity}
           api={api}
-          data={data}
-          moduleSubject={module.subject}
-          moduleSubjects={module.subjects}
-          refresh={refresh}
+          onLinkedClassCountChange={setCurrentLinkedClassCount}
         />
       ) : null}
 
@@ -585,29 +585,89 @@ type AssignmentDraft = {
   period: GradingPeriod
   categoryId: string
 }
+type ActivityGradingData = Pick<
+  RouteData,
+  'users' | 'schedules' | 'enrollments' | 'gradeCategories' | 'gradeItems'
+>
 
 function ActivityGradingAssignments({
   activity,
   api,
+  onLinkedClassCountChange,
+}: {
+  activity: ModuleActivity
+  api: AuthedRequest
+  onLinkedClassCountChange: (count: number) => void
+}) {
+  const workspacePath = `/modules/activities/${activity.id}/grading-workspace/`
+  const workspaceQuery = useQuery({
+    queryKey: queryKeys.resource(workspacePath),
+    queryFn: () => api<MainActivityGradingWorkspace>(workspacePath),
+    staleTime: 30_000,
+  })
+  const fetchedLinkedClassCount = workspaceQuery.data?.linked_class_count
+
+  useEffect(() => {
+    if (fetchedLinkedClassCount !== undefined) {
+      onLinkedClassCountChange(fetchedLinkedClassCount)
+    }
+  }, [fetchedLinkedClassCount, onLinkedClassCountChange])
+
+  if (workspaceQuery.isPending) {
+    return (
+      <section className="main-activity-tab-panel activity-grading-panel">
+        <p className="admin-empty-line">Loading class grading details...</p>
+      </section>
+    )
+  }
+
+  if (workspaceQuery.error || !workspaceQuery.data) {
+    return (
+      <section className="main-activity-tab-panel activity-grading-panel">
+        <p className="admin-message" role="alert">
+          {toErrorMessage(workspaceQuery.error ?? new Error('Grading details are unavailable.'))}
+        </p>
+        <button className="button button--secondary" onClick={() => void workspaceQuery.refetch()} type="button">
+          Retry
+        </button>
+      </section>
+    )
+  }
+
+  const workspace = workspaceQuery.data
+  const scopedData: ActivityGradingData = {
+    users: workspace.users,
+    schedules: workspace.schedules,
+    enrollments: workspace.enrollments,
+    gradeCategories: workspace.grade_categories,
+    gradeItems: workspace.grade_items,
+  }
+
+  return (
+    <ActivityGradingAssignmentsContent
+      activity={activity}
+      api={api}
+      data={scopedData}
+      extensions={workspace.extensions}
+      refresh={async () => { await workspaceQuery.refetch() }}
+    />
+  )
+}
+
+function ActivityGradingAssignmentsContent({
+  activity,
+  api,
   data,
-  moduleSubject,
-  moduleSubjects,
+  extensions,
   refresh,
 }: {
   activity: ModuleActivity
   api: AuthedRequest
-  data: RouteData
-  moduleSubject: number | null
-  moduleSubjects: number[]
+  data: ActivityGradingData
+  extensions: MainActivityGradingWorkspace['extensions']
   refresh: () => Promise<void>
 }) {
-  const subjectIds = new Set([
-    ...moduleSubjects,
-    ...(moduleSubject ? [moduleSubject] : []),
-  ])
-  const schedules = data.schedules.filter(
-    (schedule) => schedule.is_active && subjectIds.has(schedule.subject),
-  )
+  const schedules = data.schedules
   const existingItemsBySchedule = new Map(
     schedules.map((schedule) => [
       schedule.id,
@@ -848,28 +908,31 @@ function ActivityGradingAssignments({
           <span>{saving ? 'Applying assignments...' : 'Apply selected assignments'}</span>
         </button>
       </div>
-      <ActivityExtensions activity={activity} api={api} data={data} schedules={schedules} />
+      <ActivityExtensions
+        activity={activity}
+        api={api}
+        data={data}
+        extensions={extensions}
+        refresh={refresh}
+        schedules={schedules}
+      />
     </section>
   )
-}
-
-type ActivityExtension = {
-  id: number
-  activity: number
-  student: number
-  student_name: string
-  due_at: string
 }
 
 function ActivityExtensions({
   activity,
   api,
   data,
+  extensions,
+  refresh,
   schedules,
 }: {
   activity: ModuleActivity
   api: AuthedRequest
-  data: RouteData
+  data: ActivityGradingData
+  extensions: MainActivityGradingWorkspace['extensions']
+  refresh: () => Promise<void>
   schedules: RouteData['schedules']
 }) {
   const eligibleStudentIds = new Set(
@@ -880,28 +943,10 @@ function ActivityExtensions({
   const students = data.users
     .filter((user) => user.role === 'STUDENT' && eligibleStudentIds.has(user.id))
     .sort((first, second) => `${first.last_name} ${first.first_name}`.localeCompare(`${second.last_name} ${second.first_name}`))
-  const [extensions, setExtensions] = useState<ActivityExtension[]>([])
   const [studentId, setStudentId] = useState('')
   const [extensionDueAt, setExtensionDueAt] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-
-  async function loadExtensions() {
-    const rows = await api<ActivityExtension[]>(`/modules/activities/${activity.id}/extensions/`)
-    setExtensions(rows)
-  }
-
-  useEffect(() => {
-    let active = true
-    void api<ActivityExtension[]>(`/modules/activities/${activity.id}/extensions/`)
-      .then((rows) => {
-        if (active) setExtensions(rows)
-      })
-      .catch((error) => {
-        if (active) setMessage(toErrorMessage(error))
-      })
-    return () => { active = false }
-  }, [activity.id, api])
 
   async function saveExtension() {
     if (!studentId || !extensionDueAt) {
@@ -915,7 +960,7 @@ function ActivityExtensions({
         method: 'PUT',
         body: JSON.stringify({ student: Number(studentId), due_at: fromLocalDateTime(extensionDueAt) }),
       })
-      await loadExtensions()
+      await refresh()
       setStudentId('')
       setExtensionDueAt('')
       setMessage('Student extension saved.')
@@ -934,7 +979,7 @@ function ActivityExtensions({
         method: 'DELETE',
         body: JSON.stringify({ student }),
       })
-      await loadExtensions()
+      await refresh()
       setMessage('Student extension removed.')
     } catch (error) {
       setMessage(toErrorMessage(error))
@@ -975,7 +1020,7 @@ function ActivityExtensions({
   )
 }
 
-function quizCategoriesFor(data: RouteData, scheduleId: number, period: GradingPeriod): GradeCategory[] {
+function quizCategoriesFor(data: ActivityGradingData, scheduleId: number, period: GradingPeriod): GradeCategory[] {
   const schedule = data.schedules.find((candidate) => candidate.id === scheduleId)
   if (!schedule) return []
   return data.gradeCategories.filter(

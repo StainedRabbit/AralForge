@@ -347,7 +347,7 @@ test('creates and reopens an attendance-style class score sheet', async ({ page 
   await expect(page.getByText('Quiz 1', { exact: true }).first()).toBeVisible()
 })
 
-test('creates allowed schedules and rejects a shared-day overlap', async ({ page }) => {
+test('creates adjacent and overlapping schedules', async ({ page }) => {
   await openClasses(page)
   await startNewSchedule(page)
   await fillSchedule(page, {
@@ -372,13 +372,8 @@ test('creates allowed schedules and rejects a shared-day overlap', async ({ page
     term: '1st Semester',
   })
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
-  await expect(page.locator('.class-form')).toContainText('Conflicts with E2E101 E2E-A')
-
-  const secondTerm = await page.locator('.class-form').getByLabel('Term', { exact: true }).locator('option').filter({ hasText: '2nd Semester' }).getAttribute('value')
-  if (!secondTerm) throw new Error('The second term option is unavailable.')
-  await page.locator('.class-form').getByLabel('Term', { exact: true }).selectOption(secondTerm)
-  await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
   await expect(page.locator('.class-form')).toContainText('Schedule saved.')
+  await expect(page).toHaveURL(/schedule=\d+/)
 })
 
 test('supports keyboard row actions and safe roster removal', async ({ page }) => {

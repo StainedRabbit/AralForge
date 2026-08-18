@@ -318,8 +318,32 @@ export type ModuleActivityAttempt = {
   started_at: string
   submitted_at: string | null
   is_submitted: boolean
-  question_snapshot: ModuleActivityQuestionSnapshot[]
-  draft_answers: Record<string, ModuleActivityDraftAnswer>
+  question_snapshot?: ModuleActivityQuestionSnapshot[]
+  draft_answers?: Record<string, ModuleActivityDraftAnswer>
+}
+
+export type MainActivityEditorWorkspace = {
+  activity: ModuleActivity | null
+  questions: ModuleActivityQuestion[]
+  choices: ModuleActivityQuestionChoice[]
+  matching_pairs: ModuleActivityMatchingPair[]
+  linked_class_count: number
+}
+
+export type MainActivityGradingWorkspace = {
+  users: User[]
+  schedules: SubjectSchedule[]
+  enrollments: ScheduleStudent[]
+  grade_categories: GradeCategory[]
+  grade_items: GradeItem[]
+  linked_class_count: number
+  extensions: Array<{
+    id: number
+    activity: number
+    student: number
+    student_name: string
+    due_at: string
+  }>
 }
 
 export type ModuleActivityDraftAnswer = {

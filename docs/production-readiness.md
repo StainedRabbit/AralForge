@@ -17,6 +17,10 @@
    python manage.py test
    ```
 
+   Release startup must run `python manage.py migrate` before serving traffic. Confirm
+   `learning_modules.0019_activity_reliability` is applied with
+   `python manage.py showmigrations learning_modules`.
+
 3. Keep SQLite for local development unless `DATABASE_URL` is set.
 
 ## Environment Variables
@@ -31,6 +35,12 @@ Required for production:
 - `CORS_ALLOWED_ORIGINS`
 - `CSRF_TRUSTED_ORIGINS`
 - `DATABASE_URL`
+- `MEDIA_ROOT` pointing to a persistent mounted volume
+- `MEDIA_URL` matching the public media route or object-storage URL
+
+The frontend production build must set `VITE_API_BASE_URL` to the public backend URL,
+including its `/api` suffix. This value is compiled into the Vite bundle, so rebuild
+after changing it.
 
 Supabase uses a PostgreSQL URL. Keep the production database separate from any staging database.
 
@@ -54,6 +64,11 @@ Supabase uses a PostgreSQL URL. Keep the production database separate from any s
 - Deploy the backend and PostgreSQL database in nearby regions. Cross-region database calls add latency to every request.
 - Set `DB_CONN_MAX_AGE=60` for a long-running application server. Set it to `0` for serverless deployments or when required by the database pooler.
 - API responses expose `Server-Timing` and `X-Response-Time-Ms`; requests above `API_SLOW_REQUEST_MS` are written to the server log.
+- After each staging release, record p50 and p95 for
+  `GET /api/modules/modules/{id}/workspace/` and
+  `PUT /api/modules/activities/atomic-save/` from those headers under normal seeded
+  teacher/student traffic. Review the application log and confirm neither endpoint
+  produces slow-request warnings at the configured threshold.
 - Serve Vite's hashed assets with `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html` on a short cache lifetime.
 - Run the authenticated staging load check with a non-production test account:
 
@@ -101,6 +116,8 @@ python manage.py loaddata data-export.json
 - Mock exam generation and scoring work.
 - Grades and attendance are isolated per student.
 - Uploaded PDFs/files open correctly.
+- `MEDIA_ROOT` survives an application restart and redeploy; ephemeral application
+  storage is not an acceptable home for lesson PDFs or uploaded assets.
 
 ## Production Checklist
 
@@ -110,3 +127,5 @@ python manage.py loaddata data-export.json
 - Supabase backups are enabled.
 - No test users or demo grades are exposed.
 - Frontend build uses production `VITE_API_BASE_URL`.
+- Persistent media storage is mounted, backed up, and served from `MEDIA_URL`.
+- `learning_modules.0019_activity_reliability` is applied before the new frontend is published.
