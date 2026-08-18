@@ -2322,6 +2322,11 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual(self.activity.title, 'Reliable Main Activity')
         self.assertEqual(self.activity.points_possible, Decimal('2.00'))
         self.assertEqual(self.activity.questions.count(), 1)
+        self.assertEqual(response.data['activity']['id'], self.activity.id)
+        self.assertEqual(len(response.data['questions']), 1)
+        self.assertEqual(response.data['questions'][0]['prompt'], 'Name the runtime.')
+        self.assertEqual(response.data['choices'], [])
+        self.assertEqual(response.data['matching_pairs'], [])
 
     def test_atomic_editor_save_rolls_back_when_publishing_invalid_question(self):
         self.client.force_authenticate(self.teacher)
@@ -2473,3 +2478,138 @@ class LessonMainActivityApiTests(APITestCase):
         response = self.client.get('/api/modules/activity-questions/')
         row = next(item for item in result_rows(response) if item['id'] == question.id)
         self.assertEqual(row['explanation'], 'Runtime explanation.')
+
+    def test_attempt_summary_endpoints_omit_frozen_answers_and_full_retrieve_keeps_them(self):
+        attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            attempt_number=1,
+            question_snapshot=[{'id': 99, 'correct_text_answers': ['secret']}],
+            draft_answers={'99': {'text_answer': 'private draft', 'feedback': 'private'}},
+        )
+        self.client.force_authenticate(self.student)
+
+        workspace = self.client.get(f'/api/modules/modules/{self.module.id}/workspace/')
+        summary_list = self.client.get('/api/modules/activity-attempts/?view=summary')
+        compatibility_list = self.client.get('/api/modules/activity-attempts/')
+        detail = self.client.get(f'/api/modules/activity-attempts/{attempt.id}/')
+
+        self.assertEqual(workspace.status_code, 200)
+        workspace_row = workspace.data['activity_attempts'][0]
+        summary_row = result_rows(summary_list)[0]
+        for row in (workspace_row, summary_row):
+            self.assertNotIn('question_snapshot', row)
+            self.assertNotIn('draft_answers', row)
+        self.assertIn('question_snapshot', result_rows(compatibility_list)[0])
+        self.assertIn('draft_answers', result_rows(compatibility_list)[0])
+        self.assertIn('question_snapshot', detail.data)
+        self.assertIn('draft_answers', detail.data)
+
+    def test_teacher_editor_workspace_is_lesson_scoped_and_student_is_forbidden(self):
+        question = self.create_question(ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE, 1)
+        choice = ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='JVM',
+            is_correct=True,
+            order=1,
+        )
+        other_lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Other lesson',
+            is_published=True,
+        )
+        other_activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=other_lesson,
+            title='Other activity',
+        )
+        self.create_question(ModuleActivityQuestion.QuestionType.FILL_BLANK, 2)
+        ModuleActivityQuestion.objects.create(
+            activity=other_activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Outside the requested lesson',
+            points=Decimal('1.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.get(
+            f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['activity']['id'], self.activity.id)
+        self.assertEqual(
+            {row['activity'] for row in response.data['questions']},
+            {self.activity.id},
+        )
+        self.assertIn(choice.id, {row['id'] for row in response.data['choices']})
+        self.assertNotIn(
+            'Outside the requested lesson',
+            {row['prompt'] for row in response.data['questions']},
+        )
+
+        self.client.force_authenticate(self.student)
+        forbidden = self.client.get(
+            f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/',
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_grading_workspace_is_activity_scoped(self):
+        school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='M',
+            start_time='09:00',
+            end_time='10:00',
+            section='A',
+        )
+        enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Activity quizzes',
+            weight=Decimal('100.00'),
+        )
+        item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=category,
+            title=self.activity.title,
+            points_possible=self.activity.points_possible,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        extension = ModuleActivityExtension.objects.create(
+            activity=self.activity,
+            student=self.student,
+            due_at=timezone.now() + timezone.timedelta(days=1),
+            granted_by=self.teacher,
+        )
+        outside_subject = Subject.objects.create(code='OUT101', name='Outside')
+        outside_schedule = SubjectSchedule.objects.create(
+            subject=outside_subject,
+            school_year_semester=term,
+            days='T',
+            start_time='09:00',
+            end_time='10:00',
+            section='B',
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/grading-workspace/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual({row['id'] for row in response.data['schedules']}, {schedule.id})
+        self.assertEqual({row['id'] for row in response.data['enrollments']}, {enrollment.id})
+        self.assertEqual({row['id'] for row in response.data['grade_categories']}, {category.id})
+        self.assertEqual({row['id'] for row in response.data['grade_items']}, {item.id})
+        self.assertEqual({row['id'] for row in response.data['extensions']}, {extension.id})
+        self.assertNotIn(outside_schedule.id, {row['id'] for row in response.data['schedules']})

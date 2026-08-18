@@ -9,11 +9,13 @@ from learning_modules.models import (
     Module,
     ModuleAccess,
     ModuleActivity,
+    ModuleActivityAttempt,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
     ModuleLesson,
     ModuleTopic,
 )
+from learning_modules.services.activity_snapshots import build_activity_snapshot
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 
@@ -264,6 +266,71 @@ class Command(BaseCommand):
             text='Incorrect response',
             is_correct=False,
             order=2,
+        )
+
+        hydration_subject = Subject.objects.create(
+            code='E2EH1',
+            name='Attempt Hydration Fixture',
+        )
+        hydration_module = Module.objects.create(
+            title='E2E Attempt Hydration Module',
+            slug='e2e-attempt-hydration-module',
+            subject=hydration_subject,
+            is_published=True,
+        )
+        hydration_topic = ModuleTopic.objects.create(
+            module=hydration_module,
+            title='Hydration Topic',
+            order=1,
+            is_published=True,
+        )
+        hydration_lesson = ModuleLesson.objects.create(
+            topic=hydration_topic,
+            title='Resume a Saved Main Activity',
+            order=1,
+            learning_targets='Resume a saved answer without loading every attempt payload.',
+            is_published=True,
+        )
+        hydration_activity = ModuleActivity.objects.create(
+            module=hydration_module,
+            topic=hydration_topic,
+            lesson=hydration_lesson,
+            title='Saved Attempt Hydration',
+            instructions='Continue the answer saved in this attempt.',
+            points_possible=1,
+            max_attempts=1,
+            is_published=True,
+        )
+        hydration_question = ModuleActivityQuestion.objects.create(
+            activity=hydration_activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='What is loaded only for this attempt?',
+            correct_text_answers=['The saved draft'],
+            points=1,
+            order=1,
+            is_published=True,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=hydration_activity,
+            student=students[0],
+            attempt_number=1,
+            question_snapshot=build_activity_snapshot(hydration_activity),
+            draft_answers={
+                str(hydration_question.id): {
+                    'selected_choice': None,
+                    'text_answer': 'The saved draft',
+                    'choice_order': [],
+                    'matching_answer': {},
+                },
+            },
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.PAYMENT,
+            activated_by=teacher,
+            amount_paid=100,
+            module=hydration_module,
+            payment_status=ModuleAccess.PaymentStatus.PAID,
+            student=students[0],
         )
 
         self.stdout.write(self.style.SUCCESS('Seeded isolated Playwright data.'))

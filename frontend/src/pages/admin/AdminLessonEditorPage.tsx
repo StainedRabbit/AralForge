@@ -9,7 +9,14 @@ import { MarkdownEditor } from '../../components/MarkdownEditor'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatusBanner } from '../../components/ui'
 import { usePaginatedResource } from '../../queries/useScopedWorkspace'
 import { queryKeys } from '../../queries/queryKeys'
-import type { Module, ModuleLesson, ModuleLessonAsset, ModuleLessonExample, ModuleTopic } from '../../types'
+import type {
+  MainActivityEditorWorkspace,
+  Module,
+  ModuleLesson,
+  ModuleLessonAsset,
+  ModuleLessonExample,
+  ModuleTopic,
+} from '../../types'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
@@ -61,13 +68,13 @@ type LessonTemplateFieldKey =
 export function AdminLessonEditorPage({
   api,
   data,
-  refresh,
 }: {
   api: AuthedRequest
   data: RouteData
   refresh: () => Promise<void>
 }) {
   const { lessonId, moduleId, topicId } = useParams()
+  const queryClient = useQueryClient()
   const numericModuleId = Number(moduleId)
   const numericTopicId = Number(topicId)
   const numericLessonId = Number(lessonId)
@@ -95,11 +102,24 @@ export function AdminLessonEditorPage({
       ? `/modules/lesson-examples/?lesson=${numericLessonId}`
       : null,
   )
+  const mainActivityWorkspacePath = numericLessonId
+    ? `/modules/lessons/${numericLessonId}/main-activity-workspace/`
+    : null
+  const mainActivityWorkspaceQuery = useQuery({
+    queryKey: queryKeys.resource(mainActivityWorkspacePath ?? 'main-activity-workspace-disabled'),
+    queryFn: () => api<MainActivityEditorWorkspace>(mainActivityWorkspacePath!),
+    enabled: Boolean(mainActivityWorkspacePath),
+    staleTime: 60_000,
+  })
   const isEditing = Boolean(lessonId)
   const isPending = moduleQuery.isPending || topicQuery.isPending ||
-    (isEditing && (lessonQuery.isPending || examplesQuery.isPending))
+    (isEditing && (
+      lessonQuery.isPending || examplesQuery.isPending || mainActivityWorkspaceQuery.isPending
+    ))
   const queryError = moduleQuery.error || topicQuery.error ||
-    (isEditing ? lessonQuery.error || examplesQuery.error : null)
+    (isEditing
+      ? lessonQuery.error || examplesQuery.error || mainActivityWorkspaceQuery.error
+      : null)
 
   if (isPending) {
     return <Page><section aria-label="Loading lesson editor"><SkeletonList count={5} /></section></Page>
@@ -123,18 +143,53 @@ export function AdminLessonEditorPage({
     moduleLessons: lessonQuery.data ? [lessonQuery.data] : [],
     moduleTopics: topicQuery.data ? [topicQuery.data] : [],
     modules: moduleQuery.data ? [moduleQuery.data] : [],
+    activities: mainActivityWorkspaceQuery.data?.activity
+      ? [mainActivityWorkspaceQuery.data.activity]
+      : [],
+    activityQuestions: mainActivityWorkspaceQuery.data?.questions ?? [],
+    activityChoices: mainActivityWorkspaceQuery.data?.choices ?? [],
+    activityMatchingPairs: mainActivityWorkspaceQuery.data?.matching_pairs ?? [],
   }
 
-  return <AdminLessonEditorForm api={api} data={scopedData} refresh={refresh} />
+  const refreshScopedData = async () => {
+    await Promise.all([
+      moduleQuery.refetch(),
+      topicQuery.refetch(),
+      ...(isEditing
+        ? [lessonQuery.refetch(), examplesQuery.refetch(), mainActivityWorkspaceQuery.refetch()]
+        : []),
+    ])
+  }
+
+  return (
+    <AdminLessonEditorForm
+      api={api}
+      data={scopedData}
+      mainActivityLinkedClassCount={mainActivityWorkspaceQuery.data?.linked_class_count ?? 0}
+      onMainActivityWorkspaceSaved={(workspace) => {
+        if (mainActivityWorkspacePath) {
+          queryClient.setQueryData(
+            queryKeys.resource(mainActivityWorkspacePath),
+            workspace,
+          )
+        }
+      }}
+      refresh={refreshScopedData}
+    />
+  )
 }
 
 function AdminLessonEditorForm({
   api,
   data,
+  mainActivityLinkedClassCount,
+  onMainActivityWorkspaceSaved,
   refresh,
 }: {
   api: AuthedRequest
   data: RouteData
+  mainActivityLinkedClassCount: number
+  onMainActivityWorkspaceSaved: (workspace: MainActivityEditorWorkspace) => void
   refresh: () => Promise<void>
 }) {
   const navigate = useNavigate()
@@ -701,8 +756,9 @@ function AdminLessonEditorForm({
                 <MainActivityEditor
                   api={api}
                   data={data}
+                  linkedClassCount={mainActivityLinkedClassCount}
                   lesson={editingLesson}
-                  refresh={refresh}
+                  onWorkspaceSaved={onMainActivityWorkspaceSaved}
                 />
               ) : (
                 <section className="main-activity-editor">

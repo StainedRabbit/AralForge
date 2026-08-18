@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../app/types'
 import type {
@@ -30,6 +30,8 @@ export function LessonMainActivityPanel({
   onSubmitted: () => Promise<void>
 }) {
   const [activeAttemptId, setActiveAttemptId] = useState<number | null>(null)
+  const [hydratedAttempts, setHydratedAttempts] = useState<Record<number, ModuleActivityAttempt>>({})
+  const hydrationRequests = useRef(new Map<number, Promise<ModuleActivityAttempt>>())
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -70,13 +72,16 @@ export function LessonMainActivityPanel({
                 numeric(attempt.score) >= numeric(attempt.max_score),
         )),
   )
-  const activeAttempt =
+  const activeAttemptSummary =
     attempts.find((attempt) => attempt.id === activeAttemptId) ??
     attempts.find((attempt) => !attempt.is_submitted) ??
     bestAttempt ??
     attempts[0] ??
     null
-  const displayAttempt = reviewUnlocked && reviewAttempt ? reviewAttempt : activeAttempt
+  const displayAttemptSummary = reviewUnlocked && reviewAttempt ? reviewAttempt : activeAttemptSummary
+  const displayAttempt = displayAttemptSummary
+    ? hydratedAttempts[displayAttemptSummary.id] ?? null
+    : null
   const questions = useMemo(
     () => questionsForAttempt(displayAttempt, liveQuestions, activity?.id ?? 0),
     [activity?.id, displayAttempt, liveQuestions],
@@ -90,13 +95,39 @@ export function LessonMainActivityPanel({
   const afterDue = effectiveDueAt !== null && now > effectiveDueAt
   const windowClosed = beforeOpen || (afterDue && !activity?.allow_late_submissions)
   const canStartAttempt = Boolean(
-    activity && !windowClosed && attempts.length < activity.max_attempts && !activeAttempt?.is_submitted,
+    activity && !windowClosed && attempts.length < activity.max_attempts && !activeAttemptSummary?.is_submitted,
   )
   const canStartNewAttempt = Boolean(activity && !windowClosed && attempts.length < activity.max_attempts)
   const initialDrafts = useMemo(
     () => displayAttempt ? buildActivityDrafts(displayAttempt, questions, data) : {},
     [data, displayAttempt, questions],
   )
+
+  const hydrateAttempt = useCallback((attemptId: number) => {
+    const hydrated = hydratedAttempts[attemptId]
+    if (hydrated) return Promise.resolve(hydrated)
+    const pending = hydrationRequests.current.get(attemptId)
+    if (pending) return pending
+
+    const request = api<ModuleActivityAttempt>(`/modules/activity-attempts/${attemptId}/`)
+      .then((attempt) => {
+        setHydratedAttempts((current) => ({ ...current, [attempt.id]: attempt }))
+        return attempt
+      })
+      .catch((error) => {
+        hydrationRequests.current.delete(attemptId)
+        throw error
+      })
+    hydrationRequests.current.set(attemptId, request)
+    return request
+  }, [api, hydratedAttempts])
+
+  useEffect(() => {
+    if (!displayAttemptSummary) return
+    void hydrateAttempt(displayAttemptSummary.id).catch((caughtError) => {
+      setMessage(toErrorMessage(caughtError))
+    })
+  }, [displayAttemptSummary, hydrateAttempt])
 
   if (!activity) {
     return null
@@ -106,8 +137,8 @@ export function LessonMainActivityPanel({
     if (!activity || !data.currentUser) {
       throw new Error('Your account could not be loaded. Refresh and try again.')
     }
-    if (activeAttempt && !activeAttempt.is_submitted) {
-      return activeAttempt
+    if (activeAttemptSummary && !activeAttemptSummary.is_submitted) {
+      return hydrateAttempt(activeAttemptSummary.id)
     }
     const attempt = await api<ModuleActivityAttempt>('/modules/activity-attempts/', {
       method: 'POST',
@@ -116,6 +147,7 @@ export function LessonMainActivityPanel({
         student: data.currentUser.id,
       }),
     })
+    setHydratedAttempts((current) => ({ ...current, [attempt.id]: attempt }))
     setActiveAttemptId(attempt.id)
     return attempt
   }
@@ -149,7 +181,14 @@ export function LessonMainActivityPanel({
     try {
       const attempt = await ensureAttempt()
       await saveAttemptDraft(attempt.id, drafts)
-      await api(`/modules/activity-attempts/${attempt.id}/submit/`, { method: 'POST' })
+      const submittedAttempt = await api<ModuleActivityAttempt>(
+        `/modules/activity-attempts/${attempt.id}/submit/`,
+        { method: 'POST' },
+      )
+      setHydratedAttempts((current) => ({
+        ...current,
+        [submittedAttempt.id]: submittedAttempt,
+      }))
       setMessage('Main Activity submitted.')
       await onSubmitted()
     } catch (caughtError) {
@@ -195,7 +234,7 @@ export function LessonMainActivityPanel({
               {numeric(bestAttempt.score) >= numeric(activity.passing_score) ? 'Passed' : 'Needs improvement'}
             </span>
           ) : null}
-          {activeAttempt?.is_submitted && !reviewUnlocked ? (
+          {activeAttemptSummary?.is_submitted && !reviewUnlocked ? (
             <button
               className="button button--secondary button--compact"
               disabled={saving || !canStartNewAttempt}
@@ -239,11 +278,15 @@ export function LessonMainActivityPanel({
         </div>
       ) : null}
 
-      {!activeAttempt && canStartAttempt ? (
+      {!activeAttemptSummary && canStartAttempt ? (
         <button className="button button--primary" disabled={saving} onClick={() => void startNewAttempt()} type="button">
           <Icon name="send" />
           <span>{saving ? 'Starting...' : 'Start Main Activity'}</span>
         </button>
+      ) : null}
+
+      {displayAttemptSummary && !displayAttempt ? (
+        <p className="admin-empty-line" role="status">Loading saved attempt...</p>
       ) : null}
 
       {displayAttempt ? (

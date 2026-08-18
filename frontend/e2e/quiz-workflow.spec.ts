@@ -39,9 +39,35 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
     return { lesson: lesson?.id, module: module?.id, topic: topic?.id }
   })
   expect(target).toEqual({ lesson: expect.any(Number), module: expect.any(Number), topic: expect.any(Number) })
+  const editorRequests: Array<{ method: string; path: string }> = []
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/')) {
+      editorRequests.push({ method: request.method(), path: `${url.pathname}${url.search}` })
+    }
+  })
   await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
   const editor = page.locator('#lesson-editor-main-activity')
   await expect(editor.getByRole('heading', { name: 'Main Activity' })).toBeVisible()
+  expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(0)
+  expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`)).toBe(true)
+  const forbiddenInitialCollections = [
+    '/api/modules/activities/',
+    '/api/modules/activity-questions/',
+    '/api/modules/activity-choices/',
+    '/api/modules/activity-matching-pairs/',
+    '/api/accounts/users/',
+    '/api/subjects/subject-schedules/',
+    '/api/subjects/schedule-students/',
+    '/api/grades/categories/',
+    '/api/grades/items/',
+  ]
+  for (const path of forbiddenInitialCollections) {
+    expect(editorRequests.some(request =>
+      request.method === 'GET' &&
+      (request.path === path || request.path.startsWith(`${path}?`)),
+    )).toBe(false)
+  }
   await expect(editor.getByLabel('Points (from published questions)')).toBeDisabled()
   await expect(editor.getByLabel('Opens at')).toBeVisible()
   await expect(editor.getByLabel('Due at')).toBeVisible()
@@ -52,8 +78,17 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await expect(editor.getByText('Unsaved changes', { exact: true })).toBeVisible()
   await atomicSave
   await expect(editor.getByText('Saved', { exact: true }).first()).toBeVisible()
+  const workspaceGetsAfterSave = editorRequests.filter(
+    request => request.method === 'GET' && request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`,
+  )
+  expect(workspaceGetsAfterSave).toHaveLength(1)
+  const gradingWorkspace = page.waitForResponse(
+    response => response.url().includes('/grading-workspace/') && response.request().method() === 'GET',
+  )
   await editor.getByRole('button', { name: /^Grading/ }).click()
+  await gradingWorkspace
   await expect(editor.getByRole('heading', { name: 'Student extensions' })).toBeVisible()
+  expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(1)
 
   const classRows = editor.locator('.activity-grading-row')
   await expect(classRows).toHaveCount(2)
