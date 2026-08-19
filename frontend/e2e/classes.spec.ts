@@ -310,6 +310,124 @@ test('loads the roster ten students at a time and exports the complete filtered 
   expect(mobileScrollMetrics.scrollHeight).toBe(mobileScrollMetrics.clientHeight)
 })
 
+test('loads the Select Class list ten classes at a time inside its panel', async ({ page }) => {
+  const classRequests: Array<{ limit: number; offset: number; search: string; term: string }> = []
+  let failNextClassPage = false
+
+  await page.route(/\/subjects\/subject-schedules\/\?.*/, async (route) => {
+    const url = new URL(route.request().url())
+    const limit = Number(url.searchParams.get('limit') ?? 50)
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    const search = url.searchParams.get('search') ?? ''
+    const term = url.searchParams.get('term') ?? ''
+    const termId = Number(term || 1)
+    const classes = Array.from({ length: 12 }, (_, index) => ({
+      archived_at: null,
+      archived_by: null,
+      created_at: '2026-08-04T00:00:00Z',
+      created_by: null,
+      days: 'MO,WE,FR',
+      end_time: '10:00:00',
+      id: 9001 + index,
+      is_active: true,
+      room: `Lab ${index + 1}`,
+      school_year_semester: termId,
+      section: `Batch ${String(index + 1).padStart(2, '0')}`,
+      start_time: '09:00:00',
+      subject: 1,
+      subject_code: `PCLS${String(index + 1).padStart(2, '0')}`,
+      subject_name: `Paged Class ${String(index + 1).padStart(2, '0')}`,
+      term_name: '1st Semester 2027-2028',
+      updated_at: '2026-08-04T00:00:00Z',
+      updated_by: null,
+    }))
+    const normalizedSearch = search.toLowerCase()
+    const filteredClasses = classes.filter((schedule) =>
+      `${schedule.subject_code} ${schedule.subject_name} ${schedule.section} ${schedule.days} ${schedule.room}`
+        .toLowerCase()
+        .includes(normalizedSearch),
+    )
+
+    if (limit === 10) classRequests.push({ limit, offset, search, term })
+    if (failNextClassPage && limit === 10 && offset === 10) {
+      failNextClassPage = false
+      await route.fulfill({ body: JSON.stringify({ detail: 'Temporary class page failure.' }), status: 500 })
+      return
+    }
+
+    await route.fulfill({
+      body: JSON.stringify({
+        count: filteredClasses.length,
+        next: offset + limit < filteredClasses.length ? offset + limit : null,
+        previous: offset ? Math.max(offset - limit, 0) : null,
+        results: filteredClasses.slice(offset, offset + limit),
+      }),
+      contentType: 'application/json',
+      status: 200,
+    })
+  })
+
+  await openClasses(page)
+
+  const classList = page.locator('.class-list')
+  const classItems = classList.locator('.class-list__item')
+  const pagination = classList.locator('.class-list__pagination')
+  await expect(classItems).toHaveCount(10)
+  await expect(pagination).toContainText('Showing 10 of 12 classes')
+  expect(classRequests[0]).toMatchObject({ limit: 10, offset: 0, search: '' })
+
+  const desktopScrollMetrics = await classList.evaluate((element) => {
+    const styles = window.getComputedStyle(element)
+    return {
+      clientHeight: element.clientHeight,
+      overflowY: styles.overflowY,
+      scrollHeight: element.scrollHeight,
+    }
+  })
+  expect(desktopScrollMetrics.overflowY).toBe('auto')
+  expect(desktopScrollMetrics.clientHeight).toBeLessThanOrEqual(440)
+  expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
+
+  await page.goto('/admin/classes?schedule=9012')
+  await expect(classList.locator('.class-list__item.active')).toContainText('PCLS12')
+  await expect(classItems).toHaveCount(11)
+
+  await classList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect(pagination).toContainText('Showing 12 of 12 classes')
+  await expect(classItems).toHaveCount(12)
+  expect(Array.from(new Set(
+    classRequests.filter((request) => request.search === '').map((request) => request.offset),
+  ))).toEqual([0, 10])
+
+  const classSearch = page.getByPlaceholder('Subject, section, day, room')
+  await classSearch.fill('Paged Class 05')
+  await expect(pagination).toContainText('Showing 1 of 1 class')
+  await expect(classItems).toHaveCount(1)
+  expect(classRequests.at(-1)).toMatchObject({ limit: 10, offset: 0, search: 'Paged Class 05' })
+
+  failNextClassPage = true
+  await classSearch.fill('PCLS')
+  await expect(pagination).toContainText('Showing 11 of 12 classes')
+  await classList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect(pagination.getByRole('button', { name: 'Retry loading more' })).toBeVisible()
+  await pagination.getByRole('button', { name: 'Retry loading more' }).click()
+  await expect(pagination).toContainText('Showing 12 of 12 classes')
+  expect(classRequests.filter((request) => request.search === 'PCLS').map((request) => request.offset))
+    .toEqual([0, 10, 10])
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileScrollMetrics = await classList.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    overflowY: window.getComputedStyle(element).overflowY,
+  }))
+  expect(mobileScrollMetrics.overflowY).toBe('auto')
+  expect(mobileScrollMetrics.clientHeight).toBeLessThanOrEqual(340)
+})
+
 test('creates and reopens an attendance-style class score sheet', async ({ page }) => {
   await openClasses(page)
   await selectClass(page, 'E2E101')

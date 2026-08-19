@@ -262,6 +262,42 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual([item['id'] for item in result_rows(response)], [own_schedule.id])
         self.assertNotIn(other_schedule.id, [item['id'] for item in result_rows(response)])
 
+    def test_schedule_list_pages_filtered_results_with_stable_offsets(self):
+        schedules = [
+            SubjectSchedule.objects.create(
+                subject=self.subject,
+                school_year_semester=self.term,
+                days='TU,TH',
+                start_time=time(13, 0),
+                end_time=time(14, 0),
+                section=f'Paged {index:02d}',
+            )
+            for index in range(12)
+        ]
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-list')
+        filters = {
+            'limit': 10,
+            'term': self.term.id,
+            'search': 'Paged',
+            'status': 'all',
+        }
+
+        first_page = self.client.get(url, {**filters, 'offset': 0})
+        second_page = self.client.get(url, {**filters, 'offset': 10})
+
+        self.assertEqual(first_page.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_page.status_code, status.HTTP_200_OK)
+        self.assertEqual(first_page.data['count'], 12)
+        self.assertEqual(first_page.data['next'], 10)
+        self.assertEqual(second_page.data['next'], None)
+        first_ids = [item['id'] for item in first_page.data['results']]
+        second_ids = [item['id'] for item in second_page.data['results']]
+        self.assertEqual(len(first_ids), 10)
+        self.assertEqual(len(second_ids), 2)
+        self.assertFalse(set(first_ids) & set(second_ids))
+        self.assertEqual(first_ids + second_ids, [schedule.id for schedule in schedules])
+
     def test_roster_action_pages_students_with_numeric_offsets(self):
         schedule = self.create_schedule()
         user_model = get_user_model()

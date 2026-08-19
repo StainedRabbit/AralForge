@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
-import { asArray } from '../../api'
 import { Icon } from '../../components/Icon'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
 import { ClassAttendanceDialog } from '../../components/admin/ClassAttendanceDialog'
@@ -13,7 +12,6 @@ import { ManageStudentModulesDialog } from '../../components/admin/ManageStudent
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   ApiPage,
-  ApiList,
   GradeCategory,
   GradeItem,
   Module,
@@ -28,6 +26,7 @@ import { cleanImportedPersonName } from '../../utils/importCleaning'
 import { fullName } from '../../utils/student'
 
 const AVAILABLE_STUDENT_LIMIT = 8
+const CLASS_PAGE_SIZE = 10
 const ROSTER_PAGE_SIZE = 10
 const ROSTER_EXPORT_PAGE_SIZE = 100
 const weekdays = [
@@ -139,20 +138,28 @@ export function AdminClassesPage({
     ? String(requestedWorkspaceSchedule.school_year_semester)
     : selectedTermId
   const queryClient = useQueryClient()
-  const scheduleListQuery = useQuery({
+  const scheduleListQuery = useInfiniteQuery({
+    initialPageParam: 0,
     queryKey: ['classes', queryTermId, query],
-    queryFn: () => {
-      const params = new URLSearchParams({ limit: '100', status: 'all' })
+    queryFn: ({ pageParam, signal }) => {
+      const params = new URLSearchParams({
+        limit: String(CLASS_PAGE_SIZE),
+        offset: String(pageParam),
+        status: 'all',
+      })
       if (queryTermId) params.set('term', queryTermId)
       if (query.trim()) params.set('search', query.trim())
-      return api<ApiList<SubjectSchedule>>(
+      return api<ApiPage<SubjectSchedule>>(
         `/subjects/subject-schedules/?${params.toString()}`,
+        { signal },
       )
     },
+    getNextPageParam: (lastPage) => lastPage.next ?? undefined,
+    retry: false,
   })
   const routeSchedules = scheduleListQuery.data
-    ? asArray(scheduleListQuery.data)
-    : data.schedules
+    ? uniqueSchedules(scheduleListQuery.data.pages.flatMap((page) => page.results))
+    : []
   const selectedSchedule =
     routeSchedules.find((schedule) => schedule.id === requestedScheduleId)
     ?? requestedWorkspaceSchedule
@@ -165,6 +172,14 @@ export function AdminClassesPage({
     query,
     effectiveTermId,
   )
+  const selectedScheduleMatchesFilters = selectedSchedule
+    ? filterSchedules([selectedSchedule], query, effectiveTermId).length > 0
+    : false
+  const finderSchedules = selectedScheduleMatchesFilters
+    ? uniqueSchedules([selectedSchedule!, ...visibleSchedules])
+    : visibleSchedules
+  const classCount = scheduleListQuery.data?.pages[0]?.count
+    ?? filterSchedules(data.schedules, query, effectiveTermId).length
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
 
   const refreshClasses = useCallback(async () => {
@@ -240,12 +255,26 @@ export function AdminClassesPage({
       <section className="classes-setup__grid">
         <div className="classes-setup__panel section-block">
           <SectionHeading
-            subtitle={`${visibleSchedules.length} class${visibleSchedules.length === 1 ? '' : 'es'}`}
+            subtitle={`${classCount} class${classCount === 1 ? '' : 'es'}`}
             title="Select Class"
           />
           <ClassFinder
+            classCount={classCount}
+            errorMessage={scheduleListQuery.isError ? toErrorMessage(scheduleListQuery.error) : ''}
+            hasNextPage={scheduleListQuery.hasNextPage}
+            isFetchingNextPage={scheduleListQuery.isFetchingNextPage}
+            isNextPageError={scheduleListQuery.isFetchNextPageError}
+            isPending={scheduleListQuery.isPending}
+            loadNextPage={() => void scheduleListQuery.fetchNextPage()}
             query={query}
-            schedules={visibleSchedules}
+            retry={() => {
+              if (scheduleListQuery.isFetchNextPageError) {
+                void scheduleListQuery.fetchNextPage()
+              } else {
+                void scheduleListQuery.refetch()
+              }
+            }}
+            schedules={finderSchedules}
             selectedSchedule={selectedSchedule}
             selectedTermId={effectiveTermId}
             setQuery={updateQuery}
@@ -283,7 +312,15 @@ export function AdminClassesPage({
 }
 
 function ClassFinder({
+  classCount,
+  errorMessage,
+  hasNextPage,
+  isFetchingNextPage,
+  isNextPageError,
+  isPending,
+  loadNextPage,
   query,
+  retry,
   schedules,
   selectedSchedule,
   selectedTermId,
@@ -292,7 +329,15 @@ function ClassFinder({
   setSelectedTermId,
   termOptions,
 }: {
+  classCount: number
+  errorMessage: string
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  isNextPageError: boolean
+  isPending: boolean
+  loadNextPage: () => void
   query: string
+  retry: () => void
   schedules: SubjectSchedule[]
   selectedSchedule: SubjectSchedule | null
   selectedTermId: string
@@ -301,6 +346,24 @@ function ClassFinder({
   setSelectedTermId: (value: string) => void
   termOptions: { label: string; value: number | string }[]
 }) {
+  const classListRef = useRef<HTMLDivElement>(null)
+  const classLoadMoreRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const root = classListRef.current
+    const target = classLoadMoreRef.current
+    if (!root || !target || !hasNextPage || isNextPageError) return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        loadNextPage()
+      }
+    }, { root, rootMargin: '0px 0px 160px' })
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [hasNextPage, isFetchingNextPage, isNextPageError, loadNextPage])
+
   return (
     <div className="class-finder">
       <div className="class-finder__filters">
@@ -332,7 +395,33 @@ function ClassFinder({
         </label>
       </div>
 
-      <div className="class-list">
+      <div
+        className="class-list"
+        ref={classListRef}
+        onScroll={(event) => {
+          const target = event.currentTarget
+          if (
+            target.scrollTop + target.clientHeight >= target.scrollHeight - 160
+            && hasNextPage
+            && !isFetchingNextPage
+            && !isNextPageError
+          ) {
+            loadNextPage()
+          }
+        }}
+      >
+        {errorMessage && !isNextPageError ? (
+          <div className="class-list__feedback" role="alert">
+            <span>{errorMessage}</span>
+            <button
+              className="button button--secondary button--compact"
+              onClick={retry}
+              type="button"
+            >
+              Retry classes
+            </button>
+          </div>
+        ) : null}
         {schedules.map((schedule) => (
           <button
             className={
@@ -355,8 +444,37 @@ function ClassFinder({
             </small>
           </button>
         ))}
-        {!schedules.length ? (
+        {isPending && !schedules.length ? (
+          <p className="admin-empty-line">Loading classes...</p>
+        ) : null}
+        {!isPending && !errorMessage && !schedules.length ? (
           <p className="admin-empty-line">No classes found.</p>
+        ) : null}
+        {schedules.length ? (
+          <div className="class-list__pagination" ref={classLoadMoreRef}>
+            <span aria-live="polite">
+              Showing {schedules.length} of {classCount} class{classCount === 1 ? '' : 'es'}
+            </span>
+            {hasNextPage && !isNextPageError ? (
+              <button
+                className="button button--secondary button--compact"
+                disabled={isFetchingNextPage}
+                onClick={loadNextPage}
+                type="button"
+              >
+                {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+              </button>
+            ) : null}
+            {isNextPageError ? (
+              <button
+                className="button button--secondary button--compact"
+                onClick={retry}
+                type="button"
+              >
+                Retry loading more
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -2155,6 +2273,12 @@ function filterSchedules(
     `${schedule.subject_code} ${schedule.subject_name} ${schedule.section} ${schedule.days} ${schedule.room} ${schedule.term_name}`
       .toLowerCase()
       .includes(normalizedQuery),
+  )
+}
+
+function uniqueSchedules(schedules: SubjectSchedule[]) {
+  return Array.from(
+    new Map(schedules.map((schedule) => [schedule.id, schedule])).values(),
   )
 }
 
