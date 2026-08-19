@@ -56,7 +56,13 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_admin_teacher:
             queryset = queryset.filter(students__student=self.request.user).distinct()
 
-        return queryset
+        return queryset.order_by(
+            'school_year_semester_id',
+            'subject__code',
+            'days',
+            'start_time',
+            'pk',
+        )
 
     def get_queryset(self):
         queryset = self.get_base_queryset()
