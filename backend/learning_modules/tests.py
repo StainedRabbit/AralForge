@@ -1777,7 +1777,7 @@ class PrintablePdfApiTests(APITestCase):
                     b''.join(response.streaming_content),
                     b'%PDF-1.4 saved lesson',
                 )
-                response.close()
+                self.assertTrue(response.closed)
 
     def test_student_download_does_not_regenerate_outdated_existing_pdf(self):
         with tempfile.TemporaryDirectory() as media_root:
@@ -1808,7 +1808,7 @@ class PrintablePdfApiTests(APITestCase):
                     b''.join(response.streaming_content),
                     b'%PDF-1.4 old lesson',
                 )
-                response.close()
+                self.assertTrue(response.closed)
 
     def test_student_download_generates_once_when_published_pdf_missing(self):
         with tempfile.TemporaryDirectory() as media_root:
@@ -1832,7 +1832,7 @@ class PrintablePdfApiTests(APITestCase):
 
                 self.assertEqual(response.status_code, 200)
                 b''.join(response.streaming_content)
-                response.close()
+                self.assertTrue(response.closed)
                 self.assertEqual(generate_lesson_pdf.call_count, 1)
                 self.lesson.refresh_from_db()
                 self.assertTrue(self.lesson.pdf_file)
