@@ -1571,6 +1571,32 @@ class PrintablePdfApiTests(APITestCase):
         lesson.save(update_fields=['pdf_file', 'pdf_generated_at', 'pdf_is_outdated'])
         return lesson
 
+    def test_published_module_pdf_generation_runs_after_commit(self):
+        with patch('learning_modules.models.safe_generate_module_pdf') as generate_pdf:
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                module = Module.objects.create(
+                    title='Deferred Printable Module',
+                    slug='deferred-printable-module',
+                    is_published=True,
+                )
+                generate_pdf.assert_not_called()
+
+            self.assertEqual(len(callbacks), 1)
+            generate_pdf.assert_called_once_with(module)
+
+    def test_published_lesson_pdf_generation_runs_after_commit(self):
+        with patch('learning_modules.models.safe_generate_lesson_pdf') as generate_pdf:
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                lesson = ModuleLesson.objects.create(
+                    topic=self.topic,
+                    title='Deferred Printable Lesson',
+                    is_published=True,
+                )
+                generate_pdf.assert_not_called()
+
+            self.assertEqual(len(callbacks), 1)
+            generate_pdf.assert_called_once_with(lesson)
+
     def test_printable_lesson_sections_exclude_removed_fields(self):
         from learning_modules.services.pdf_generation import lesson_context
 
