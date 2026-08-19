@@ -243,7 +243,7 @@ class GradeItemViewSet(viewsets.ModelViewSet):
     def score_sheet(self, request):
         require_teacher(request)
         schedule = get_object_or_404(
-            SubjectSchedule.objects.select_for_update().select_related('subject'),
+            SubjectSchedule.objects.select_for_update(of=('self',)).select_related('subject'),
             pk=request.data.get('schedule'),
         )
         if not schedule.is_active:
@@ -285,7 +285,7 @@ class GradeItemViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError({'schedule': 'Archived or unassigned classes cannot record scores.'})
             if item.source_type != 'MANUAL':
                 raise serializers.ValidationError({'source_type': 'Only manual score sheets can be edited here.'})
-            SubjectSchedule.objects.select_for_update().get(pk=item.schedule_id)
+            SubjectSchedule.objects.select_for_update(of=('self',)).get(pk=item.schedule_id)
             save_score_sheet_roster(item, request.data.get('records'))
             item.refresh_from_db()
         return Response(score_sheet_payload(item))
@@ -344,7 +344,7 @@ def validate_main_activity_assignments(activity, assignments):
 
     schedules = {
         schedule.id: schedule
-        for schedule in SubjectSchedule.objects.select_for_update().select_related('subject').filter(pk__in=schedule_ids)
+        for schedule in SubjectSchedule.objects.select_for_update(of=('self',)).select_related('subject').filter(pk__in=schedule_ids)
     }
     categories = {
         category.id: category
@@ -374,7 +374,7 @@ def validate_main_activity_assignments(activity, assignments):
         linked_items = []
         if schedule:
             linked_items = list(
-                GradeItem.objects.select_for_update().filter(
+                GradeItem.objects.select_for_update(of=('self',)).filter(
                     schedule=schedule,
                     module_activity=activity,
                 )
@@ -395,7 +395,7 @@ def active_score_roster(item):
     if not item.schedule_id:
         return []
     return list(
-        ScheduleStudent.objects.select_for_update()
+        ScheduleStudent.objects.select_for_update(of=('self',))
         .select_related('student', 'student__student_profile')
         .filter(schedule=item.schedule, is_active=True)
         .order_by('student__last_name', 'student__first_name', 'student_id')

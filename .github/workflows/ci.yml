@@ -111,7 +111,7 @@ jobs:
       - name: Start image
         run: docker run --detach --name ezoryx-ci --publish 8000:10000 --env DEBUG=True ezoryx-ci
       - name: Verify container health
-        run: curl --fail --retry 20 --retry-delay 2 --retry-connrefused http://127.0.0.1:8000/api/health/
+        run: curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8000/api/health/
       - name: Print logs on failure
         if: failure()
         run: docker logs ezoryx-ci
