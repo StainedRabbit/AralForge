@@ -2,7 +2,7 @@ import calendar
 
 from django.conf import settings
 from django.core.validators import FileExtensionValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -78,7 +78,10 @@ class Module(models.Model):
             and not self.pdf_file
             and (not previous or not previous['is_published'])
         ):
-            safe_generate_module_pdf(self)
+            transaction.on_commit(
+                lambda: safe_generate_module_pdf(self),
+                using=self._state.db,
+            )
 
 
 class ModuleTopic(models.Model):
@@ -258,7 +261,10 @@ class ModuleLesson(models.Model):
                 or previous_is_published != self.is_published
             )
         ):
-            safe_generate_lesson_pdf(self)
+            transaction.on_commit(
+                lambda: safe_generate_lesson_pdf(self),
+                using=self._state.db,
+            )
 
     def delete(self, *args, **kwargs):
         topic = self.topic

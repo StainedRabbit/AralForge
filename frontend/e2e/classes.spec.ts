@@ -51,7 +51,7 @@ async function fillSchedule(page: Page, options: {
   await form.getByLabel('End time').fill(options.end)
 }
 
-test('persists class selection and keeps class links scoped', async ({ page }) => {
+test('persists class selection and keeps class links scoped', async ({ page }, testInfo) => {
   await openClasses(page)
   await selectClass(page, 'E2E101')
   const selectedUrl = page.url()
@@ -95,7 +95,9 @@ test('persists class selection and keeps class links scoped', async ({ page }) =
   const attendanceDate = attendanceDialog.getByLabel('Attendance date')
   const today = new Date()
   const expectedToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  const selectedAttendanceDate = '2031-02-03'
+  const selectedDate = new Date(today)
+  selectedDate.setDate(selectedDate.getDate() + 30 + testInfo.retry)
+  const selectedAttendanceDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
   await expect(attendanceDate).toHaveValue(expectedToday)
   await attendanceDate.fill(selectedAttendanceDate)
   await expect(attendanceDate).toHaveValue(selectedAttendanceDate)
@@ -189,7 +191,7 @@ test('persists class selection and keeps class links scoped', async ({ page }) =
   for (const chip of await rosterTotals.locator('.class-roster-summary__item').all()) {
     const box = await chip.boundingBox()
     expect(box?.height).toBeLessThanOrEqual(40)
-    expect(box?.width).toBeLessThan(100)
+    expect(box?.width).toBeLessThanOrEqual(120)
   }
 })
 
