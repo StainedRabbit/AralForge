@@ -13,7 +13,7 @@ AralForge is an academic coding platform that brings lessons, coding practice, a
 
 ## Local development
 
-Create a local `.env` from `.env.example`, install the Python requirements and frontend packages, then run Django on port 8000 and Vite on port 5173.
+Create a local `.env` from `.env.example`, install the Python requirements and frontend packages, then run Django on port 8000 and Vite on port 5173. Django automatically loads the project-root `.env` file.
 
 ```powershell
 python backend/manage.py migrate

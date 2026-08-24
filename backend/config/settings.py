@@ -4,6 +4,37 @@ from urllib.parse import parse_qsl, urlparse
 from pathlib import Path
 
 
+# Keep local development configuration in the ignored project-root .env file.
+# Hosted environments do not include this file and continue to use platform
+# environment variables.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def load_env_file(path):
+    if not path.is_file():
+        return
+
+    for raw_line in path.read_text(encoding='utf-8-sig').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('export '):
+            line = line[7:].lstrip()
+
+        name, separator, value = line.partition('=')
+        name = name.strip()
+        if not separator or not name or not name.replace('_', '').isalnum():
+            continue
+
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[name] = value
+
+
+load_env_file(BASE_DIR.parent / '.env')
+
+
 def env_bool(name, default=False):
     value = os.getenv(name)
 
@@ -60,10 +91,6 @@ def require_production_values(names):
             'Missing required production environment variables: '
             + ', '.join(sorted(missing))
         )
-
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
