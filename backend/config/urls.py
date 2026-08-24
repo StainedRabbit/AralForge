@@ -20,13 +20,17 @@ from django.conf.urls.static import static
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.auth import CompletePasswordSetupView, EzoryxTokenObtainPairView
+from accounts.auth import AralForgeTokenObtainPairView, CompletePasswordSetupView
 from config.health import health_check
+
+admin.site.site_header = 'AralForge administration'
+admin.site.site_title = 'AralForge admin'
+admin.site.index_title = 'AralForge management'
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='health-check'),
-    path('api/auth/token/', EzoryxTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/auth/token/', AralForgeTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/complete-password-setup/', CompletePasswordSetupView.as_view(), name='complete_password_setup'),
     path('api/accounts/', include('accounts.urls')),

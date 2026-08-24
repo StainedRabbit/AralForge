@@ -5,12 +5,12 @@ from .models import StudentProfile, User
 
 
 @admin.register(User)
-class EzoryxUserAdmin(UserAdmin):
+class AralForgeUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
-        ('Ezoryx', {'fields': ('role', 'must_change_password')}),
+        ('AralForge', {'fields': ('role', 'must_change_password')}),
     )
     add_fieldsets = UserAdmin.add_fieldsets + (
-        ('Ezoryx', {'fields': ('role', 'must_change_password')}),
+        ('AralForge', {'fields': ('role', 'must_change_password')}),
     )
     list_display = (
         'username',

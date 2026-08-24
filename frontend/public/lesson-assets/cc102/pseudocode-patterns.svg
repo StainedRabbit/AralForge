@@ -15,9 +15,9 @@
   <text x="120" y="535" fill="#f8fafc" font-family="Consolas, monospace" font-size="26">END IF</text>
   <text x="120" y="580" fill="#f8fafc" font-family="Consolas, monospace" font-size="26">END</text>
   <g font-family="Arial, sans-serif">
-    <rect x="670" y="145" width="370" height="58" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <rect x="670" y="145" width="370" height="58" rx="8" fill="#ffedd5" stroke="#c2410c" stroke-width="3"/>
     <text x="700" y="183" fill="#0f172a" font-size="24" font-weight="700">INPUT means receive data</text>
-    <rect x="670" y="230" width="370" height="58" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="3"/>
+    <rect x="670" y="230" width="370" height="58" rx="8" fill="#fef3c7" stroke="#92400e" stroke-width="3"/>
     <text x="700" y="268" fill="#0f172a" font-size="24" font-weight="700">SET means compute or store</text>
     <rect x="670" y="315" width="370" height="58" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
     <text x="700" y="353" fill="#0f172a" font-size="24" font-weight="700">DISPLAY means show output</text>

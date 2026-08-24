@@ -1,9 +1,12 @@
+import { isJsonObject, migrateStorageValue } from './storageMigration'
+
 type StoredDraft<TDraft> = {
   savedAt: string
   value: TDraft
 }
 
-const DRAFT_PREFIX = 'ezoryx:lesson-draft:v2'
+const DRAFT_PREFIX = 'aralforge:lesson-draft:v2'
+const LEGACY_DRAFT_PREFIX = 'ezoryx:lesson-draft:v2'
 
 export function lessonDraftKey({
   lessonId,
@@ -19,7 +22,11 @@ export function lessonDraftKey({
 
 export function readLessonDraft<TDraft>(key: string): StoredDraft<TDraft> | null {
   try {
-    const value = window.localStorage.getItem(key)
+    const value = migrateStorageValue(
+      key,
+      key.replace(DRAFT_PREFIX, LEGACY_DRAFT_PREFIX),
+      isJsonObject,
+    )
     return value ? JSON.parse(value) as StoredDraft<TDraft> : null
   } catch {
     return null

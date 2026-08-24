@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import type { AuthedRequest } from '../../app/types'
 import { toErrorMessage } from '../../utils/format'
@@ -73,6 +73,7 @@ export function AdminResourcePanel<TItem extends { id: number }>({
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
 
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -98,6 +99,12 @@ export function AdminResourcePanel<TItem extends { id: number }>({
     setEditing(item)
     setDraft(createDraft(fields, item))
     setMessage('')
+    window.requestAnimationFrame(() => {
+      const form = formRef.current
+      form?.scrollIntoView({ block: 'start' })
+      form?.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')
+        ?.focus({ preventScroll: true })
+    })
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -111,8 +118,9 @@ export function AdminResourcePanel<TItem extends { id: number }>({
         body: payload instanceof FormData ? payload : JSON.stringify(payload),
         method: editing ? 'PATCH' : 'POST',
       })
+      setEditing(null)
+      setDraft(createDraft(fields))
       setMessage(`${noun} saved.`)
-      resetForm()
       await onRefresh()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -149,12 +157,12 @@ export function AdminResourcePanel<TItem extends { id: number }>({
       />
 
       <div className="admin-resource__grid">
-        <form className="admin-form" onSubmit={submitForm}>
+        <form className="admin-form" onSubmit={submitForm} ref={formRef}>
           <div className="admin-form__header">
             <strong>{editing ? `Edit ${noun}` : `New ${noun}`}</strong>
             {editing ? (
               <button
-                className="button button--ghost"
+                className="button button--secondary"
                 onClick={resetForm}
                 type="button"
               >
@@ -216,6 +224,7 @@ export function AdminResourcePanel<TItem extends { id: number }>({
                     <td>
                       <div className="admin-table__actions">
                         <button
+                          aria-label={`Edit ${noun}`}
                           className="icon-button"
                           onClick={() => editItem(item)}
                           title="Edit"

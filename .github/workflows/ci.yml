@@ -17,13 +17,13 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: ezoryx_ci
-          POSTGRES_USER: ezoryx
-          POSTGRES_PASSWORD: ezoryx-ci-password
+          POSTGRES_DB: aralforge_ci
+          POSTGRES_USER: aralforge
+          POSTGRES_PASSWORD: aralforge-ci-password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U ezoryx -d ezoryx_ci"
+          --health-cmd "pg_isready -U aralforge -d aralforge_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -31,7 +31,7 @@ jobs:
       run:
         working-directory: backend
     env:
-      DATABASE_URL: postgresql://ezoryx:ezoryx-ci-password@127.0.0.1:5432/ezoryx_ci
+      DATABASE_URL: postgresql://aralforge:aralforge-ci-password@127.0.0.1:5432/aralforge_ci
       SECRET_KEY: 'zB7!qT2@L9#nR4$vX8%kM3^pH6&cJ1*wF5-yU0_gS9+aD2=eN7!rK4@xP8#tV3'
     steps:
       - uses: actions/checkout@v4
@@ -107,11 +107,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build production image
-        run: docker build --tag ezoryx-ci .
+        run: docker build --tag aralforge-ci .
       - name: Start image
-        run: docker run --detach --name ezoryx-ci --publish 8000:10000 --env DEBUG=True ezoryx-ci
+        run: docker run --detach --name aralforge-ci --publish 8000:10000 --env DEBUG=True aralforge-ci
       - name: Verify container health
         run: curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8000/api/health/
       - name: Print logs on failure
         if: failure()
-        run: docker logs ezoryx-ci
+        run: docker logs aralforge-ci

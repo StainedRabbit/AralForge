@@ -17,6 +17,7 @@ import { toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 import { SectionHeading } from '../ui'
 import { queryKeys } from '../../queries/queryKeys'
+import { isJsonObject, migrateStorageValue } from '../../utils/storageMigration'
 
 type QuestionDraft = {
   id: string
@@ -117,8 +118,12 @@ export function MainActivityEditor({
     () => createQuestionDrafts(data, activity),
     [activity, data],
   )
-  const recoveryKey = `ezoryx.main-activity-draft.${lesson.id}`
-  const recoveredDraft = useMemo(() => readRecoveredDraft(recoveryKey), [recoveryKey])
+  const recoveryKey = `aralforge.main-activity-draft.${lesson.id}`
+  const legacyRecoveryKey = `ezoryx.main-activity-draft.${lesson.id}`
+  const recoveredDraft = useMemo(
+    () => readRecoveredDraft(recoveryKey, legacyRecoveryKey),
+    [legacyRecoveryKey, recoveryKey],
+  )
   const [title, setTitle] = useState(recoveredDraft?.title ?? activity?.title ?? 'Main Activity')
   const [instructions, setInstructions] = useState(recoveredDraft?.instructions ?? activity?.instructions ?? '')
   const [maxAttempts, setMaxAttempts] = useState(recoveredDraft?.maxAttempts ?? String(activity?.max_attempts ?? 3))
@@ -1293,9 +1298,9 @@ function fromLocalDateTime(value: string) {
   return value ? new Date(value).toISOString() : null
 }
 
-function readRecoveredDraft(key: string): RecoveredEditorDraft | null {
+function readRecoveredDraft(key: string, legacyKey: string): RecoveredEditorDraft | null {
   try {
-    const value = window.localStorage.getItem(key)
+    const value = migrateStorageValue(key, legacyKey, isJsonObject)
     return value ? JSON.parse(value) as RecoveredEditorDraft : null
   } catch {
     return null

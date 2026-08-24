@@ -131,7 +131,11 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      <Icon name={icon} />
+      <span className="empty-state__visual" aria-hidden="true">
+        <span className="empty-state__spark empty-state__spark--one" />
+        <span className="empty-state__spark empty-state__spark--two" />
+        <Icon name={icon} />
+      </span>
       <strong>{title}</strong>
       <p>{message}</p>
     </div>
@@ -141,7 +145,11 @@ export function EmptyState({
 export function NotFoundState({ message, to }: { message: string; to: string }) {
   return (
     <div className="empty-state empty-state--large">
-      <Icon name="warning" />
+      <span className="empty-state__visual" aria-hidden="true">
+        <span className="empty-state__spark empty-state__spark--one" />
+        <span className="empty-state__spark empty-state__spark--two" />
+        <Icon name="warning" />
+      </span>
       <strong>Nothing to show here</strong>
       <p>{message}</p>
       <Link className="button button--secondary" to={to}>

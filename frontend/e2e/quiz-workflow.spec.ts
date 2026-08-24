@@ -13,7 +13,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await signIn(page)
 
   const target = await page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('ezoryx.session') ?? '{}') as { access?: string }
+    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
     const headers = { Authorization: `Bearer ${session.access}` }
     const load = async (path: string) => {
       const rows = []

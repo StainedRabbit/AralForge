@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { completePasswordSetup, getApiBaseUrl, login as loginRequest } from '../api'
 import type { Session } from '../api'
-import heroImage from '../assets/academic-dashboard.webp'
+import loginIllustration from '../assets/aralforge-login-illustration.jpg'
 import { BrandMark } from '../components/navigation'
 import { Icon } from '../components/Icon'
 import { toErrorMessage } from '../utils/format'
@@ -56,28 +56,17 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
 
   return (
     <main className="login-page">
-      <section className="login-visual" aria-label="Ezoryx preview">
-        <img src={heroImage} alt="" decoding="async" fetchPriority="high" height="640" width="1280" />
+      <section className="login-visual" aria-label="AralForge preview">
+        <img
+          src={loginIllustration}
+          alt="A warmly lit programming workspace with a laptop, desk lamp, books, and an open notebook."
+          decoding="async"
+          fetchPriority="high"
+          height="1024"
+          width="1536"
+        />
         <div className="login-visual__content">
-          <BrandMark />
-          <div>
-            <p className="eyebrow">Academic coding platform</p>
-            <h1>Learn, build, submit, and track progress in one place.</h1>
-          </div>
-          <div className="login-proof-grid" aria-label="Platform highlights">
-            <div>
-              <strong>Modules</strong>
-              <span>Lessons and activities</span>
-            </div>
-            <div>
-              <strong>Coding</strong>
-              <span>Blank-based practice</span>
-            </div>
-            <div>
-              <strong>Grades</strong>
-              <span>Progress visibility</span>
-            </div>
-          </div>
+          <BrandMark inverted />
         </div>
       </section>
 
@@ -86,10 +75,10 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
           <BrandMark compact />
           <div>
             <p className="eyebrow">Welcome back</p>
-            <h2>{passwordSetupToken ? 'Create your password' : 'Sign in to Ezoryx'}</h2>
+            <h2>{passwordSetupToken ? 'Create your password' : 'Sign in to AralForge'}</h2>
             <p className="muted">
               {passwordSetupToken
-                ? 'Replace your temporary password before continuing to Ezoryx.'
+                ? 'Replace your temporary password before continuing to AralForge.'
                 : 'Use your username or student number.'}
             </p>
           </div>

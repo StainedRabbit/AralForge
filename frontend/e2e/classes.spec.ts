@@ -195,6 +195,26 @@ test('persists class selection and keeps class links scoped', async ({ page }, t
   }
 })
 
+test('opens the selected class subject module from the roster actions', async ({ page }) => {
+  await openClasses(page)
+
+  await selectClass(page, 'E2E101')
+  await expect(
+    page.getByRole('button', {
+      name: 'Open Module unavailable: no module is linked to this subject',
+    }),
+  ).toBeDisabled()
+
+  await selectClass(page, 'E2E102')
+  const openModuleLink = page.getByRole('link', { name: 'Open Module' })
+  const moduleHref = await openModuleLink.getAttribute('href')
+  expect(moduleHref).toMatch(/^\/admin\/modules\?subject=\d+$/)
+
+  await openModuleLink.click()
+  await expect(page).toHaveURL(/\/admin\/modules\?subject=\d+/)
+  await expect(page.getByText('Resume Basics', { exact: true }).first()).toBeVisible()
+})
+
 test('loads the roster ten students at a time and exports the complete filtered list', async ({ page }) => {
   const rosterRequests: Array<{ limit: number; offset: number; search: string; status: string }> = []
   const students = Array.from({ length: 12 }, (_, index) => ({
@@ -376,21 +396,36 @@ test('loads the Select Class list ten classes at a time inside its panel', async
   await expect(pagination).toContainText('Showing 10 of 12 classes')
   expect(classRequests[0]).toMatchObject({ limit: 10, offset: 0, search: '' })
 
-  const desktopScrollMetrics = await classList.evaluate((element) => {
-    const styles = window.getComputedStyle(element)
-    return {
-      clientHeight: element.clientHeight,
-      overflowY: styles.overflowY,
-      scrollHeight: element.scrollHeight,
-    }
-  })
-  expect(desktopScrollMetrics.overflowY).toBe('auto')
-  expect(desktopScrollMetrics.clientHeight).toBeLessThanOrEqual(440)
-  expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
-
   await page.goto('/admin/classes?schedule=9012')
   await expect(classList.locator('.class-list__item.active')).toContainText('PCLS12')
   await expect(classItems).toHaveCount(11)
+
+  const desktopScrollMetrics = await classList.evaluate((element) => {
+    const finderPanel = element.closest<HTMLElement>('.classes-setup__panel--finder')
+    const setupPanel = finderPanel?.parentElement?.querySelector<HTMLElement>(
+      '.classes-setup__panel:not(.classes-setup__panel--finder)',
+    )
+    const scheduleForm = setupPanel?.querySelector<HTMLElement>('.class-form')
+    if (!finderPanel || !setupPanel || !scheduleForm) throw new Error('Classes setup layout is missing.')
+
+    const styles = window.getComputedStyle(element)
+    const listRect = element.getBoundingClientRect()
+    const scheduleFormRect = scheduleForm.getBoundingClientRect()
+    return {
+      clientHeight: element.clientHeight,
+      finderPanelHeight: finderPanel.getBoundingClientRect().height,
+      listBottom: listRect.bottom,
+      overflowY: styles.overflowY,
+      scheduleFormBottom: scheduleFormRect.bottom,
+      scrollHeight: element.scrollHeight,
+      setupPanelHeight: setupPanel.getBoundingClientRect().height,
+    }
+  })
+  expect(desktopScrollMetrics.overflowY).toBe('auto')
+  expect(desktopScrollMetrics.finderPanelHeight).toBeCloseTo(desktopScrollMetrics.setupPanelHeight, 0)
+  expect(Math.abs(desktopScrollMetrics.listBottom - desktopScrollMetrics.scheduleFormBottom))
+    .toBeLessThanOrEqual(1)
+  expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
 
   await classList.evaluate((element) => {
     element.scrollTop = element.scrollHeight

@@ -2548,7 +2548,7 @@
   "model": "grades.gradingtemplate",
   "pk": 1,
   "fields": {
-    "name": "Standard Ezoryx Grading",
+      "name": "Standard AralForge Grading",
     "description": "Default grading setup for prelim, midterm, prefinal, and final periods.",
     "is_default": true,
     "created_at": "2026-05-23T03:21:54.230Z"

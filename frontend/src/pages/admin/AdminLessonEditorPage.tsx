@@ -1615,7 +1615,7 @@ function LessonImportModal({
                 value={text}
               />
               <small>
-                Local paths in Markdown are okay. Ezoryx matches them by filename, but you still need to upload the image files.
+                Local paths in Markdown are okay. AralForge matches them by filename, but you still need to upload the image files.
               </small>
             </label>
             {!canUploadAssets && imageReferences.length ? (

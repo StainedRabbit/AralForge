@@ -5,7 +5,7 @@
   <text x="60" y="72" fill="#0f172a" font-family="Arial, sans-serif" font-size="38" font-weight="700">Trace Java Operators Before Running</text>
   <rect x="80" y="125" width="1040" height="430" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
   <g font-family="Arial, sans-serif" font-size="24">
-    <rect x="80" y="125" width="1040" height="70" fill="#dbeafe"/>
+    <rect x="80" y="125" width="1040" height="70" fill="#ffedd5"/>
     <text x="130" y="170" fill="#0f172a" font-weight="700">Expression</text>
     <text x="470" y="170" fill="#0f172a" font-weight="700">Substitute Values</text>
     <text x="820" y="170" fill="#0f172a" font-weight="700">Result</text>

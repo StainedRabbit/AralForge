@@ -26,12 +26,12 @@ COPY backend ./backend
 COPY frontend/public/lesson-assets ./frontend/public/lesson-assets
 
 RUN SECRET_KEY=django-build-only DEBUG=True python backend/manage.py collectstatic --noinput \
-    && addgroup --system ezoryx \
-    && adduser --system --ingroup ezoryx --home /app ezoryx \
-    && chown -R ezoryx:ezoryx /app
+    && addgroup --system aralforge \
+    && adduser --system --ingroup aralforge --home /app aralforge \
+    && chown -R aralforge:aralforge /app
 
 WORKDIR /app/backend
-USER ezoryx
+USER aralforge
 
 EXPOSE 10000
 

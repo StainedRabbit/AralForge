@@ -51,7 +51,7 @@ def percentile(values, percentile_value):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Exercise authenticated Ezoryx read endpoints.')
+    parser = argparse.ArgumentParser(description='Exercise authenticated AralForge read endpoints.')
     parser.add_argument('--base-url', required=True, help='API root, for example https://staging.example.com/api/')
     parser.add_argument('--username', required=True)
     parser.add_argument('--password', required=True)

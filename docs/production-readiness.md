@@ -1,6 +1,6 @@
-# Ezoryx Production Runbook
+# AralForge Production Runbook
 
-Ezoryx deploys as two isolated environments:
+AralForge deploys as two isolated environments:
 
 - `main` deploys staging: Vercel frontend, paid Render API, Supabase PostgreSQL, and private Supabase Storage.
 - `production` deploys production with separate services, database, bucket, and secrets.
@@ -32,7 +32,7 @@ Never place production values in `.env`, GitHub Actions, fixtures, screenshots, 
 Before migration, stop writes to the SQLite source and create an off-repository backup:
 
 ```powershell
-powershell -File scripts/backup-sqlite.ps1 -BackupDir "D:\secure\ezoryx-cutover"
+powershell -File scripts/backup-sqlite.ps1 -BackupDir "D:\secure\aralforge-cutover"
 ```
 
 Create the migration fixture outside the repository. Exclude sessions, admin logs, content types, and permissions:
@@ -47,14 +47,14 @@ python manage.py dumpdata `
   --exclude sessions.session `
   --exclude admin.logentry `
   --indent 2 `
-  --output "D:\secure\ezoryx-cutover\data-export.json"
+  --output "D:\secure\aralforge-cutover\data-export.json"
 ```
 
 Encrypt the backup directory with the organization-approved encryption tool before transferring it. Record SHA-256 hashes and never commit the artifacts.
 
 ## Staging migration
 
-1. Create the staging Supabase project and private `ezoryx-media-staging` bucket. Enable the S3 protocol and generate server-only keys.
+1. Create the staging Supabase project and private `aralforge-media-staging` bucket. Enable the S3 protocol and generate server-only keys.
 2. Apply the Render Blueprint and provide every `sync: false` value.
 3. Run migrations and import the off-repository fixture:
 
@@ -103,7 +103,7 @@ Encrypt the backup directory with the organization-approved encryption tool befo
 ## Production promotion and rollback
 
 1. Freeze source writes and repeat the encrypted database/media backups.
-2. Import the final data into the separate production Supabase project and private `ezoryx-media-production` bucket.
+2. Import the final data into the separate production Supabase project and private `aralforge-media-production` bucket.
 3. Run media verification and credential rotation before exposing the frontend.
 4. Push only the validated commit to `production`, then run the health, login, authorization, upload, PDF, grades, and attendance smoke tests.
 5. Keep the previous application commit, database backup/PITR point, and independent media backup. Supabase Storage does not provide S3 object versioning.

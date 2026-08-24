@@ -8,7 +8,7 @@
       size: A4;
       margin: 18mm 16mm 20mm;
       @bottom-center {
-        color: #6b7280;
+        color: #64748b;
         content: "Page " counter(page) " of " counter(pages);
         font-size: 9pt;
       }
@@ -19,7 +19,7 @@
     }
 
     body {
-      color: #1f2937;
+      color: #1e293b;
       font-family: Arial, Helvetica, sans-serif;
       font-size: 11pt;
       line-height: 1.45;
@@ -34,28 +34,28 @@
     }
 
     h1 {
-      color: #111827;
+      color: #0b1f3a;
       font-size: 24pt;
       line-height: 1.15;
       margin-top: 6mm;
     }
 
     h2 {
-      border-bottom: 1px solid #d1d5db;
-      color: #111827;
+      border-bottom: 1px solid #e2e8f0;
+      color: #0b1f3a;
       font-size: 16pt;
       margin: 11mm 0 4mm;
       padding-bottom: 2mm;
     }
 
     h3 {
-      color: #111827;
+      color: #0b1f3a;
       font-size: 13pt;
       margin: 6mm 0 2mm;
     }
 
     h4 {
-      color: #374151;
+      color: #1e293b;
       font-size: 11pt;
       margin: 4mm 0 1.5mm;
     }
@@ -75,7 +75,7 @@
     }
 
     a {
-      color: #1d4ed8;
+      color: #9c3706;
       text-decoration: none;
     }
 
@@ -85,9 +85,11 @@
     }
 
     pre {
-      background: #f3f4f6;
-      border: 1px solid #e5e7eb;
+      background: #07182d;
+      border: 1px solid #17365f;
+      border-top: 2px solid #e86a17;
       border-radius: 3mm;
+      color: #e6edf6;
       font-size: 9pt;
       overflow-wrap: anywhere;
       padding: 3mm;
@@ -122,7 +124,7 @@
     }
 
     figcaption {
-      color: #6b7280;
+      color: #64748b;
       font-size: 9pt;
       font-weight: 700;
       margin-top: 1.5mm;
@@ -130,25 +132,26 @@
 
     th,
     td {
-      border: 1px solid #d1d5db;
+      border: 1px solid #cbd5e1;
       padding: 2mm;
       vertical-align: top;
     }
 
     th {
-      background: #f3f4f6;
-      color: #111827;
+      background: #f2b544;
+      color: #0b1f3a;
       font-weight: 700;
     }
 
     .cover {
-      border-bottom: 2px solid #111827;
+      border-bottom: 3px solid #e86a17;
+      background: #faf8f3;
       margin-bottom: 8mm;
-      padding-bottom: 7mm;
+      padding: 6mm 7mm 7mm;
     }
 
     .eyebrow {
-      color: #4b5563;
+      color: #9c3706;
       font-size: 9pt;
       font-weight: 700;
       letter-spacing: 0.08em;
@@ -156,7 +159,7 @@
     }
 
     .generated {
-      color: #6b7280;
+      color: #64748b;
       font-size: 9pt;
       margin-top: 3mm;
     }
@@ -167,14 +170,14 @@
     }
 
     .lesson {
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid #e2e8f0;
       margin-top: 7mm;
       padding-top: 4mm;
     }
 
     .lesson-meta,
     .activity-meta {
-      color: #6b7280;
+      color: #64748b;
       font-size: 9pt;
       font-weight: 700;
       margin-bottom: 2mm;
@@ -183,8 +186,8 @@
 
     .example,
     .activity {
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
+      background: #faf8f3;
+      border: 1px solid #e2e8f0;
       border-radius: 3mm;
       break-inside: avoid;
       margin: 3mm 0;
@@ -192,7 +195,7 @@
     }
 
     .activity-question {
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid #e2e8f0;
       margin-top: 3mm;
       padding-top: 3mm;
     }
@@ -203,7 +206,7 @@
     }
 
     .activity-question__type {
-      color: #6b7280;
+      color: #64748b;
       font-size: 9pt;
       font-weight: 700;
       text-transform: uppercase;
@@ -234,7 +237,7 @@
 
     .print-choice-box,
     .print-rank-box {
-      border: 1px solid #6b7280;
+      border: 1px solid #64748b;
       display: inline-block;
       flex: 0 0 auto;
       height: 5mm;
@@ -265,9 +268,10 @@
     }
 
     .note {
-      border-left: 3px solid #9ca3af;
+      border-left: 3px solid #f2b544;
+      background: #fff6db;
       margin-top: 2.5mm;
-      padding-left: 3mm;
+      padding: 2.5mm 3mm;
     }
 
     .section-body > * + * {
@@ -275,8 +279,8 @@
     }
 
     .pdf-missing-media {
-      background: #fef3c7;
-      border: 1px solid #f59e0b;
+      background: #fff4d6;
+      border: 1px solid #f2b544;
       border-radius: 2mm;
       color: #78350f;
       font-size: 9pt;

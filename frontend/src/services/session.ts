@@ -1,9 +1,12 @@
 import type { Session } from '../api'
+import { migrateAralForgeStorage, migrateStorageValue } from '../utils/storageMigration'
 
-const SESSION_KEY = 'ezoryx.session'
+export const SESSION_KEY = 'aralforge.session'
+export const LEGACY_SESSION_KEY = 'ezoryx.session'
 
 export function loadSession() {
-  const raw = localStorage.getItem(SESSION_KEY)
+  migrateAralForgeStorage()
+  const raw = migrateStorageValue(SESSION_KEY, LEGACY_SESSION_KEY, isStoredSession)
 
   if (!raw) {
     return null
@@ -23,6 +26,21 @@ export function saveSession(session: Session) {
 
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY)
+  localStorage.removeItem(LEGACY_SESSION_KEY)
+}
+
+function isStoredSession(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Partial<Session> | null
+    return Boolean(
+      parsed
+      && typeof parsed === 'object'
+      && typeof parsed.access === 'string'
+      && typeof parsed.refresh === 'string',
+    )
+  } catch {
+    return false
+  }
 }
 
 export function readJwtUserId(token: string) {

@@ -1,5 +1,7 @@
 from decimal import Decimal
+from io import StringIO
 
+from django.core.management import call_command
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
@@ -14,6 +16,7 @@ from grades.models import (
     GradeCategoryChoices,
     GradeItem,
     GradeItemSourceType,
+    GradingTemplate,
     GradingPeriod,
     FinalGrade,
     PeriodGrade,
@@ -31,6 +34,18 @@ from learning_modules.models import (
 )
 from subjects.models import Subject
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, SubjectSchedule
+
+
+class GradingTemplateSeedTests(TestCase):
+    def test_seed_command_creates_the_aralforge_default_template(self):
+        output = StringIO()
+
+        call_command('seed_grading_templates', stdout=output)
+
+        template = GradingTemplate.objects.get(name='Standard AralForge Grading')
+        self.assertTrue(template.is_default)
+        self.assertEqual(template.items.count(), 16)
+        self.assertIn('Seeded the standard AralForge grading template.', output.getvalue())
 
 
 class GradeComputationTests(TestCase):

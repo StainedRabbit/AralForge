@@ -4,11 +4,11 @@ from grades.models import GradeCategoryChoices, GradingPeriod, GradingTemplate, 
 
 
 class Command(BaseCommand):
-    help = 'Create the standard Ezoryx grading template.'
+    help = 'Create the standard AralForge grading template.'
 
     def handle(self, *args, **options):
         template, _ = GradingTemplate.objects.update_or_create(
-            name='Standard Ezoryx Grading',
+            name='Standard AralForge Grading',
             defaults={
                 'description': 'Default grading setup for prelim, midterm, prefinal, and final periods.',
                 'is_default': True,
@@ -45,4 +45,4 @@ class Command(BaseCommand):
 
         GradingTemplate.objects.exclude(pk=template.pk).update(is_default=False)
 
-        self.stdout.write(self.style.SUCCESS('Seeded the standard Ezoryx grading template.'))
+        self.stdout.write(self.style.SUCCESS('Seeded the standard AralForge grading template.'))

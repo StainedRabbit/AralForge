@@ -3,7 +3,7 @@ import os
 from time import perf_counter
 
 
-logger = logging.getLogger('ezoryx.performance')
+logger = logging.getLogger('aralforge.performance')
 
 
 class RequestTimingMiddleware:

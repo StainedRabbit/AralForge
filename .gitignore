@@ -4,6 +4,7 @@ frontend/dist/
 .env
 *.sqlite3
 backend/e2e_media/
+backend/media/
 frontend/playwright-report/
 frontend/test-results/
 backend/backups/

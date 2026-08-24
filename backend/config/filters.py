@@ -2,7 +2,7 @@ from django.db.models import Q
 from rest_framework.filters import BaseFilterBackend
 
 
-class EzoryxQueryFilterBackend(BaseFilterBackend):
+class AralForgeQueryFilterBackend(BaseFilterBackend):
     """Apply the common bounded-list filters only when the model supports them."""
 
     exact_parameters = {

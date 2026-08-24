@@ -11,6 +11,7 @@ import {
   lessonsForTopic,
   topicsForModule,
 } from '../../utils/modules'
+import { migrateStorageValue } from '../../utils/storageMigration'
 
 type PresentationSection = {
   content: string
@@ -22,7 +23,8 @@ type PresentationSection = {
 
 type PresentationTextSize = 'default' | 'large' | 'small'
 
-const TEXT_SIZE_KEY = 'ezoryx:presentation-text-size'
+const TEXT_SIZE_KEY = 'aralforge:presentation-text-size'
+const LEGACY_TEXT_SIZE_KEY = 'ezoryx:presentation-text-size'
 
 export function LessonPresentationPage({ data }: { data: RouteData }) {
   const { moduleId } = useParams()
@@ -733,7 +735,11 @@ function presentationSectionId(title: string) {
 
 function readTextSize(): PresentationTextSize {
   try {
-    const storedSize = window.localStorage.getItem(TEXT_SIZE_KEY)
+    const storedSize = migrateStorageValue(
+      TEXT_SIZE_KEY,
+      LEGACY_TEXT_SIZE_KEY,
+      (value) => value === 'large' || value === 'small' || value === 'default',
+    )
     if (storedSize === 'large' || storedSize === 'small') {
       return storedSize
     }

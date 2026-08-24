@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://render.com/schema/render.yaml.json
 services:
   - type: web
-    name: ezoryx-api-staging
+    name: aralforge-api-staging
     runtime: docker
     branch: main
     region: singapore
@@ -34,14 +34,14 @@ services:
       - key: SUPABASE_S3_SECRET_ACCESS_KEY
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
-        value: ezoryx-media-staging
+        value: aralforge-media-staging
       - key: DB_CONN_MAX_AGE
         value: "60"
       - key: API_SLOW_REQUEST_MS
         value: "750"
 
   - type: web
-    name: ezoryx-api-production
+    name: aralforge-api-production
     runtime: docker
     branch: production
     region: singapore
@@ -74,7 +74,7 @@ services:
       - key: SUPABASE_S3_SECRET_ACCESS_KEY
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
-        value: ezoryx-media-production
+        value: aralforge-media-production
       - key: DB_CONN_MAX_AGE
         value: "60"
       - key: API_SLOW_REQUEST_MS

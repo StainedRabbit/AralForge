@@ -30,7 +30,7 @@
 .button--primary {
   color: #ffffff;
   background: var(--primary);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 12px 24px rgba(var(--primary-rgb), 0.2);
 }
 
 .button--primary:hover {
@@ -40,11 +40,11 @@
 .button--secondary {
   color: var(--primary-dark);
   background: var(--primary-soft);
-  border-color: rgba(37, 99, 235, 0.12);
+  border-color: rgba(var(--primary-rgb), 0.12);
 }
 
 .button--secondary:hover {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
 }
 
 .button--ghost {

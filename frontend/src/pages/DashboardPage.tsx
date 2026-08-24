@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import type { AuthedRequest } from '../app/types'
 import type { Module, ModuleActivity, User } from '../types'
-import heroImage from '../assets/academic-dashboard.webp'
+import dashboardJourney from '../assets/aralforge-dashboard-journey.webp'
 import { Icon } from '../components/Icon'
 import { EmptyState, Page, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../components/ui'
 import { queryKeys } from '../queries/queryKeys'
@@ -33,9 +33,16 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
 
   return <Page>
     <section className="dashboard-hero">
-      <img src={heroImage} alt="" decoding="async" fetchPriority="high" height="640" width="1280" />
+      <img
+        src={dashboardJourney}
+        alt="An open book connecting code, ideas, and a rising learning path."
+        decoding="async"
+        fetchPriority="high"
+        height="800"
+        width="1600"
+      />
       <div className="dashboard-hero__content">
-        <p className="eyebrow">Today in Ezoryx</p><h1>{greeting(currentUser)}</h1>
+        <p className="eyebrow">Today in AralForge</p><h1>{greeting(currentUser)}</h1>
         <p>Keep your modules, coding work, assessments, and grades moving from one focused academic workspace.</p>
         <div className="hero-actions">
           <Link className="button button--primary" to="/modules"><Icon name="book" /><span>Continue learning</span></Link>

@@ -1,7 +1,7 @@
 from rest_framework.pagination import LimitOffsetPagination
 
 
-class EzoryxLimitOffsetPagination(LimitOffsetPagination):
+class AralForgeLimitOffsetPagination(LimitOffsetPagination):
     default_limit = 50
     max_limit = 100
 

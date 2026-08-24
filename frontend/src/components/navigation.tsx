@@ -49,7 +49,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar__top">
-        <BrandMark />
+        <BrandMark inverted sidebar />
         <nav className="nav-list" aria-label="Primary">
           {items.map((item) => (
             <NavEntry
@@ -100,7 +100,7 @@ export function MobileHeader({
 }) {
   return (
     <header className="mobile-header">
-      <BrandMark compact />
+      <BrandMark iconOnly />
       <div className="mobile-header__actions">
         {pendingCount ? <span className="notification-dot">{pendingCount}</span> : null}
         <div className="avatar">{initials(currentUser)}</div>
@@ -174,16 +174,55 @@ function isExactNavItem(path: string) {
   return path === '/' || path === '/admin'
 }
 
-export function BrandMark({ compact = false }: { compact?: boolean }) {
+export function BrandMark({
+  compact = false,
+  iconOnly = false,
+  inverted = false,
+  sidebar = false,
+}: {
+  compact?: boolean
+  iconOnly?: boolean
+  inverted?: boolean
+  sidebar?: boolean
+}) {
+  const className = [
+    'brand',
+    compact ? 'brand--compact' : '',
+    iconOnly ? 'brand--icon' : '',
+    inverted ? 'brand--inverted' : '',
+    sidebar ? 'brand--sidebar' : '',
+  ].filter(Boolean).join(' ')
+
   return (
-    <Link className={compact ? 'brand brand--compact' : 'brand'} to="/">
-      <span className="brand__icon" aria-hidden="true">
-        E
-      </span>
-      <span>
-        <strong>Ezoryx</strong>
-        {!compact ? <small>Academic OS</small> : null}
-      </span>
+    <Link aria-label="AralForge home" className={className} to="/">
+      {sidebar ? (
+        <>
+          <img
+            alt="AralForge"
+            className="brand__icon"
+            height="512"
+            src="/brand/aralforge-icon-dark.png"
+            width="512"
+          />
+          <span aria-hidden="true" className="brand__wordmark">
+            <strong>Aral<span>Forge</span></strong>
+            <small>Forge Knowledge, Build Future.</small>
+          </span>
+        </>
+      ) : (
+        <>
+          <img
+            alt="AralForge"
+            className={iconOnly ? 'brand__icon' : 'brand__logo'}
+            height={iconOnly ? '512' : '274'}
+            src={iconOnly
+              ? (inverted ? '/brand/aralforge-icon-dark.png' : '/brand/aralforge-icon.png')
+              : (inverted ? '/brand/aralforge-logo-horizontal-dark.png' : '/brand/aralforge-logo-horizontal.png')}
+            width={iconOnly ? '512' : '1184'}
+          />
+          {!compact && !iconOnly ? <small>Forge Knowledge, Build Future.</small> : null}
+        </>
+      )}
     </Link>
   )
 }

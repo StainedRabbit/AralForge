@@ -8,7 +8,7 @@ test('module workspace uses attempt summaries and hydrates only the opened attem
   await page.waitForURL((url) => url.pathname === '/')
 
   const target = await page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('ezoryx.session') ?? '{}') as { access?: string }
+    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
     const headers = { Authorization: `Bearer ${session.access}` }
     const modulesResponse = await fetch('http://127.0.0.1:8001/api/modules/modules/?limit=100', { headers })
     const modulesPayload = await modulesResponse.json()

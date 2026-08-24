@@ -20,7 +20,7 @@ class PasswordSetupToken(Token):
     lifetime = timedelta(minutes=15)
 
 
-class EzoryxTokenObtainPairSerializer(TokenObtainPairSerializer):
+class AralForgeTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         identifier = attrs.get(self.username_field, '').strip()
         password = attrs.get('password', '')
@@ -56,8 +56,8 @@ class EzoryxTokenObtainPairSerializer(TokenObtainPairSerializer):
         return {'refresh': str(refresh), 'access': str(refresh.access_token)}
 
 
-class EzoryxTokenObtainPairView(TokenObtainPairView):
-    serializer_class = EzoryxTokenObtainPairSerializer
+class AralForgeTokenObtainPairView(TokenObtainPairView):
+    serializer_class = AralForgeTokenObtainPairSerializer
 
 
 class CompletePasswordSetupSerializer(serializers.Serializer):

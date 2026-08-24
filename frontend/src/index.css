@@ -1,31 +1,57 @@
 :root {
-  --bg: #f7f9fb;
-  --surface: #ffffff;
-  --surface-muted: #eef3f7;
-  --surface-strong: #e7eef5;
-  --text: #1f2933;
-  --text-muted: #64748b;
+  /* AralForge "Modern Forge" brand system */
+  --forge-navy: #0b1f3a;
+  --forge-navy-rgb: 11, 31, 58;
+  --forge-navy-soft: #17365f;
+  --ember-orange: #e86a17;
+  --ember-orange-rgb: 232, 106, 23;
+  --ember-orange-accessible: #c44d0b;
+  --forge-gold: #f2b544;
+  --forge-gold-rgb: 242, 181, 68;
+  --warm-white: #faf8f3;
+  --interface-bg: #f8fafc;
+  --main-text: #1e293b;
+  --muted-text: #64748b;
+  --interface-border: #e2e8f0;
+
+  /* Component aliases retained for the existing CSS architecture. */
+  --bg: var(--interface-bg);
+  --surface: #fffdf9;
+  --surface-muted: #f3f6f9;
+  --surface-strong: #e8eef4;
+  --text: var(--main-text);
+  --text-muted: var(--muted-text);
   --text-soft: #94a3b8;
-  --primary: #2563eb;
-  --primary-dark: #1e40af;
-  --primary-soft: #dbeafe;
-  --accent: #14b8a6;
-  --accent-dark: #0f766e;
-  --accent-soft: #ccfbf1;
-  --success: #22c55e;
-  --success-soft: #dcfce7;
-  --warning: #f59e0b;
-  --warning-soft: #fef3c7;
-  --danger: #ef4444;
-  --danger-soft: #fee2e2;
-  --border: #dbe3ea;
+  --brand-navy: var(--forge-navy);
+  --brand-navy-rgb: var(--forge-navy-rgb);
+  --primary: var(--ember-orange-accessible);
+  --primary-rgb: 196, 77, 11;
+  --primary-vivid: var(--ember-orange);
+  --primary-dark: #9c3706;
+  --primary-soft: #fff0e5;
+  --accent: var(--forge-gold);
+  --accent-rgb: var(--forge-gold-rgb);
+  --accent-dark: #8a5700;
+  --accent-soft: #fff6db;
+  --success: #15803d;
+  --success-soft: #e8f7ed;
+  --warning: #a15c00;
+  --warning-soft: #fff4d6;
+  --danger: #b42318;
+  --danger-soft: #fff0ee;
+  --info: #1769aa;
+  --info-soft: #eaf5ff;
+  --border: var(--interface-border);
   --border-strong: #cbd5e1;
-  --code-bg: #0f172a;
-  --code-text: #e2e8f0;
-  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
-  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
-  --radius: 8px;
-  --sidebar-width: 280px;
+  --code-bg: #07182d;
+  --code-text: #e6edf6;
+  --shadow: 0 18px 46px rgba(var(--forge-navy-rgb), 0.12);
+  --shadow-soft: 0 8px 24px rgba(var(--forge-navy-rgb), 0.065);
+  --shadow-card: 0 1px 2px rgba(var(--forge-navy-rgb), 0.04), 0 10px 28px rgba(var(--forge-navy-rgb), 0.055);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --sidebar-width: 268px;
   --sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -57,9 +83,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    linear-gradient(180deg, rgba(219, 234, 254, 0.38), transparent 360px),
-    var(--bg);
+  background: var(--bg);
 }
 
 button,
@@ -85,6 +109,16 @@ a {
 img {
   display: block;
   max-width: 100%;
+}
+
+::selection {
+  color: var(--forge-navy);
+  background: rgba(var(--forge-gold-rgb), 0.48);
+}
+
+:focus-visible {
+  outline: 3px solid rgba(var(--ember-orange-rgb), 0.38);
+  outline-offset: 3px;
 }
 
 #root {

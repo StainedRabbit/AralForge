@@ -242,8 +242,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'config.pagination.EzoryxLimitOffsetPagination',
-    'DEFAULT_FILTER_BACKENDS': ('config.filters.EzoryxQueryFilterBackend',),
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.AralForgeLimitOffsetPagination',
+    'DEFAULT_FILTER_BACKENDS': ('config.filters.AralForgeQueryFilterBackend',),
     'PAGE_SIZE': 50,
 }
 
@@ -287,6 +287,6 @@ LOGGING = {
     },
     'loggers': {
         'django': {'handlers': ['console'], 'level': 'INFO'},
-        'ezoryx.performance': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'aralforge.performance': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
 }

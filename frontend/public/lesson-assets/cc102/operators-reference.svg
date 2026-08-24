@@ -4,10 +4,10 @@
   <rect width="1200" height="720" fill="#f8fafc"/>
   <text x="60" y="72" fill="#0f172a" font-family="Arial, sans-serif" font-size="38" font-weight="700">Java Operators Reference</text>
   <g font-family="Arial, sans-serif" fill="#0f172a">
-    <rect x="70" y="125" width="500" height="115" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <rect x="70" y="125" width="500" height="115" rx="8" fill="#ffedd5" stroke="#c2410c" stroke-width="3"/>
     <text x="100" y="170" font-size="28" font-weight="700">Arithmetic</text>
     <text x="100" y="210" font-size="24">+  -  *  /  %</text>
-    <rect x="630" y="125" width="500" height="115" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="3"/>
+    <rect x="630" y="125" width="500" height="115" rx="8" fill="#fef3c7" stroke="#92400e" stroke-width="3"/>
     <text x="660" y="170" font-size="28" font-weight="700">Assignment</text>
     <text x="660" y="210" font-size="24">=  +=  -=  *=  /=</text>
     <rect x="70" y="285" width="500" height="115" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>

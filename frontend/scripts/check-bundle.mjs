@@ -13,13 +13,19 @@ if (!entryMatch) {
 
 const entry = await readFile(`${assets}/${entryMatch[1]}`)
 const entryGzipBytes = gzipSync(entry).byteLength
-const imageNames = (await readdir(assets)).filter((name) => name.startsWith('academic-dashboard-'))
+const imageNames = (await readdir(assets)).filter((name) =>
+  name.startsWith('aralforge-dashboard-journey-') ||
+  name.startsWith('aralforge-login-illustration-'),
+)
+if (!imageNames.length) {
+  throw new Error('Could not find the bundled AralForge visual assets.')
+}
 const imageSizes = await Promise.all(imageNames.map(async (name) => (await stat(`${assets}/${name}`)).size))
 const largestHeroBytes = Math.max(0, ...imageSizes)
 
 const budgets = [
   { actual: entryGzipBytes, label: 'entry JavaScript (gzip)', maximum: 100 * 1024 },
-  { actual: largestHeroBytes, label: 'dashboard hero', maximum: 250 * 1024 },
+  { actual: largestHeroBytes, label: 'largest AralForge visual', maximum: 250 * 1024 },
 ]
 const failures = budgets.filter(({ actual, maximum }) => actual > maximum)
 

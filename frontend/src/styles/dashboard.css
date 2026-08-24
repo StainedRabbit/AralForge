@@ -44,8 +44,8 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.16)),
-    linear-gradient(180deg, transparent, rgba(15, 23, 42, 0.4));
+    linear-gradient(90deg, rgba(var(--brand-navy-rgb), 0.9), rgba(var(--brand-navy-rgb), 0.1)),
+    linear-gradient(180deg, transparent, rgba(var(--brand-navy-rgb), 0.44));
 }
 
 .dashboard-hero__content {

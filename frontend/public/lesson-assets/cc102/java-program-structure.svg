@@ -12,7 +12,7 @@
   <text x="170" y="410" fill="#f8fafc" font-family="Consolas, monospace" font-size="24">System.out.println(name);</text>
   <text x="130" y="460" fill="#f8fafc" font-family="Consolas, monospace" font-size="24">}</text>
   <text x="90" y="510" fill="#93c5fd" font-family="Consolas, monospace" font-size="24">}</text>
-  <g fill="#ffffff" stroke="#2563eb" stroke-width="3">
+  <g fill="#ffffff" stroke="#c2410c" stroke-width="3">
     <rect x="820" y="125" width="280" height="58" rx="8"/>
     <rect x="820" y="205" width="280" height="58" rx="8"/>
     <rect x="820" y="285" width="280" height="58" rx="8"/>
@@ -26,7 +26,7 @@
     <text x="845" y="402">Variables</text>
     <text x="845" y="482">Output statement</text>
   </g>
-  <g stroke="#2563eb" stroke-width="4" fill="none" marker-end="url(#arrow)">
+  <g stroke="#c2410c" stroke-width="4" fill="none" marker-end="url(#arrow)">
     <path d="M810 154 H700"/>
     <path d="M810 234 H670"/>
     <path d="M810 314 H520"/>
@@ -35,7 +35,7 @@
   </g>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/>
+      <path d="M0,0 L0,6 L9,3 z" fill="#c2410c"/>
     </marker>
   </defs>
 </svg>

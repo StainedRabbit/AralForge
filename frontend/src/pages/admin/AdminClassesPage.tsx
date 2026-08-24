@@ -23,6 +23,7 @@ import type {
 import { toOptions } from '../../admin/adminHelpers'
 import { formatTime, numeric, toErrorMessage } from '../../utils/format'
 import { cleanImportedPersonName } from '../../utils/importCleaning'
+import { modulesForSubject as allModulesForSubject } from '../../utils/modules'
 import { fullName } from '../../utils/student'
 
 const AVAILABLE_STUDENT_LIMIT = 8
@@ -253,7 +254,7 @@ export function AdminClassesPage({
       />
 
       <section className="classes-setup__grid">
-        <div className="classes-setup__panel section-block">
+        <div className="classes-setup__panel classes-setup__panel--finder section-block">
           <SectionHeading
             subtitle={`${classCount} class${classCount === 1 ? '' : 'es'}`}
             title="Select Class"
@@ -592,7 +593,7 @@ function ScheduleForm({
         <strong>{selectedSchedule ? 'Edit schedule' : 'New schedule'}</strong>
         {selectedSchedule ? (
           <button
-            className="button button--ghost"
+            className="button button--secondary"
             disabled={changingStatus || saving}
             onClick={() => {
               setSelectedScheduleId(null)
@@ -941,6 +942,12 @@ function ClassRoster({
   const classModules = selectedSchedule
     ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
+  const selectedClassModule = selectedSchedule
+    ? allModulesForSubject(data.modules, selectedSchedule.subject)[0] ?? null
+    : null
+  const classModuleUrl = selectedSchedule && selectedClassModule
+    ? `/admin/modules?subject=${selectedSchedule.subject}`
+    : null
   const primaryClassModule = classModules[0] ?? null
   const moduleProgressUrl = selectedSchedule && primaryClassModule
     ? `/admin/modules/${primaryClassModule.id}/progress?schedule=${selectedSchedule.id}&returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`
@@ -963,6 +970,31 @@ function ClassRoster({
               <Icon name="check" />
               <span>Attendance</span>
             </button>
+            {classModuleUrl ? (
+              <Link className="button button--secondary" to={classModuleUrl}>
+                <Icon name="module" />
+                <span>Open Module</span>
+              </Link>
+            ) : (
+              <button
+                aria-label={
+                  selectedSchedule
+                    ? 'Open Module unavailable: no module is linked to this subject'
+                    : 'Open Module unavailable: select a class first'
+                }
+                className="button button--secondary"
+                disabled
+                title={
+                  selectedSchedule
+                    ? 'No module is linked to this subject.'
+                    : 'Select a class to open its module.'
+                }
+                type="button"
+              >
+                <Icon name="module" />
+                <span>Open Module</span>
+              </button>
+            )}
             <button
               className="button button--secondary"
               disabled={!selectedSchedule?.is_active || !activeCount}

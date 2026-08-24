@@ -19,7 +19,7 @@
 }
 
 .admin-quick-link:hover {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
 }
 
 .admin-quick-link strong,
@@ -133,7 +133,7 @@
 .admin-field textarea:focus,
 .admin-search input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.14);
 }
 
 .admin-check {
@@ -252,6 +252,28 @@
 
 .classes-setup__panel {
   align-content: start;
+}
+
+@media (min-width: 1161px) {
+  .classes-setup__panel--finder {
+    align-content: stretch;
+    contain: size;
+    grid-template-rows: max-content minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .classes-setup__panel--finder .class-finder {
+    grid-template-rows: max-content minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .classes-setup__panel--finder .class-list {
+    height: 100%;
+    min-height: 0;
+  }
 }
 
 .class-finder__filters {
@@ -377,7 +399,7 @@
 
 .class-list__item:hover,
 .class-list__item.active {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   background: var(--primary-soft);
 }
 
@@ -874,7 +896,7 @@
 }
 
 .roster-grade--strong {
-  border-color: rgba(37, 99, 235, 0.24);
+  border-color: rgba(var(--primary-rgb), 0.24);
   background: var(--primary-soft);
   color: var(--text);
 }
@@ -1024,7 +1046,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(37, 99, 235, 0.22);
+  border: 1px solid rgba(var(--primary-rgb), 0.22);
   border-radius: var(--radius);
   background: var(--primary-soft);
 }
@@ -1091,7 +1113,7 @@
 
 .gradebook-item:hover,
 .gradebook-item.active {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   background: var(--primary-soft);
 }
 
@@ -1596,7 +1618,7 @@
 
 .attendance-subject:hover,
 .attendance-subject.active {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   background: var(--primary-soft);
 }
 
@@ -1861,7 +1883,7 @@
   gap: 18px;
   min-height: 150px;
   padding: clamp(20px, 4vw, 32px);
-  border: 1px solid rgba(37, 99, 235, 0.24);
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
   border-radius: calc(var(--radius) + 6px);
   background: linear-gradient(135deg, var(--primary-soft), var(--surface));
 }
@@ -1994,8 +2016,8 @@
 }
 
 .attendance-status-action--excused {
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: var(--primary-dark);
+  background: var(--primary-soft);
 }
 
 .attendance-roll-call__navigation,
@@ -2009,7 +2031,7 @@
   display: grid;
   gap: 10px;
   padding: 18px;
-  border: 1px solid rgba(37, 99, 235, 0.24);
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
   border-radius: var(--radius);
   background: var(--primary-soft);
 }
@@ -2227,7 +2249,7 @@
 
 .class-score-sheet-list > button:hover:not(:disabled),
 .class-score-sheet-list > button:focus-visible {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   background: var(--primary-soft);
 }
 
@@ -2384,8 +2406,8 @@
 }
 
 .attendance-status--excused {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary-dark);
 }
 
 .attendance-status-select {
@@ -2401,7 +2423,7 @@
 
 .attendance-status-select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.14);
   outline: none;
 }
 
@@ -2418,7 +2440,7 @@
 
 .attendance-remarks-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.14);
   outline: none;
 }
 
@@ -2459,14 +2481,14 @@
 }
 
 .attendance-action--excused {
-  border: 1px solid rgba(37, 99, 235, 0.25);
-  color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
+  color: var(--primary-dark);
+  background: rgba(var(--primary-rgb), 0.1);
 }
 
 .attendance-action--excused:hover {
-  border-color: rgba(37, 99, 235, 0.38);
-  background: rgba(37, 99, 235, 0.16);
+  border-color: rgba(var(--primary-rgb), 0.38);
+  background: rgba(var(--primary-rgb), 0.16);
 }
 
 .attendance-excuse-form {
@@ -2474,9 +2496,9 @@
   gap: 12px;
   width: min(520px, 100%);
   padding: 14px;
-  border: 1px solid rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
   border-radius: var(--radius);
-  background: rgba(37, 99, 235, 0.07);
+  background: rgba(var(--primary-rgb), 0.07);
   text-align: left;
 }
 
@@ -2889,9 +2911,9 @@
 .markdown-editor__preview-toggle.active,
 .markdown-editor__focus-toggle:hover,
 .markdown-editor__focus-toggle.active {
-  border-color: rgba(37, 99, 235, 0.38);
+  border-color: rgba(var(--primary-rgb), 0.38);
   color: var(--primary-dark);
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(var(--primary-rgb), 0.08);
 }
 
 .markdown-editor__tool:disabled {
@@ -2911,7 +2933,7 @@
 }
 
 .markdown-editor textarea:focus {
-  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.16);
+  box-shadow: inset 0 0 0 2px rgba(var(--primary-rgb), 0.16);
 }
 
 .markdown-editor--large textarea {
@@ -2937,7 +2959,7 @@
 .markdown-editor__resize:hover,
 .markdown-editor__resize:focus-visible {
   background-color: var(--primary-soft);
-  outline: 2px solid rgba(37, 99, 235, 0.22);
+  outline: 2px solid rgba(var(--primary-rgb), 0.22);
   outline-offset: -2px;
 }
 
@@ -3120,7 +3142,7 @@
 }
 
 .module-outline-panel article.active {
-  border-color: rgba(37, 99, 235, 0.22);
+  border-color: rgba(var(--primary-rgb), 0.22);
   background: var(--primary-soft);
 }
 
@@ -3221,7 +3243,7 @@
 
 .module-reorder-actions button:hover:not(:disabled),
 .module-reorder-actions button:focus-visible {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   color: var(--primary-dark);
   background: var(--primary-soft);
 }
@@ -3245,7 +3267,7 @@
 }
 
 .action-menu[open] > summary {
-  border-color: rgba(37, 99, 235, 0.34);
+  border-color: rgba(var(--primary-rgb), 0.34);
   background: var(--primary-soft);
 }
 
@@ -3413,7 +3435,7 @@
 
 .module-lesson-switcher__arrow:hover:not(:disabled),
 .module-lesson-switcher__arrow:focus-visible {
-  border-color: rgba(37, 99, 235, 0.36);
+  border-color: rgba(var(--primary-rgb), 0.36);
   color: var(--primary-dark);
   background: var(--primary-soft);
 }
@@ -3460,9 +3482,9 @@
 
 .module-lesson-chip:hover,
 .module-lesson-chip.active {
-  border-color: rgba(37, 99, 235, 0.72);
+  border-color: rgba(var(--primary-rgb), 0.72);
   background: var(--primary-soft);
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.18);
 }
 
 .module-lesson-chip span,
@@ -3924,9 +3946,9 @@
 .lesson-editor-outline__template button:hover,
 .lesson-editor-outline__utility button:hover,
 .lesson-editor-mobile-outline button:hover {
-  border-color: rgba(37, 99, 235, 0.42);
+  border-color: rgba(var(--primary-rgb), 0.42);
   color: var(--primary);
-  background: #eff6ff;
+  background: var(--primary-soft);
 }
 
 .lesson-editor-outline__template button span {
@@ -4262,7 +4284,7 @@
 
 .gradebook-status-card:hover,
 .gradebook-status-card.active {
-  border-color: rgba(37, 99, 235, 0.38);
+  border-color: rgba(var(--primary-rgb), 0.38);
   background: var(--primary-soft);
 }
 
@@ -4338,9 +4360,9 @@
 }
 
 .status-badge--online {
-  color: #1d4ed8;
-  background: #eff6ff;
-  border-color: rgba(37, 99, 235, 0.35);
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+  border-color: rgba(var(--primary-rgb), 0.35);
 }
 
 .status-badge--paper {
@@ -4461,7 +4483,7 @@
 }
 
 .activity-grading-row--selected {
-  border-color: rgba(37, 99, 235, 0.38);
+  border-color: rgba(var(--primary-rgb), 0.38);
   background: var(--primary-soft);
 }
 
