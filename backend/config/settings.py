@@ -32,7 +32,8 @@ def load_env_file(path):
         os.environ[name] = value
 
 
-load_env_file(BASE_DIR.parent / '.env')
+if os.getenv('RENDER', '').strip().lower() != 'true':
+    load_env_file(BASE_DIR.parent / '.env')
 
 
 def env_bool(name, default=False):
@@ -107,6 +108,12 @@ DEBUG = env_bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS')
 render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if not render_hostname:
+    render_hostname = urlparse(os.getenv('RENDER_EXTERNAL_URL', '')).hostname
+if not render_hostname and os.getenv('RENDER_SERVICE_TYPE') == 'web':
+    render_service_name = os.getenv('RENDER_SERVICE_NAME', '').strip()
+    if render_service_name:
+        render_hostname = f'{render_service_name}.onrender.com'
 if render_hostname and render_hostname not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(render_hostname)
 
