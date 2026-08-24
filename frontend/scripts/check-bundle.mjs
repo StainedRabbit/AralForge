@@ -13,7 +13,8 @@ if (!entryMatch) {
 
 const entry = await readFile(`${assets}/${entryMatch[1]}`)
 const entryGzipBytes = gzipSync(entry).byteLength
-const imageNames = (await readdir(assets)).filter((name) =>
+const assetNames = await readdir(assets)
+const imageNames = assetNames.filter((name) =>
   name.startsWith('aralforge-dashboard-journey-') ||
   name.startsWith('aralforge-login-illustration-'),
 )
@@ -22,6 +23,25 @@ if (!imageNames.length) {
 }
 const imageSizes = await Promise.all(imageNames.map(async (name) => (await stat(`${assets}/${name}`)).size))
 const largestHeroBytes = Math.max(0, ...imageSizes)
+const javascriptNames = assetNames.filter((name) => name.endsWith('.js'))
+const javascriptContents = await Promise.all(
+  javascriptNames.map(async (name) => [name, await readFile(`${assets}/${name}`, 'utf8')]),
+)
+const forbiddenApiUrls = [
+  'http://127.0.0.1:8000/api',
+  'http://localhost:8000/api',
+]
+const forbiddenMatches = javascriptContents.flatMap(([name, contents]) =>
+  forbiddenApiUrls
+    .filter((url) => contents.includes(url))
+    .map((url) => `${name}: ${url}`),
+)
+
+if (forbiddenMatches.length) {
+  throw new Error(
+    `Production bundle contains a development API URL: ${forbiddenMatches.join(', ')}`,
+  )
+}
 
 const budgets = [
   { actual: entryGzipBytes, label: 'entry JavaScript (gzip)', maximum: 100 * 1024 },

@@ -9,7 +9,13 @@ npm install
 npm run dev
 ```
 
-The frontend reads `VITE_API_BASE_URL` from the active environment and defaults to `http://127.0.0.1:8000/api` for local development.
+The frontend reads `VITE_API_BASE_URL` from the active environment. The Vite development server defaults to `http://127.0.0.1:8000/api`, but production builds require an explicit non-loopback HTTPS URL ending in `/api`:
+
+```text
+VITE_API_BASE_URL=https://your-api-host.example/api
+```
+
+Hosted frontend providers must configure this as a build variable because Vite substitutes it while creating the bundle.
 
 ## Validation
 

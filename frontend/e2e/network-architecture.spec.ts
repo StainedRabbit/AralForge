@@ -61,3 +61,71 @@ test('feature navigation loads only that route resources', async ({ page }) => {
   expect(uniqueRouteRequests.some(path => path.startsWith('/api/coding/'))).toBe(false)
   expect(uniqueRouteRequests.length).toBeLessThanOrEqual(10)
 })
+
+test('JWT login, refresh, authenticated retry, and logout stay on the configured API', async ({ page }) => {
+  const apiRequests: Array<{ authorization: string | null; pathname: string; origin: string }> = []
+  page.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/')) {
+      apiRequests.push({
+        authorization: request.headers().authorization ?? null,
+        pathname: url.pathname,
+        origin: url.origin,
+      })
+    }
+  })
+
+  await page.goto('/admin')
+  await page.getByLabel('Username or student number').fill('e2e-teacher')
+  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+
+  const loginRequest = apiRequests.find(request => request.pathname === '/api/auth/token/')
+  expect(loginRequest?.origin).toBe('http://127.0.0.1:8001')
+  expect(loginRequest?.authorization).toBeNull()
+
+  await page.evaluate(() => {
+    const rawSession = localStorage.getItem('aralforge.session')
+    if (!rawSession) throw new Error('Expected a stored JWT session.')
+    const session = JSON.parse(rawSession) as { access: string; refresh: string }
+    localStorage.setItem(
+      'aralforge.session',
+      JSON.stringify({ ...session, access: 'invalid-access-token' }),
+    )
+  })
+  apiRequests.length = 0
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+
+  expect(apiRequests.every(request => request.origin === 'http://127.0.0.1:8001')).toBe(true)
+  const refreshRequest = apiRequests.find(
+    request => request.pathname === '/api/auth/token/refresh/',
+  )
+  expect(refreshRequest).toBeTruthy()
+  expect(refreshRequest?.authorization).toBeNull()
+
+  const identityRequests = apiRequests.filter(
+    request => request.pathname === '/api/accounts/users/me/',
+  )
+  expect(
+    identityRequests.some(
+      request => request.authorization === 'Bearer invalid-access-token',
+    ),
+  ).toBe(true)
+  expect(
+    identityRequests.some(
+      request => request.authorization?.startsWith('Bearer ')
+        && request.authorization !== 'Bearer invalid-access-token',
+    ),
+  ).toBe(true)
+
+  apiRequests.length = 0
+  await page.locator('button[title="Sign out"]:visible').click()
+  await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
+  const storedSession = await page.evaluate(() => localStorage.getItem('aralforge.session'))
+
+  expect(storedSession).toBeNull()
+  expect(apiRequests).toEqual([])
+})

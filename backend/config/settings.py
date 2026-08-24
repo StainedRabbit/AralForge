@@ -1,4 +1,5 @@
 import os
+import re
 from urllib.parse import parse_qsl, urlparse
 
 from pathlib import Path
@@ -29,7 +30,9 @@ def load_env_file(path):
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
             value = value[1:-1]
-        os.environ[name] = value
+        # Explicit process/platform variables take precedence over local .env
+        # values so hosted settings cannot be replaced by a checked-out file.
+        os.environ.setdefault(name, value)
 
 
 if os.getenv('RENDER', '').strip().lower() != 'true':
@@ -52,6 +55,50 @@ def env_list(name, default=None):
         return default or []
 
     return [item.strip() for item in value.split(',') if item.strip()]
+
+
+def env_origin_list(name, default=None):
+    origins = env_list(name, default)
+
+    for origin in origins:
+        parsed = urlparse(origin)
+        try:
+            parsed.port
+        except ValueError as error:
+            raise RuntimeError(f'{name} contains an invalid origin: {origin}') from error
+
+        if (
+            parsed.scheme not in {'http', 'https'}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+            or '*' in origin
+        ):
+            raise RuntimeError(f'{name} must contain exact HTTP(S) origins: {origin}')
+
+    return origins
+
+
+def env_regex_list(name):
+    patterns = env_list(name)
+
+    for pattern in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as error:
+            raise RuntimeError(f'{name} contains an invalid regular expression: {pattern}') from error
+
+    return patterns
+
+
+def append_unique(values, value):
+    normalized = (value or '').strip()
+    if normalized and normalized not in values:
+        values.append(normalized)
 
 
 def database_config(database_url, sqlite_path):
@@ -114,16 +161,16 @@ if not render_hostname and os.getenv('RENDER_SERVICE_TYPE') == 'web':
     render_service_name = os.getenv('RENDER_SERVICE_NAME', '').strip()
     if render_service_name:
         render_hostname = f'{render_service_name}.onrender.com'
-if render_hostname and render_hostname not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append(render_hostname)
+append_unique(ALLOWED_HOSTS, render_hostname)
+append_unique(ALLOWED_HOSTS, os.getenv('RAILWAY_PUBLIC_DOMAIN'))
 
-CORS_ALLOWED_ORIGINS = env_list(
+CORS_ALLOWED_ORIGINS = env_origin_list(
     'CORS_ALLOWED_ORIGINS',
     default=['http://localhost:5173', 'http://127.0.0.1:5173'],
 )
-CORS_ALLOWED_ORIGIN_REGEXES = env_list('CORS_ALLOWED_ORIGIN_REGEXES')
+CORS_ALLOWED_ORIGIN_REGEXES = env_regex_list('CORS_ALLOWED_ORIGIN_REGEXES')
 
-CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+CSRF_TRUSTED_ORIGINS = env_origin_list('CSRF_TRUSTED_ORIGINS')
 
 
 # Application definition
@@ -308,8 +355,8 @@ if not DEBUG:
     )
     SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', default=True)
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    # Render accepts redirects as healthy, so this probe must reach the database
-    # check even when the internal request arrives over plain HTTP.
+    # Hosted health probes must reach the database check even when the platform's
+    # internal request arrives over plain HTTP.
     SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
 
 

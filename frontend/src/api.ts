@@ -1,7 +1,8 @@
 import type { ApiList, TokenPair } from './types'
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000/api'
+const DEVELOPMENT_API_BASE_URL = 'http://127.0.0.1:8000/api'
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+const API_BASE_URL = resolveApiBaseUrl()
 
 export class ApiError extends Error {
   status: number
@@ -84,11 +85,43 @@ export async function requestWithToken<T>(
 }
 
 function buildUrl(path: string) {
-  if (path.startsWith('http')) {
-    return path
+  if (/^https?:\/\//i.test(path)) {
+    throw new Error('API request paths must be relative to VITE_API_BASE_URL.')
   }
 
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+function resolveApiBaseUrl() {
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+
+  if (!configuredUrl) {
+    if (import.meta.env.DEV) {
+      return DEVELOPMENT_API_BASE_URL
+    }
+    throw new Error('VITE_API_BASE_URL is required outside local development.')
+  }
+
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(configuredUrl)
+  } catch {
+    throw new Error('VITE_API_BASE_URL must be an absolute URL.')
+  }
+
+  const normalizedPath = parsedUrl.pathname.replace(/\/+$/, '')
+  if (normalizedPath !== '/api' || parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash) {
+    throw new Error('VITE_API_BASE_URL must be an origin followed by /api.')
+  }
+  if (import.meta.env.PROD && parsedUrl.protocol !== 'https:') {
+    throw new Error('VITE_API_BASE_URL must use HTTPS in production.')
+  }
+  if (import.meta.env.PROD && LOOPBACK_HOSTNAMES.has(parsedUrl.hostname.toLowerCase())) {
+    throw new Error('VITE_API_BASE_URL cannot use a loopback hostname in production.')
+  }
+
+  parsedUrl.pathname = normalizedPath
+  return parsedUrl.toString().replace(/\/$/, '')
 }
 
 function createHeaders(options: RequestOptions, accessToken?: string) {
