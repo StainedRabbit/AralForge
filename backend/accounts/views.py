@@ -92,7 +92,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
-    search_fields = ('student_number', 'section', 'user__username', 'user__first_name', 'user__last_name')
+    search_fields = ('student_number', 'user__username', 'user__first_name', 'user__last_name')
 
     def get_queryset(self):
         if self.request.user.is_admin_teacher:

@@ -1,8 +1,5 @@
 import re
-import secrets
-import string
 
-from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -14,6 +11,11 @@ from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from accounts.models import StudentProfile, User
+from accounts.services import (
+    clean_student_number,
+    create_student_account,
+    validate_student_number_available,
+)
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .serializers import (
@@ -324,6 +326,18 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 })
                 has_errors = True
                 continue
+            try:
+                clean_student_number(student_number)
+                validate_student_number_available(student_number)
+            except DjangoValidationError as error:
+                row_results.append({
+                    'row': index,
+                    'student_number': student_number,
+                    'status': 'error',
+                    'error': ' '.join(error.messages),
+                })
+                has_errors = True
+                continue
             account_first_name = ' '.join(part for part in (first_name, middle_name) if part)
             if len(account_first_name) > 150 or len(last_name) > 150:
                 row_results.append({
@@ -367,28 +381,17 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             if profile:
                 students.append(profile.user)
                 continue
-            user = User(
-                username=available_import_username(entry['student_number']),
+            profile = create_student_account(
+                student_number=entry['student_number'],
                 first_name=entry['first_name'],
                 last_name=entry['last_name'],
                 email='',
-                role=User.Role.STUDENT,
                 is_active=True,
-                must_change_password=True,
             )
-            temporary_password = generate_temporary_password(user)
-            user.set_password(temporary_password)
-            user.save()
-            StudentProfile.objects.create(
-                user=user,
-                student_number=entry['student_number'],
-                section='',
-                year_level=None,
-            )
-            students.append(user)
+            students.append(profile.user)
             credentials.append({
                 'student_number': entry['student_number'],
-                'temporary_password': temporary_password,
+                'temporary_password': entry['student_number'],
             })
 
         preview.update(enroll_users(schedule, students, request.user))
@@ -442,17 +445,6 @@ def bounded_int(value, default=0, maximum=None):
     return min(number, maximum) if maximum is not None else number
 
 
-def available_import_username(student_number):
-    normalized = re.sub(r'[^\w.@+-]+', '-', student_number, flags=re.UNICODE).strip('-')
-    base = f'student-{normalized or "account"}'[:140]
-    candidate = base
-    suffix = 1
-    while User.objects.filter(username=candidate).exists():
-        suffix += 1
-        candidate = f'{base[:145 - len(str(suffix))]}-{suffix}'
-    return candidate
-
-
 def normalize_imported_person_name(value):
     cleaned = ' '.join(str(value or '').split())
     return re.sub(
@@ -461,20 +453,6 @@ def normalize_imported_person_name(value):
         cleaned,
         flags=re.UNICODE,
     )
-
-
-def generate_temporary_password(user):
-    alphabet = string.ascii_letters + string.digits + '!@#$%&*?'
-    for _ in range(100):
-        password = ''.join(secrets.choice(alphabet) for _ in range(18))
-        try:
-            validate_password(password, user)
-        except DjangoValidationError:
-            continue
-        return password
-    raise RuntimeError('Could not generate a valid temporary password.')
-
-
 def schedule_dependency_counts(schedule):
     dependencies = {}
     for relation in schedule._meta.related_objects:

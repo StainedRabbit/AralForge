@@ -356,9 +356,8 @@ function LockedModuleSummary({
         <p className="eyebrow">Module access</p>
         <h3>PDF available</h3>
         <p>
-          Download the module PDF for offline study. Pay {Number(module.price).toFixed(2)}
-          {' '}in cash to unlock web lessons, activities, coding exercises, mock exams,
-          and progress tracking.
+          Download the module PDF for offline study. Ask your teacher to activate web
+          lessons, activities, coding exercises, mock exams, and progress tracking.
         </p>
       </div>
       <div className="locked-module-summary__actions">

@@ -40,8 +40,6 @@ export function ProfilePage({ data }: { data: RouteData }) {
               stacked
               items={[
                 ['Student number', profile.student_number],
-                ['Section', profile.section || 'Not set'],
-                ['Year level', profile.year_level?.toString() ?? 'Not set'],
                 ['Joined', formatDateTime(profile.joined_at)],
               ]}
             />

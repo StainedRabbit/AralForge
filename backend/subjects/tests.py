@@ -425,12 +425,12 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(imported.data['created_count'], 1)
         credential = imported.data['credentials'][0]
         profile = StudentProfile.objects.select_related('user').get(student_number='2027-NEW-1')
-        self.assertEqual(profile.section, '')
-        self.assertIsNone(profile.year_level)
         self.assertEqual(profile.user.email, '')
         self.assertEqual(profile.user.first_name, 'New Middle')
         self.assertEqual(profile.user.last_name, 'Learner')
+        self.assertEqual(profile.user.username, '2027-NEW-1')
         self.assertTrue(profile.user.must_change_password)
+        self.assertEqual(credential['temporary_password'], '2027-NEW-1')
         self.assertTrue(profile.user.check_password(credential['temporary_password']))
         self.assertTrue(ScheduleStudent.objects.filter(schedule=schedule, student=profile.user).exists())
 

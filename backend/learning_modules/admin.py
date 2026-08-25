@@ -26,14 +26,12 @@ class ModuleAdmin(admin.ModelAdmin):
     list_display = (
         'title',
         'subject',
-        'is_paid',
-        'price',
         'is_published',
         'pdf_generated_at',
         'pdf_is_outdated',
         'created_at',
     )
-    list_filter = ('is_paid', 'is_published', 'pdf_is_outdated', 'subject', 'subjects')
+    list_filter = ('is_published', 'pdf_is_outdated', 'subject', 'subjects')
     search_fields = (
         'title',
         'description',
@@ -126,20 +124,17 @@ class ModuleAccessAdmin(admin.ModelAdmin):
         'module',
         'student',
         'access_type',
-        'payment_status',
-        'amount_paid',
         'is_active',
         'expires_at',
         'activated_by',
         'activated_at',
     )
-    list_filter = ('access_type', 'payment_status', 'is_active', 'module')
+    list_filter = ('access_type', 'is_active', 'module')
     search_fields = (
         'module__title',
         'student__username',
         'student__first_name',
         'student__last_name',
-        'payment_reference',
     )
     autocomplete_fields = ('module', 'student', 'activated_by')
 

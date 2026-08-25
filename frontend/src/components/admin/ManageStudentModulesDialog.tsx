@@ -44,9 +44,7 @@ export function ManageStudentModulesDialog({
   const [moduleId, setModuleId] = useState(
     defaultModule ? String(defaultModule.id) : '',
   )
-  const [amountPaid, setAmountPaid] = useState(defaultModule?.price ?? '0.00')
   const [expiresAt, setExpiresAt] = useState(defaultExpiryValue())
-  const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')
   const [message, setMessage] = useState('')
   const [savingId, setSavingId] = useState<number | 'new' | null>(null)
@@ -62,14 +60,6 @@ export function ManageStudentModulesDialog({
   )
   const modules = data.modules.filter((module) => module.is_published)
 
-  function selectModule(nextModuleId: string) {
-    const module = data.modules.find(
-      (candidate) => candidate.id === Number(nextModuleId),
-    )
-    setModuleId(nextModuleId)
-    setAmountPaid(module?.price ?? '0.00')
-  }
-
   async function activate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const module = data.modules.find(
@@ -80,7 +70,7 @@ export function ManageStudentModulesDialog({
     const accessType = moduleSubjectIds(module).some((subjectId) =>
       enrolledSubjectIds.has(subjectId),
     )
-      ? 'PAYMENT'
+      ? 'ENROLLED'
       : 'ADVANCE_STUDY'
     const existing = grants.find(
       (grant) =>
@@ -95,21 +85,18 @@ export function ManageStudentModulesDialog({
         {
           body: JSON.stringify({
             access_type: accessType,
-            amount_paid: amountPaid,
             expires_at: expiresAt
               ? new Date(expiresAt).toISOString()
               : null,
             is_active: true,
             module: module.id,
             notes,
-            payment_reference: reference,
-            payment_status: 'PAID',
             student: studentId,
           }),
           method: existing ? 'PATCH' : 'POST',
         },
       )
-      setMessage('Cash payment recorded and module access activated.')
+      setMessage('Module access activated.')
       await refresh()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -137,11 +124,9 @@ export function ManageStudentModulesDialog({
 
   function prepareRenewal(grant: ModuleAccess) {
     setModuleId(String(grant.module))
-    setAmountPaid(grant.amount_paid)
     setExpiresAt(defaultExpiryValue())
-    setReference(grant.payment_reference)
     setNotes(grant.notes)
-    setMessage('Review the payment details and record the new activation.')
+    setMessage('Review the access details and renew the activation.')
   }
 
   return (
@@ -152,7 +137,7 @@ export function ManageStudentModulesDialog({
       role="dialog"
     >
       <button
-        aria-label="Close module payment"
+        aria-label="Close module access"
         className="attendance-modal__backdrop"
         onClick={onClose}
         type="button"
@@ -160,7 +145,7 @@ export function ManageStudentModulesDialog({
       <div className="attendance-modal__panel attendance-modal__panel--wide student-module-access-dialog">
         <div className="attendance-modal__header">
           <div>
-            <strong id="manage-student-modules-title">Module Payment And Access</strong>
+            <strong id="manage-student-modules-title">Module Access</strong>
             <span>{studentName}</span>
           </div>
           <button className="icon-button" onClick={onClose} title="Close" type="button">
@@ -172,14 +157,14 @@ export function ManageStudentModulesDialog({
           <div>
             <p className="eyebrow">Class enrollment</p>
             <h3>Enrolled Modules</h3>
-            <p>Enrolled modules remain locked until cash payment is recorded.</p>
+            <p>Enrolled modules remain locked until a teacher activates access.</p>
           </div>
           <div className="student-module-access-list">
             {enrolledModules.map((module) => {
               const grant = grants.find(
                 (candidate) =>
                   candidate.module === module.id &&
-                  candidate.access_type === 'PAYMENT',
+                  candidate.access_type === 'ENROLLED',
               )
               return (
                 <article key={module.id}>
@@ -208,15 +193,15 @@ export function ManageStudentModulesDialog({
 
         <section className="student-module-access-section">
           <div>
-            <p className="eyebrow">Cash activation</p>
-            <h3>Record Module Payment</h3>
-            <p>Selecting a non-enrolled module records an advance-module purchase.</p>
+            <p className="eyebrow">Teacher activation</p>
+            <h3>Activate Module Access</h3>
+            <p>Selecting a non-enrolled module grants advance-study access.</p>
           </div>
           <form className="student-module-grant-form" onSubmit={activate}>
             <label className="admin-field">
               <span>Module</span>
               <select
-                onChange={(event) => selectModule(event.target.value)}
+                onChange={(event) => setModuleId(event.target.value)}
                 required
                 value={moduleId}
               >
@@ -229,31 +214,12 @@ export function ManageStudentModulesDialog({
               </select>
             </label>
             <label className="admin-field">
-              <span>Amount paid</span>
-              <input
-                min="0"
-                onChange={(event) => setAmountPaid(event.target.value)}
-                required
-                step="0.01"
-                type="number"
-                value={amountPaid}
-              />
-            </label>
-            <label className="admin-field">
               <span>Access expires</span>
               <input
                 onChange={(event) => setExpiresAt(event.target.value)}
                 required
                 type="datetime-local"
                 value={expiresAt}
-              />
-            </label>
-            <label className="admin-field">
-              <span>Receipt / reference</span>
-              <input
-                onChange={(event) => setReference(event.target.value)}
-                type="text"
-                value={reference}
               />
             </label>
             <label className="admin-field admin-field--wide">
@@ -266,7 +232,7 @@ export function ManageStudentModulesDialog({
             </label>
             <button className="button button--primary" disabled={savingId !== null} type="submit">
               <Icon name="shield" />
-              <span>{savingId ? 'Saving...' : 'Record Payment'}</span>
+              <span>{savingId ? 'Saving...' : 'Activate Access'}</span>
             </button>
           </form>
 
@@ -293,11 +259,11 @@ export function ManageStudentModulesDialog({
                         ? ` · Expires ${formatDateTime(grant.expires_at)}`
                         : ''}
                     </span>
-                    <small>Paid {Number(grant.amount_paid).toFixed(2)}</small>
+                    <small>{grant.status}</small>
                   </div>
                   <div className="student-module-access-list__actions">
                     <span className={grant.is_available ? 'status-pill status-pill--success' : 'status-pill'}>
-                      {grant.is_available ? 'Active' : grant.is_active ? 'Expired' : 'Revoked'}
+                      {grant.status === 'ACTIVE' ? 'Active' : grant.status === 'EXPIRED' ? 'Expired' : 'Revoked'}
                     </span>
                     {grant.is_available ? (
                       <button
@@ -325,7 +291,7 @@ export function ManageStudentModulesDialog({
               )
             })}
             {!grants.length ? (
-              <p className="admin-empty-line">No module payments recorded.</p>
+              <p className="admin-empty-line">No module access grants recorded.</p>
             ) : null}
           </div>
         </section>

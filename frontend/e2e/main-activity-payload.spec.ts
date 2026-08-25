@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('module workspace uses attempt summaries and hydrates only the opened attempt once', async ({ page }) => {
   await page.goto('/modules')
-  await page.getByLabel('Username').fill('e2e-student-1')
+  await page.getByLabel('Username').fill('E2E-001')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((url) => url.pathname === '/')

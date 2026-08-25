@@ -79,8 +79,6 @@ type AvailableStudent = {
   id: number
   display_name: string
   student_number: string
-  section: string
-  year_level: number | null
   enrollment_status: 'not_enrolled' | 'inactive'
 }
 
@@ -2123,7 +2121,6 @@ function AddStudentsModal({
                       <strong>{student.display_name}</strong>
                       <small>
                         {student.student_number || 'No student number'}
-                        {student.section ? ` · Section ${student.section}` : ''}
                       </small>
                     </span>
                     {student.enrollment_status === 'inactive' ? <em>Will reactivate</em> : null}
@@ -2233,8 +2230,8 @@ function AddStudentsModal({
           ) : null}
           {newCredentials.length ? (
             <div className="class-import-credentials" role="status">
-              <strong>Save the new student credentials now</strong>
-              <span>They are available only in this dialog and cannot be recovered from the server.</span>
+              <strong>New students use their student number to sign in</strong>
+              <span>The initial username and password are the student number. A secure password is required after first login.</span>
               <button
                 className="button button--secondary"
                 onClick={() => downloadNewStudentCredentials(newCredentials)}
@@ -2715,7 +2712,7 @@ function modulesForSubject(modules: Module[], subjectId: number) {
 }
 
 function parseStudentImport(text: string): StudentImportRow[] {
-  const rows = parseCsvRows(text).filter((row) =>
+  const rows = parseCsvRows(text.replace(/^\uFEFF/, '')).filter((row) =>
     row.some((cell) => cell.trim()),
   )
 
@@ -2726,6 +2723,10 @@ function parseStudentImport(text: string): StudentImportRow[] {
   const headers = rows[0].map(normalizeImportHeader)
   const hasHeader = headers.includes('student_number')
   const dataRows = hasHeader ? rows.slice(1) : rows
+
+  if (!dataRows.length) {
+    throw new Error('The imported file does not contain any student rows.')
+  }
 
   const parsedRows = dataRows.map((row, index) => {
     const getCell = (name: string, fallbackIndex: number) => {

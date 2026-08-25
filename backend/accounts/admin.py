@@ -26,6 +26,6 @@ class AralForgeUserAdmin(UserAdmin):
 
 @admin.register(StudentProfile)
 class StudentProfileAdmin(admin.ModelAdmin):
-    list_display = ('student_number', 'user', 'section', 'year_level', 'is_active')
-    list_filter = ('is_active', 'section', 'year_level')
+    list_display = ('student_number', 'user', 'is_active')
+    list_filter = ('is_active',)
     search_fields = ('student_number', 'user__username', 'user__first_name', 'user__last_name')

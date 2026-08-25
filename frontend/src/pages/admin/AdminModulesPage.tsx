@@ -13,7 +13,7 @@ import type {
   ModuleLessonExample,
   ModuleTopic,
 } from '../../types'
-import { formatDateTime, numeric, toErrorMessage } from '../../utils/format'
+import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
   getLessonSections,
@@ -1192,7 +1192,7 @@ function TopicSummaryCard({
         <div className="module-topic-pills" aria-label="Topic metadata">
           <span>Topic: {selectedTopic.is_published ? 'Published' : 'Draft'}</span>
           <span>Module: {module.is_published ? 'Published' : 'Draft'}</span>
-          <span>{module.is_paid ? `Paid ${numeric(module.price).toFixed(2)}` : 'Free'}</span>
+          <span>{module.is_published ? 'Available for access' : 'Not available to students'}</span>
           <span>{totalLessons} lesson{totalLessons === 1 ? '' : 's'}</span>
         </div>
       </div>

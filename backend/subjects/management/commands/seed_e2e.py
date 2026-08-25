@@ -43,7 +43,7 @@ class Command(BaseCommand):
         for index, name in enumerate(('Alex Rivera', 'Jamie Santos', 'Morgan Lee'), start=1):
             first_name, last_name = name.split(' ', 1)
             student = User.objects.create_user(
-                username=f'e2e-student-{index}',
+                username=f'E2E-00{index}',
                 password='e2e-password',
                 first_name=first_name,
                 last_name=last_name,
@@ -52,8 +52,6 @@ class Command(BaseCommand):
             StudentProfile.objects.create(
                 user=student,
                 student_number=f'E2E-00{index}',
-                section='E2E-A',
-                year_level=1,
             )
             students.append(student)
 
@@ -174,11 +172,9 @@ class Command(BaseCommand):
             title__startswith='Resume ',
         ).update(is_published=True)
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=teacher,
-            amount_paid=100,
             module=resume_module,
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             student=students[0],
         )
 
@@ -325,11 +321,9 @@ class Command(BaseCommand):
             },
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=teacher,
-            amount_paid=100,
             module=hydration_module,
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             student=students[0],
         )
 

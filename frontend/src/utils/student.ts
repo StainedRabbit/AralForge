@@ -251,9 +251,9 @@ export function moduleSubjectLabel(data: RouteData, module: Module) {
 }
 
 export function moduleAccessLabel(_data: RouteData, module: Module) {
-  if (module.access_status === 'ADVANCE_PAID') return 'Advance module'
-  if (module.access_status === 'ENROLLED_PAID') return 'Paid access'
-  if (module.access_status === 'LOCKED') return 'Payment required'
+  if (module.access_status === 'ADVANCE_ACTIVE') return 'Advance access'
+  if (module.access_status === 'ENROLLED_ACTIVE') return 'Active access'
+  if (module.access_status === 'LOCKED') return 'Locked'
   return module.is_accessible ? 'Active access' : 'Locked'
 }
 

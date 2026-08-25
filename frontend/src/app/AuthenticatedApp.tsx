@@ -45,7 +45,7 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
     <RouteWorkspace api={api} currentUser={user} profile={profile} resources={resources}>{render}</RouteWorkspace>
 
   return <div className="app-shell">
-    <Sidebar currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} />
+    <Sidebar currentUser={user} pendingCount={pendingCount} onLogout={onLogout} />
     <main className="app-main">
       <MobileHeader currentUser={user} pendingCount={pendingCount} onLogout={onLogout} />
       <Suspense fallback={<Page><SkeletonList count={4} /></Page>}>

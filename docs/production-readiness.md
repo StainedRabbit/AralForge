@@ -103,20 +103,23 @@ Encrypt the backup directory with the organization-approved encryption tool befo
    python manage.py verify_media_storage --source /secure/media
    ```
 
-5. Rotate all migrated credentials. The output must be outside the repository and securely deleted after distribution:
+5. Back up the staging database, preflight every student number, then synchronize all active and inactive student credentials:
 
    ```bash
-   python manage.py prepare_migrated_users --confirm --output /secure/temporary-credentials.csv
+   python manage.py sync_student_credentials --dry-run
+   python manage.py sync_student_credentials --confirm
    ```
+
+   The confirmed command sets each student username and temporary password to the exact student number and requires the existing first-login password setup. It aborts without changes if it finds an invalid number, a case-insensitive duplicate, a non-student username conflict, or a profile linked to a non-student account. Admin and teacher credentials are not changed.
 
 6. Confirm `learning_modules.0019_activity_reliability` is applied and create/delete a disposable record to prove PostgreSQL sequences advanced correctly.
 
 ## Staging acceptance
 
 - `GET /api/health/` returns `200 {"status":"ok"}`.
-- Admin and student logins work, and every migrated account must change its temporary password.
+- Admin logins remain unchanged. Students sign in with their student number as both username and temporary password, then must create a secure password.
 - Students cannot see another student's grades, attendance, attempts, submissions, or uploaded files.
-- Free/paid module access, mock exams, activity grading, attendance, and gradebook workflows pass.
+- Teacher-controlled module access, mock exams, activity grading, attendance, and gradebook workflows pass.
 - Uploaded files remain available after a Railway redeploy; unsigned private bucket URLs fail.
 - Lesson and module PDFs render remote images and download correctly.
 - The browser E2E suite passes against the release code.
@@ -136,7 +139,7 @@ Encrypt the backup directory with the organization-approved encryption tool befo
 
 1. Freeze source writes and repeat the encrypted database/media backups.
 2. Import the final data into the separate production Supabase project and private Cloudflare R2 `aralforge-media-production` bucket.
-3. Run media verification and credential rotation before exposing the frontend.
+3. Run media verification, back up Supabase, then run `sync_student_credentials --dry-run` followed by `sync_student_credentials --confirm` before exposing the frontend.
 4. Push only the validated commit to `production`, then run the health, login, authorization, upload, PDF, grades, and attendance smoke tests.
 5. Keep the previous application commit, database backup/PITR point, and independent media backup.
 6. For an application rollback, redeploy the prior commit and leave forward-compatible schema in place. Restore database or media only for confirmed data corruption; never delete storage objects during an application-only rollback.

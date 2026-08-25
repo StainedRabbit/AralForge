@@ -1947,8 +1947,6 @@ class Command(BaseCommand):
             'IntelliJ IDEA Community Edition or VS Code with Java extensions, Java documentation, printed '
             'flowchart guides, worksheets, and sample code snippets.'
         )
-        module.is_paid = False
-        module.price = '0.00'
         module.is_published = True
         module.save()
         module.subjects.add(subject)

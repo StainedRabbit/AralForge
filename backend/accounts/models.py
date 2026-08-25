@@ -26,8 +26,6 @@ class StudentProfile(models.Model):
         related_name='student_profile',
     )
     student_number = models.CharField(max_length=30, unique=True)
-    section = models.CharField(max_length=80, blank=True)
-    year_level = models.PositiveSmallIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 

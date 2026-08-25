@@ -28,8 +28,6 @@ class Module(models.Model):
     pdf_file = models.FileField(upload_to='module_pdfs/', blank=True)
     pdf_generated_at = models.DateTimeField(null=True, blank=True)
     pdf_is_outdated = models.BooleanField(default=True)
-    is_paid = models.BooleanField(default=True)
-    price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     subjects = models.ManyToManyField(
         'subjects.Subject',
         blank=True,
@@ -277,13 +275,13 @@ class ModuleLesson(models.Model):
 
 class ModuleAccess(models.Model):
     class AccessType(models.TextChoices):
-        PAYMENT = 'PAYMENT', 'Payment'
+        ENROLLED = 'ENROLLED', 'Enrolled Module'
         ADVANCE_STUDY = 'ADVANCE_STUDY', 'Advance Study'
 
-    class PaymentStatus(models.TextChoices):
-        UNPAID = 'UNPAID', 'Unpaid'
-        PAID = 'PAID', 'Paid'
-        WAIVED = 'WAIVED', 'Waived'
+    class Status(models.TextChoices):
+        ACTIVE = 'ACTIVE', 'Active'
+        EXPIRED = 'EXPIRED', 'Expired'
+        REVOKED = 'REVOKED', 'Revoked'
 
     module = models.ForeignKey(
         Module,
@@ -305,15 +303,8 @@ class ModuleAccess(models.Model):
     access_type = models.CharField(
         max_length=20,
         choices=AccessType,
-        default=AccessType.PAYMENT,
+        default=AccessType.ENROLLED,
     )
-    payment_status = models.CharField(
-        max_length=20,
-        choices=PaymentStatus,
-        default=PaymentStatus.PAID,
-    )
-    amount_paid = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    payment_reference = models.CharField(max_length=120, blank=True)
     is_active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
@@ -331,18 +322,16 @@ class ModuleAccess(models.Model):
         verbose_name_plural = 'module access grants'
 
     @property
+    def status(self):
+        if not self.is_active or not self.activated_by_id:
+            return self.Status.REVOKED
+        if not self.expires_at or self.expires_at <= timezone.now():
+            return self.Status.EXPIRED
+        return self.Status.ACTIVE
+
+    @property
     def is_available(self):
-        if not self.is_active:
-            return False
-
-        if self.expires_at is not None and self.expires_at <= timezone.now():
-            return False
-
-        return (
-            self.activated_by_id is not None
-            and self.expires_at is not None
-            and self.payment_status == self.PaymentStatus.PAID
-        )
+        return self.status == self.Status.ACTIVE
 
     def clean(self):
         super().clean()
@@ -355,12 +344,7 @@ class ModuleAccess(models.Model):
         if self.is_active and not self.activated_by_id:
             from django.core.exceptions import ValidationError
 
-            raise ValidationError('Paid module access must identify the teacher who activated it.')
-
-        if self.is_active and self.payment_status != self.PaymentStatus.PAID:
-            from django.core.exceptions import ValidationError
-
-            raise ValidationError('Active module access requires a paid cash payment.')
+            raise ValidationError('Active module access must identify the teacher who activated it.')
 
         if self.is_active and not self.expires_at:
             self.expires_at = add_calendar_months(timezone.now(), 5)
@@ -379,7 +363,6 @@ def active_module_access_filter(user, prefix=''):
         Q(**{f'{access_prefix}student': user})
         & Q(**{f'{access_prefix}is_active': True})
         & Q(**{f'{access_prefix}activated_by__isnull': False})
-        & Q(**{f'{access_prefix}payment_status': ModuleAccess.PaymentStatus.PAID})
         & Q(**{f'{access_prefix}expires_at__gt': timezone.now()})
     )
 
@@ -406,7 +389,6 @@ def user_has_module_access(user, module):
         student=user,
         is_active=True,
         activated_by__isnull=False,
-        payment_status=ModuleAccess.PaymentStatus.PAID,
         expires_at__gt=timezone.now(),
     ).exists()
 

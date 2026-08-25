@@ -645,7 +645,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await importDialog.getByLabel('Student list CSV').setInputFiles({
     name: 'new-student.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from("Student Number,Last Name,First Name,Middle Name,Email,Section\r\nE2E-NEW-01,young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n"),
+    buffer: Buffer.from("\uFEFFStudent Number,Last Name,First Name,Middle Name,Email,Section\r\nE2E-NEW-01,young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n"),
   })
   await expect(importDialog.getByLabel('Roster import preview')).toContainText('Create account')
   await expect(importDialog.getByLabel('Roster import preview')).toContainText('Robin Mae Ann-Marie Young')

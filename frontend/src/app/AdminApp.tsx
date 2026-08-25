@@ -42,7 +42,7 @@ const GRADEBOOK: WorkspaceResource[] = ['users','schedules','enrollments','modul
 export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: { api: AuthedRequest; currentUser: User; profile: StudentProfile | null; pendingCount: number; onLogout: () => void }) {
   const scoped = (resources: readonly WorkspaceResource[], render: Parameters<typeof RouteWorkspace>[0]['children']) => <RouteWorkspace api={api} currentUser={currentUser} profile={profile} resources={resources}>{render}</RouteWorkspace>
   return <div className="app-shell">
-    <Sidebar badgePath="/admin/grades" currentUser={currentUser} items={nav} pendingCount={pendingCount} profile={profile} workspaceLabel="Teacher console" onLogout={onLogout} />
+    <Sidebar badgePath="/admin/grades" currentUser={currentUser} items={nav} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} />
     <main className="app-main"><MobileHeader currentUser={currentUser} pendingCount={pendingCount} onLogout={onLogout} />
       <Suspense fallback={<SkeletonList count={4} />}><Routes>
         <Route path="/admin" element={<AdminDashboardPage api={api} currentUser={currentUser} />} />

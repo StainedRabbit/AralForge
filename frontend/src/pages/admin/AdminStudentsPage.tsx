@@ -39,7 +39,6 @@ export function AdminStudentsPage({
   const [managedStudentId, setManagedStudentId] = useState<number | null>(null)
   const students = studentUsers(data.users)
   const studentOptions = toOptions(students, (user) => user.id, fullName)
-  const userOptions = toOptions(data.users, (user) => user.id, fullName)
   const scheduleOptions = toOptions(
     data.schedules,
     (schedule) => schedule.id,
@@ -56,7 +55,7 @@ export function AdminStudentsPage({
       <PageHeader
         eyebrow="People and access"
         title="Students"
-        description="Create accounts, maintain student profiles, enroll students, and record cash module payments."
+        description="Create accounts, maintain student profiles, enroll students, and manage module access."
       />
 
       <QuickStudentSetupPanel api={api} refresh={refresh} />
@@ -96,9 +95,9 @@ export function AdminStudentsPage({
       <AdminResourcePanel<StudentProfile>
         api={api}
         endpoint="/accounts/students/"
-        fields={profileFields(userOptions)}
+        fields={profileFields}
         getSearchText={(profile) =>
-          `${profile.student_number} ${profile.section} ${userName(data.users, profile.user)}`
+          `${profile.student_number} ${userName(data.users, profile.user)}`
         }
         items={data.profiles}
         noun="Student profile"
@@ -107,11 +106,7 @@ export function AdminStudentsPage({
         columns={[
           { header: 'Student', render: (profile) => userName(data.users, profile.user) },
           { header: 'Number', render: (profile) => profile.student_number },
-          { header: 'Section', render: (profile) => profile.section || 'Not set' },
-          {
-            header: 'Year',
-            render: (profile) => profile.year_level?.toString() ?? 'Not set',
-          },
+          { header: 'Active', render: (profile) => booleanLabel(profile.is_active) },
         ]}
       />
 
@@ -142,17 +137,17 @@ export function AdminStudentsPage({
         endpoint="/modules/access/"
         fields={accessFields(moduleOptions, studentOptions)}
         getSearchText={(grant) =>
-          `${grant.student_name} ${grant.module_title} ${grant.payment_status} ${grant.payment_reference}`
+          `${grant.student_name} ${grant.module_title} ${grant.status} ${grant.access_type}`
         }
-        items={data.moduleAccess.filter((grant) => grant.access_type === 'PAYMENT')}
+        items={data.moduleAccess}
         noun="Module access"
         onRefresh={refresh}
-        title="Module Payment Records"
+        title="Module Access Grants"
         columns={[
           { header: 'Student', render: (grant) => grant.student_name },
           { header: 'Module', render: (grant) => moduleName(data.modules, grant.module) },
-          { header: 'Status', render: (grant) => grant.payment_status },
-          { header: 'Available', render: (grant) => booleanLabel(grant.is_available) },
+          { header: 'Type', render: (grant) => grant.access_type === 'ENROLLED' ? 'Enrolled' : 'Advance study' },
+          { header: 'Status', render: (grant) => grant.status },
           { header: 'Expires', render: (grant) => compactDateTime(grant.expires_at) },
         ]}
       />
@@ -224,14 +219,10 @@ function QuickStudentSetupPanel({
   api: AuthedRequest
   refresh: () => Promise<void>
 }) {
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [studentNumber, setStudentNumber] = useState('')
-  const [section, setSection] = useState('')
-  const [yearLevel, setYearLevel] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -241,39 +232,22 @@ function QuickStudentSetupPanel({
     setMessage('')
 
     try {
-      const user = await api<User>('/accounts/users/', {
+      await api<StudentProfile>('/accounts/students/', {
         body: JSON.stringify({
           email,
           first_name: firstName,
           is_active: true,
           last_name: lastName,
-          password,
-          role: 'STUDENT',
-          username,
-        }),
-        method: 'POST',
-      })
-
-      await api('/accounts/students/', {
-        body: JSON.stringify({
-          is_active: true,
-          section,
           student_number: studentNumber,
-          user: user.id,
-          year_level: yearLevel ? Number(yearLevel) : null,
         }),
         method: 'POST',
       })
 
-      setUsername('')
-      setPassword('')
       setEmail('')
       setFirstName('')
       setLastName('')
       setStudentNumber('')
-      setSection('')
-      setYearLevel('')
-      setMessage('Student account created.')
+      setMessage('Student account created. The initial username and password are the student number.')
       await refresh()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -286,24 +260,6 @@ function QuickStudentSetupPanel({
     <section className="admin-resource section-block">
       <SectionHeading subtitle="Student records" title="Quick Student Setup" />
       <form className="admin-inline-form" onSubmit={createStudent}>
-        <label className="admin-field">
-          <span>Username</span>
-          <input
-            onChange={(event) => setUsername(event.target.value)}
-            required
-            type="text"
-            value={username}
-          />
-        </label>
-        <label className="admin-field">
-          <span>Password</span>
-          <input
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            type="password"
-            value={password}
-          />
-        </label>
         <label className="admin-field">
           <span>First name</span>
           <input
@@ -337,22 +293,6 @@ function QuickStudentSetupPanel({
             value={studentNumber}
           />
         </label>
-        <label className="admin-field">
-          <span>Section</span>
-          <input
-            onChange={(event) => setSection(event.target.value)}
-            type="text"
-            value={section}
-          />
-        </label>
-        <label className="admin-field">
-          <span>Year level</span>
-          <input
-            onChange={(event) => setYearLevel(event.target.value)}
-            type="number"
-            value={yearLevel}
-          />
-        </label>
         <button className="button button--primary" disabled={saving} type="submit">
           <Icon name="save" />
           <span>{saving ? 'Creating...' : 'Create student'}</span>
@@ -378,8 +318,6 @@ function BulkModuleAccessPanel({
 }) {
   const [moduleId, setModuleId] = useState('')
   const [scheduleId, setScheduleId] = useState('')
-  const [amountPaid, setAmountPaid] = useState('0.00')
-  const [reference, setReference] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const selectedModule = data.modules.find((module) => module.id === Number(moduleId))
@@ -419,7 +357,7 @@ function BulkModuleAccessPanel({
         students.map((student) => {
           const existing = data.moduleAccess.find(
             (grant) =>
-              grant.access_type === 'PAYMENT' &&
+              grant.access_type === 'ENROLLED' &&
               grant.module === selectedModule.id &&
               grant.student === student.id,
           )
@@ -429,13 +367,10 @@ function BulkModuleAccessPanel({
 
           return api(endpoint, {
             body: JSON.stringify({
-              amount_paid: amountPaid || selectedModule.price,
-              access_type: 'PAYMENT',
+              access_type: 'ENROLLED',
               is_active: true,
               module: selectedModule.id,
               notes: `Activated from ${scheduleName(data.schedules, data.subjects, Number(scheduleId))}`,
-              payment_reference: reference,
-              payment_status: 'PAID',
               student: student.id,
             }),
             method: existing ? 'PATCH' : 'POST',
@@ -461,13 +396,7 @@ function BulkModuleAccessPanel({
         <label className="admin-field">
           <span>Module</span>
           <select
-            onChange={(event) => {
-              const nextModule = data.modules.find(
-                (module) => module.id === Number(event.target.value),
-              )
-              setModuleId(event.target.value)
-              setAmountPaid(nextModule?.price ?? '0.00')
-            }}
+            onChange={(event) => setModuleId(event.target.value)}
             required
             value={moduleId}
           >
@@ -494,23 +423,6 @@ function BulkModuleAccessPanel({
             ))}
           </select>
         </label>
-        <label className="admin-field">
-          <span>Amount</span>
-          <input
-            onChange={(event) => setAmountPaid(event.target.value)}
-            required
-            type="number"
-            value={amountPaid}
-          />
-        </label>
-        <label className="admin-field admin-field--wide">
-          <span>Reference</span>
-          <input
-            onChange={(event) => setReference(event.target.value)}
-            type="text"
-            value={reference}
-          />
-        </label>
         <button className="button button--primary" disabled={saving} type="submit">
           <Icon name="shield" />
           <span>{saving ? 'Saving...' : 'Activate access'}</span>
@@ -528,7 +440,7 @@ const userFields: AdminField<User>[] = [
   { label: 'First name', name: 'first_name', type: 'text' },
   { label: 'Last name', name: 'last_name', type: 'text' },
   {
-    defaultValue: 'STUDENT',
+    defaultValue: 'TEACHER',
     label: 'Role',
     name: 'role',
     options: roleOptions,
@@ -543,27 +455,15 @@ const userFields: AdminField<User>[] = [
   },
 ]
 
-function profileFields(userOptions: { label: string; value: number | string }[]) {
-  return [
-    {
-      label: 'User',
-      name: 'user',
-      options: userOptions,
-      parse: Number,
-      required: true,
-      type: 'select',
-    },
-    { label: 'Student number', name: 'student_number', required: true, type: 'text' },
-    { label: 'Section', name: 'section', type: 'text' },
-    { label: 'Year level', name: 'year_level', nullable: true, type: 'number' },
-    {
-      defaultValue: true,
-      label: 'Active',
-      name: 'is_active',
-      type: 'checkbox',
-    },
-  ] satisfies AdminField<StudentProfile>[]
-}
+const profileFields = [
+  { label: 'Student number', name: 'student_number', required: true, type: 'text' },
+  {
+    defaultValue: true,
+    label: 'Active',
+    name: 'is_active',
+    type: 'checkbox',
+  },
+] satisfies AdminField<StudentProfile>[]
 
 function enrollmentFields(
   scheduleOptions: { label: string; value: number | string }[],
@@ -601,11 +501,11 @@ function accessFields(
 ) {
   return [
     {
-      defaultValue: 'PAYMENT',
+      defaultValue: 'ENROLLED',
       label: 'Access type',
       name: 'access_type',
       options: [
-        { label: 'Enrolled module', value: 'PAYMENT' },
+        { label: 'Enrolled module', value: 'ENROLLED' },
         { label: 'Advance module', value: 'ADVANCE_STUDY' },
       ],
       readOnlyOnEdit: true,
@@ -628,16 +528,6 @@ function accessFields(
       required: true,
       type: 'select',
     },
-    {
-      defaultValue: 'PAID',
-      label: 'Payment status',
-      name: 'payment_status',
-      options: [{ label: 'Paid', value: 'PAID' }],
-      required: true,
-      type: 'select',
-    },
-    { defaultValue: '0.00', label: 'Amount paid', name: 'amount_paid', type: 'number' },
-    { label: 'Reference', name: 'payment_reference', type: 'text' },
     { label: 'Expires at', name: 'expires_at', nullable: true, type: 'datetime-local' },
     { label: 'Notes', name: 'notes', rows: 3, type: 'textarea' },
     {

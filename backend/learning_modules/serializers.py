@@ -98,8 +98,6 @@ class ModuleSerializer(serializers.ModelSerializer):
             'pdf_file',
             'pdf_generated_at',
             'pdf_is_outdated',
-            'is_paid',
-            'price',
             'is_accessible',
             'access_status',
             'has_pdf',
@@ -135,15 +133,14 @@ class ModuleSerializer(serializers.ModelSerializer):
             student=request.user,
             is_active=True,
             activated_by__isnull=False,
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             expires_at__gt=timezone.now(),
         ).order_by('-updated_at').first()
         if not grant:
             return 'LOCKED'
         return (
-            'ADVANCE_PAID'
+            'ADVANCE_ACTIVE'
             if grant.access_type == ModuleAccess.AccessType.ADVANCE_STUDY
-            else 'ENROLLED_PAID'
+            else 'ENROLLED_ACTIVE'
         )
 
     def get_has_pdf(self, obj):
@@ -173,6 +170,7 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     activated_by_name = serializers.SerializerMethodField()
     is_available = serializers.BooleanField(read_only=True)
+    status = serializers.CharField(read_only=True)
 
     class Meta:
         model = ModuleAccess
@@ -185,11 +183,9 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
             'activated_by',
             'activated_by_name',
             'access_type',
-            'payment_status',
-            'amount_paid',
-            'payment_reference',
             'is_active',
             'is_available',
+            'status',
             'expires_at',
             'notes',
             'activated_at',
@@ -224,14 +220,10 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
         student = attrs.get('student') or getattr(self.instance, 'student', None)
         if module and student:
             attrs['access_type'] = (
-                ModuleAccess.AccessType.PAYMENT
+                ModuleAccess.AccessType.ENROLLED
                 if user_has_module_class_access(student, module)
                 else ModuleAccess.AccessType.ADVANCE_STUDY
             )
-
-        attrs['payment_status'] = ModuleAccess.PaymentStatus.PAID
-        if module and 'amount_paid' not in attrs:
-            attrs['amount_paid'] = module.price
 
         renewing = (
             self.instance

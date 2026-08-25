@@ -82,13 +82,11 @@ class ModuleAccessApiTests(APITestCase):
             title='Free Topic',
             slug='free-topic',
             subject=self.subject,
-            is_paid=False,
             is_published=True,
         )
         self.paid_module = Module.objects.create(
             title='Paid Topic',
             slug='paid-topic',
-            is_paid=True,
             is_published=True,
         )
         self.paid_module.subjects.add(self.subject)
@@ -100,11 +98,10 @@ class ModuleAccessApiTests(APITestCase):
             title='Advanced Programming Module',
             slug='advanced-programming-module',
             subject=self.advance_subject,
-            is_paid=True,
             is_published=True,
         )
 
-    def test_student_sees_enrolled_modules_as_locked_without_payment(self):
+    def test_student_sees_enrolled_modules_as_locked_without_access(self):
         self.client.force_authenticate(self.student)
 
         response = self.client.get('/api/modules/modules/')
@@ -115,13 +112,14 @@ class ModuleAccessApiTests(APITestCase):
         statuses = {module['id']: module['access_status'] for module in result_rows(response)}
         self.assertEqual(statuses[self.free_module.id], 'LOCKED')
         self.assertEqual(statuses[self.paid_module.id], 'LOCKED')
+        self.assertNotIn('is_paid', result_rows(response)[0])
+        self.assertNotIn('price', result_rows(response)[0])
 
-    def test_student_sees_paid_module_after_active_grant(self):
+    def test_student_sees_enrolled_module_after_active_grant(self):
         grant = ModuleAccess.objects.create(
             activated_by=self.teacher,
             module=self.paid_module,
             student=self.student,
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             is_active=True,
         )
         self.client.force_authenticate(self.student)
@@ -136,14 +134,11 @@ class ModuleAccessApiTests(APITestCase):
             add_calendar_months(grant.activated_at, 5).date(),
         )
 
-    def test_advance_study_grant_bypasses_enrollment_and_payment(self):
+    def test_advance_study_grant_bypasses_enrollment(self):
         grant = ModuleAccess.objects.create(
             access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
             activated_by=self.teacher,
-            amount_paid=500,
             module=self.advance_module,
-            payment_reference='SHOULD-CLEAR',
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             student=self.student,
         )
         self.client.force_authenticate(self.student)
@@ -156,9 +151,7 @@ class ModuleAccessApiTests(APITestCase):
             {module['id'] for module in result_rows(response)},
         )
         grant.refresh_from_db()
-        self.assertEqual(grant.amount_paid, 500)
-        self.assertEqual(grant.payment_reference, 'SHOULD-CLEAR')
-        self.assertEqual(grant.payment_status, ModuleAccess.PaymentStatus.PAID)
+        self.assertEqual(grant.status, ModuleAccess.Status.ACTIVE)
         self.assertIsNotNone(grant.expires_at)
 
     def test_expired_advance_grant_does_not_unlock_module(self):
@@ -178,9 +171,9 @@ class ModuleAccessApiTests(APITestCase):
             {module['id'] for module in result_rows(response)},
         )
 
-    def test_payment_and_advance_grants_can_coexist(self):
-        payment = ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+    def test_enrolled_and_advance_grants_can_coexist(self):
+        enrolled = ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.paid_module,
             student=self.student,
@@ -192,7 +185,7 @@ class ModuleAccessApiTests(APITestCase):
             student=self.student,
         )
 
-        self.assertNotEqual(payment.id, advance.id)
+        self.assertNotEqual(enrolled.id, advance.id)
         self.assertEqual(
             ModuleAccess.objects.filter(
                 module=self.paid_module,
@@ -216,6 +209,27 @@ class ModuleAccessApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_teacher_creates_status_only_enrolled_grant(self):
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/modules/access/',
+            {
+                'module': self.paid_module.id,
+                'student': self.student.id,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['access_type'], ModuleAccess.AccessType.ENROLLED)
+        self.assertEqual(response.data['status'], ModuleAccess.Status.ACTIVE)
+        self.assertTrue(response.data['is_available'])
+        self.assertIsNotNone(response.data['expires_at'])
+        self.assertNotIn('payment_status', response.data)
+        self.assertNotIn('amount_paid', response.data)
+        self.assertNotIn('payment_reference', response.data)
+
     def test_locked_enrolled_module_hides_child_content(self):
         topic = ModuleTopic.objects.create(
             module=self.paid_module,
@@ -231,7 +245,7 @@ class ModuleAccessApiTests(APITestCase):
             module=self.paid_module,
             topic=topic,
             title='Locked Activity',
-            instructions='Complete this after payment.',
+            instructions='Complete this after activation.',
             is_published=True,
         )
         problem = ProgrammingProblem.objects.create(
@@ -240,7 +254,7 @@ class ModuleAccessApiTests(APITestCase):
             lesson=lesson,
             title='Locked Problem',
             slug='locked-problem',
-            description='Solve after payment.',
+            description='Solve after activation.',
             is_published=True,
         )
         assessment = Assessment.objects.create(
@@ -274,7 +288,7 @@ class ModuleAccessApiTests(APITestCase):
         )
         self.assertNotIn(progress.id, {item['id'] for item in result_rows(progress_response)})
 
-    def test_payment_grant_unlocks_web_module_content(self):
+    def test_enrolled_grant_unlocks_web_module_content(self):
         topic = ModuleTopic.objects.create(
             module=self.paid_module,
             title='Paid Topic',
@@ -314,7 +328,7 @@ class ModuleAccessApiTests(APITestCase):
             completed_at=timezone.now(),
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.paid_module,
             student=self.student,
@@ -333,7 +347,7 @@ class ModuleAccessApiTests(APITestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(expected_id, {item['id'] for item in result_rows(response)})
 
-    def test_enrolled_student_can_download_pdf_before_payment(self):
+    def test_enrolled_student_can_download_pdf_while_locked(self):
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
                 self.paid_module.pdf_file.save(
@@ -726,12 +740,11 @@ class ModuleLessonProgressApiTests(APITestCase):
             title='CC 102 Module',
             slug='cc-102-module-tests',
             subject=self.subject,
-            is_paid=False,
             is_published=True,
         )
         self.module.subjects.add(self.subject)
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.module,
             student=self.student,
@@ -1034,7 +1047,6 @@ class PaperMainActivityEntryApiTests(APITestCase):
             activated_by=self.teacher,
             module=self.module,
             student=self.student,
-            payment_status=ModuleAccess.PaymentStatus.PAID,
             is_active=True,
         )
         self.assertTrue(grant.is_available)
@@ -1408,7 +1420,7 @@ class ModuleLessonExampleApiTests(APITestCase):
             is_published=True,
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.module,
             student=self.student,
@@ -1543,7 +1555,7 @@ class PrintablePdfApiTests(APITestCase):
             is_published=True,
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.module,
             student=self.student,
@@ -1970,7 +1982,7 @@ class LessonMainActivityApiTests(APITestCase):
             is_published=True,
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.PAYMENT,
+            access_type=ModuleAccess.AccessType.ENROLLED,
             activated_by=self.teacher,
             module=self.module,
             student=self.student,

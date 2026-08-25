@@ -31,8 +31,6 @@ export type StudentProfile = {
   user: number
   user_detail?: User
   student_number: string
-  section: string
-  year_level: number | null
   is_active: boolean
   joined_at: string
 }
@@ -123,10 +121,8 @@ export type Module = {
   pdf_file: string
   pdf_generated_at: string | null
   pdf_is_outdated: boolean
-  is_paid: boolean
-  price: string
   is_accessible: boolean
-  access_status: 'ADMIN' | 'LOCKED' | 'ENROLLED_PAID' | 'ADVANCE_PAID'
+  access_status: 'ADMIN' | 'LOCKED' | 'ENROLLED_ACTIVE' | 'ADVANCE_ACTIVE'
   has_pdf: boolean
   subjects: number[]
   is_published: boolean
@@ -222,12 +218,10 @@ export type ModuleAccess = {
   student_name: string
   activated_by: number | null
   activated_by_name: string
-  access_type: 'PAYMENT' | 'ADVANCE_STUDY'
-  payment_status: 'UNPAID' | 'PAID' | 'WAIVED'
-  amount_paid: string
-  payment_reference: string
+  access_type: 'ENROLLED' | 'ADVANCE_STUDY'
   is_active: boolean
   is_available: boolean
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED'
   expires_at: string | null
   notes: string
   activated_at: string

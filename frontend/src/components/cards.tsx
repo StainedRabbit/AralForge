@@ -37,7 +37,7 @@ export function ModuleCard({ data, module }: { data: RouteData; module: Module }
             module.is_accessible ? 'status-pill status-pill--success' : 'status-pill'
           }
         >
-          <Icon name={module.is_paid ? 'shield' : 'spark'} />
+          <Icon name="shield" />
           {moduleAccessLabel(data, module)}
         </span>
       </div>

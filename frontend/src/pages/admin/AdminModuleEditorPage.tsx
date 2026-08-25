@@ -10,12 +10,10 @@ import { subjectName } from '../../utils/modules'
 
 type ModuleDraft = {
   description: string
-  is_paid: boolean
   is_published: boolean
   learning_objectives: string
   lesson_overview: string
   pdf_file: File | null
-  price: string
   resources: string
   slug: string
   subject: string
@@ -261,15 +259,6 @@ export function AdminModuleEditorPage({
         </div>
 
         <section className="lesson-editor__meta">
-          <label className="admin-field">
-            <span>Price</span>
-            <input
-              onChange={(event) => updateDraft('price', event.target.value)}
-              type="number"
-              value={draft.price}
-            />
-          </label>
-
           <label className="admin-check">
             <input
               checked={draft.is_published}
@@ -382,12 +371,10 @@ function TextArea({
 function createModuleDraft(module?: Module, selectedSubjectId?: string | null): ModuleDraft {
   return {
     description: module?.description ?? '',
-    is_paid: module?.is_paid ?? true,
     is_published: module?.is_published ?? false,
     learning_objectives: module?.learning_objectives ?? '',
     lesson_overview: module?.lesson_overview ?? '',
     pdf_file: null,
-    price: module?.price ?? '0.00',
     resources: module?.resources ?? '',
     slug: module?.slug ?? '',
     subject: module?.subject ? String(module.subject) : selectedSubjectId ?? '',
@@ -413,7 +400,7 @@ function buildModulePayload(draft: ModuleDraft) {
         return
       }
 
-      formData.append(key, key === 'is_paid' ? 'true' : String(value))
+      formData.append(key, String(value))
     })
 
     return formData
@@ -421,11 +408,9 @@ function buildModulePayload(draft: ModuleDraft) {
 
   return {
     ...draft,
-    is_paid: true,
     pdf_file: undefined,
     subject: draft.subject ? Number(draft.subject) : null,
     subjects: draft.subjects.map(Number),
-    price: draft.price || '0.00',
   }
 }
 

@@ -39,7 +39,6 @@ class MockExamWorkflowTests(APITestCase):
         self.topic = Module.objects.create(
             title='Arrays',
             slug='arrays',
-            is_paid=False,
             is_published=True,
         )
         self.topic.subjects.add(self.subject)

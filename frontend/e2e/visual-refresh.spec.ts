@@ -53,7 +53,7 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.screenshot({ path: `${screenshotRoot}/login-mobile-390x844.png` })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await signIn(page, 'e2e-student-1')
+  await signIn(page, 'E2E-001')
   await page.waitForURL(/\/$/)
   await expect(page.locator('.dashboard-hero h1')).toBeVisible()
   await expect(page.locator('img[src*="aralforge-dashboard-journey"]')).toBeVisible()

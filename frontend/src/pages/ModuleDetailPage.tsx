@@ -239,7 +239,7 @@ export function ModuleDetailPage({
         actions={
           <>
             <span className={module.is_accessible ? 'status-pill status-pill--success' : 'status-pill'}>
-              <Icon name={module.is_paid ? 'shield' : 'spark'} />
+              <Icon name="shield" />
               {moduleAccessLabel(data, module)}
             </span>
             {selectedTopic ? (
@@ -322,8 +322,7 @@ function LockedModuleDetail({
         <p className="eyebrow">Offline study</p>
         <h2>PDF available</h2>
         <p>
-          Download the module PDF now. After the {Number(module.price).toFixed(2)}
-          {' '}cash payment, your teacher will activate web lessons, activities,
+          Download the module PDF now. Your teacher can activate web lessons, activities,
           coding exercises, assessments, mock exams, and progress tracking for five
           months.
         </p>

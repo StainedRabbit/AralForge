@@ -23,12 +23,6 @@ export const roleOptions: AdminOption[] = [
   { label: 'Admin', value: 'ADMIN' },
 ]
 
-export const paymentStatusOptions: AdminOption[] = [
-  { label: 'Paid', value: 'PAID' },
-  { label: 'Waived', value: 'WAIVED' },
-  { label: 'Unpaid', value: 'UNPAID' },
-]
-
 export const activityTypeOptions: AdminOption[] = [
   { label: 'Text', value: 'TEXT' },
   { label: 'File upload', value: 'FILE_UPLOAD' },

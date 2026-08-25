@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
-import type { StudentProfile, User } from '../types'
+import type { User } from '../types'
 import { fullName, initials } from '../utils/student'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
@@ -33,7 +33,6 @@ export function Sidebar({
   currentUser,
   items = studentNavItems,
   badgePath = '/modules',
-  profile,
   pendingCount,
   onLogout,
   workspaceLabel,
@@ -41,7 +40,6 @@ export function Sidebar({
   currentUser: User | null
   items?: NavItem[]
   badgePath?: string
-  profile: StudentProfile | null
   pendingCount: number
   onLogout: () => void
   workspaceLabel?: string
@@ -69,7 +67,6 @@ export function Sidebar({
             <strong>{fullName(currentUser)}</strong>
             <span>
               {workspaceLabel ||
-                profile?.section ||
                 currentUser?.role?.toLowerCase() ||
                 'Account'}
             </span>
