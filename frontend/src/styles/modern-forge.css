@@ -515,16 +515,6 @@ summary {
   color: var(--forge-navy);
 }
 
-.login-meta {
-  padding-top: 15px;
-  border-top: 1px solid var(--border);
-}
-
-.login-meta code {
-  color: var(--text-muted);
-  background: var(--surface-muted);
-}
-
 /* Dashboard and shared content surfaces */
 
 .dashboard-hero {

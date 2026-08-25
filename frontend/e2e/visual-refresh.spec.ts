@@ -11,7 +11,7 @@ async function assertNoViewportOverflow(page: Page) {
 }
 
 async function signIn(page: Page, username: string) {
-  await page.getByLabel('Username or student number').fill(username)
+  await page.getByLabel('Student number').fill(username)
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
 }
@@ -40,8 +40,8 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   await expect(page.locator('img[src*="aralforge-login-illustration"]')).toBeVisible()
-  await page.getByLabel('Username or student number').focus()
-  const focusRing = await page.getByLabel('Username or student number').evaluate(
+  await page.getByLabel('Student number').focus()
+  const focusRing = await page.getByLabel('Student number').evaluate(
     (element) => getComputedStyle(element).boxShadow,
   )
   expect(focusRing).not.toBe('none')

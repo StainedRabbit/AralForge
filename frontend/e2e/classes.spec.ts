@@ -5,7 +5,7 @@ test.describe.configure({ mode: 'serial' })
 
 async function openClasses(page: Page) {
   await page.goto('/admin/classes')
-  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
@@ -176,8 +176,14 @@ test('persists class selection and keeps class links scoped', async ({ page }, t
   await expect(attendanceDialog.getByRole('heading', { name: 'All 2 students are marked' })).toBeVisible()
   await expect(attendanceTotals).toContainText('1Late')
   await attendanceDialog.getByRole('button', { name: 'History', exact: true }).click()
-  await expect(attendanceDialog.locator('tbody tr')).toHaveCount(1)
-  await attendanceDialog.getByRole('button', { name: 'View', exact: true }).click()
+  const selectedAttendanceDateLabel = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+  }).format(new Date(`${selectedAttendanceDate}T00:00:00`))
+  const selectedAttendanceRow = attendanceDialog.getByRole('row').filter({
+    hasText: selectedAttendanceDateLabel,
+  })
+  await expect(selectedAttendanceRow).toHaveCount(1)
+  await selectedAttendanceRow.getByRole('button', { name: 'View', exact: true }).click()
   const riveraHistoryRow = attendanceDialog.getByRole('row').filter({ hasText: 'Rivera, Alex' })
   await riveraHistoryRow.locator('select').selectOption('EXCUSED')
   await attendanceDialog.getByRole('button', { name: 'Confirm Excused' }).click()
@@ -663,7 +669,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await importDialog.getByTitle('Close').click()
 
   await page.getByTitle('Sign out').last().click()
-  await page.getByLabel('Username or student number').fill('E2E-NEW-01')
+  await page.getByLabel('Student number').fill('E2E-NEW-01')
   await page.getByLabel('Password').fill(temporaryPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: 'Create your password' })).toBeVisible()

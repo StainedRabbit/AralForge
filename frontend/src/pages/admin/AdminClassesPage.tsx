@@ -129,6 +129,7 @@ export function AdminClassesPage({
     searchParams.get('term') ?? activeTerm?.id.toString() ?? '',
   )
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
+  const [scheduleMessage, setScheduleMessage] = useState('')
   const requestedScheduleId = Number(searchParams.get('schedule'))
   const requestedWorkspaceSchedule = data.schedules.find(
     (schedule) => schedule.id === requestedScheduleId,
@@ -188,6 +189,7 @@ export function AdminClassesPage({
 
   const selectSchedule = useCallback((value: number | null) => {
     pendingScheduleIdRef.current = value
+    setScheduleMessage('')
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
       if (value) next.set('schedule', String(value))
@@ -293,8 +295,10 @@ export function AdminClassesPage({
             data={data}
             defaultTermId={activeTerm?.id ?? null}
             key={selectedSchedule?.id ?? 'new'}
+            message={scheduleMessage}
             refresh={refreshClasses}
             selectedSchedule={selectedSchedule}
+            setMessage={setScheduleMessage}
             setSelectedScheduleId={selectSchedule}
           />
         </div>
@@ -484,15 +488,19 @@ function ScheduleForm({
   api,
   data,
   defaultTermId,
+  message,
   refresh,
   selectedSchedule,
+  setMessage,
   setSelectedScheduleId,
 }: {
   api: AuthedRequest
   data: RouteData
   defaultTermId: number | null
+  message: string
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
+  setMessage: (value: string) => void
   setSelectedScheduleId: (value: number | null) => void
 }) {
   const [initialDraft, setInitialDraft] = useState(() =>
@@ -503,7 +511,6 @@ function ScheduleForm({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
   const [showSubjectDialog, setShowSubjectDialog] = useState(false)
   const [showTermDialog, setShowTermDialog] = useState(false)
-  const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const subjectOptions = toOptions(
     data.subjects,

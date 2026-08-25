@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { completePasswordSetup, getApiBaseUrl, login as loginRequest } from '../api'
+import { completePasswordSetup, login as loginRequest } from '../api'
 import type { Session } from '../api'
 import loginIllustration from '../assets/aralforge-login-illustration.jpg'
 import { BrandMark } from '../components/navigation'
@@ -79,7 +79,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
             <p className="muted">
               {passwordSetupToken
                 ? 'Replace your temporary password before continuing to AralForge.'
-                : 'Use your username or student number.'}
+                : 'Use your student number to continue.'}
             </p>
           </div>
 
@@ -87,11 +87,11 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
             {!passwordSetupToken ? (
               <>
             <label>
-              <span>Username or student number</span>
+              <span>Student number</span>
               <input
                 autoComplete="username"
                 onChange={(event) => setUsername(event.target.value)}
-                placeholder="student01"
+                placeholder="Enter your Student Number"
                 required
                 type="text"
                 value={username}
@@ -147,10 +147,6 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
               <span>{loading ? 'Please wait...' : passwordSetupToken ? 'Set password and continue' : 'Sign in'}</span>
             </button>
           </form>
-
-          <p className="login-meta">
-            API endpoint: <code>{getApiBaseUrl()}</code>
-          </p>
         </div>
       </section>
     </main>

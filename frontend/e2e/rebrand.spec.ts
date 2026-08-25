@@ -11,6 +11,8 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
   await expect(page.locator('link[rel="icon"][href="/brand/aralforge-icon-dark.png"]:not([media])')).toHaveCount(1)
   await expect(page.locator('link[rel="apple-touch-icon"][href="/apple-touch-icon.png"]')).toHaveCount(1)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
+  await expect(page.getByLabel('Student number')).toHaveAttribute('placeholder', 'Enter your Student Number')
+  await expect(page.getByText('API endpoint:', { exact: false })).toHaveCount(0)
 
   for (const asset of [
     '/brand/aralforge-icon-dark.png',
@@ -20,7 +22,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
     expect(response.ok(), `${asset} should load successfully`).toBe(true)
   }
 
-  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)

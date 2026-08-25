@@ -120,7 +120,6 @@
 }
 
 .muted,
-.login-meta,
 .page-header p,
 .section-heading p,
 .module-card p,
@@ -128,10 +127,5 @@
 .assessment-row p,
 .empty-state p {
   color: var(--text-muted);
-}
-
-.login-meta {
-  margin: 0;
-  font-size: 13px;
 }
 

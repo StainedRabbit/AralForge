@@ -10,7 +10,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   })
 
   await page.goto('/admin')
-  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
@@ -28,7 +28,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
 
 test('feature navigation loads only that route resources', async ({ page }) => {
   await page.goto('/admin')
-  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
@@ -76,7 +76,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   })
 
   await page.goto('/admin')
-  await page.getByLabel('Username or student number').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()

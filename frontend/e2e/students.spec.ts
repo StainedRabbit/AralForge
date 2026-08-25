@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function openStudents(page: Page) {
   await page.goto('/admin/students')
-  await page.getByLabel('Username').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
