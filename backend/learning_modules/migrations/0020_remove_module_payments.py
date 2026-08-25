@@ -14,6 +14,10 @@ def restore_access_type(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # PostgreSQL defers foreign-key trigger checks until commit. The data cleanup
+    # above must therefore commit before columns are removed from the same table.
+    atomic = False
+
     dependencies = [
         ('learning_modules', '0019_activity_reliability'),
     ]
