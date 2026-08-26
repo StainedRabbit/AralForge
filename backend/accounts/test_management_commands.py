@@ -4,9 +4,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.urls import reverse
 
 
 class PrepareMigratedUsersCommandTests(TestCase):
@@ -67,6 +69,16 @@ class SyncStudentCredentialsCommandTests(TestCase):
     def test_confirm_updates_active_and_inactive_students_but_not_staff(self):
         active = self.create_profile('active-legacy', '141443')
         inactive = self.create_profile('inactive-legacy', '141444', active=False)
+        active_user_id = active.user_id
+        active_profile_id = active.id
+        active.user.first_name = 'Existing'
+        active.user.email = 'existing@example.test'
+        active.user.save(update_fields=('first_name', 'email'))
+        group = Group.objects.create(name='Existing student group')
+        permission = Permission.objects.order_by('id').first()
+        self.assertIsNotNone(permission)
+        active.user.groups.add(group)
+        active.user.user_permissions.add(permission)
         user_model = get_user_model()
         teacher = user_model.objects.create_user(
             username='teacher-safe',
@@ -78,12 +90,32 @@ class SyncStudentCredentialsCommandTests(TestCase):
 
         for profile in (active, inactive):
             profile.user.refresh_from_db()
+            profile.refresh_from_db()
             self.assertEqual(profile.user.username, profile.student_number)
             self.assertTrue(profile.user.check_password(profile.student_number))
+            self.assertFalse(profile.user.check_password('old-password'))
             self.assertTrue(profile.user.must_change_password)
+            self.assertEqual(profile.student_number, '141443' if profile == active else '141444')
+        self.assertEqual(active.user.first_name, 'Existing')
+        self.assertEqual(active.user.email, 'existing@example.test')
+        self.assertEqual(active.user.id, active_user_id)
+        self.assertEqual(active.id, active_profile_id)
+        self.assertEqual(set(active.user.groups.values_list('id', flat=True)), {group.id})
+        self.assertEqual(
+            set(active.user.user_permissions.values_list('id', flat=True)),
+            {permission.id},
+        )
         teacher.refresh_from_db()
         self.assertEqual(teacher.username, 'teacher-safe')
         self.assertTrue(teacher.check_password('TeacherSecurePass!482'))
+
+        login = self.client.post(
+            reverse('token_obtain_pair'),
+            {'username': '141443', 'password': '141443'},
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.json()['must_change_password'])
+        self.assertNotIn('access', login.json())
 
     def test_confirm_handles_student_username_swaps(self):
         first = self.create_profile('STUDENT-B', 'STUDENT-A')
@@ -98,6 +130,7 @@ class SyncStudentCredentialsCommandTests(TestCase):
 
     def test_conflict_aborts_without_changing_any_student(self):
         profile = self.create_profile('legacy-name', 'CONFLICT-1')
+        unaffected = self.create_profile('another-legacy', 'SAFE-1')
         user_model = get_user_model()
         user_model.objects.create_user(
             username='conflict-1',
@@ -109,8 +142,12 @@ class SyncStudentCredentialsCommandTests(TestCase):
             call_command('sync_student_credentials', confirm=True, stdout=StringIO())
 
         profile.user.refresh_from_db()
+        unaffected.user.refresh_from_db()
         self.assertEqual(profile.user.username, 'legacy-name')
         self.assertTrue(profile.user.check_password('old-password'))
+        self.assertEqual(unaffected.user.username, 'another-legacy')
+        self.assertTrue(unaffected.user.check_password('old-password'))
+        self.assertFalse(unaffected.user.must_change_password)
 
     def test_case_insensitive_duplicate_aborts(self):
         self.create_profile('legacy-one', 'Mixed-Number')
@@ -118,6 +155,33 @@ class SyncStudentCredentialsCommandTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command('sync_student_credentials', dry_run=True, stdout=StringIO())
+
+    def test_preflight_rejects_orphan_staff_linked_and_noncanonical_records(self):
+        user_model = get_user_model()
+        user_model.objects.create_user(
+            username='orphan-student',
+            password='old-password',
+            role=user_model.Role.STUDENT,
+        )
+        staff_profile = self.create_profile('staff-linked', '141445')
+        staff_profile.user.is_staff = True
+        staff_profile.user.save(update_fields=('is_staff',))
+        noncanonical = self.create_profile('spaced-number', ' 141446 ')
+
+        with self.assertRaises(CommandError) as caught:
+            call_command('sync_student_credentials', dry_run=True, stdout=StringIO())
+
+        message = str(caught.exception)
+        self.assertIn('belongs to a non-student account', message)
+        self.assertIn('has no student profile', message)
+        self.assertIn('non-canonical student number', message)
+        staff_profile.refresh_from_db()
+        staff_profile.user.refresh_from_db()
+        noncanonical.refresh_from_db()
+        noncanonical.user.refresh_from_db()
+        self.assertEqual(staff_profile.user.username, 'staff-linked')
+        self.assertEqual(noncanonical.student_number, ' 141446 ')
+        self.assertEqual(noncanonical.user.username, 'spaced-number')
 
 
 class ConvertStudentUsernamesCommandTests(TestCase):
