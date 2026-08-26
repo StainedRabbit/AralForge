@@ -27,11 +27,9 @@ class ModuleAdmin(admin.ModelAdmin):
         'title',
         'subject',
         'is_published',
-        'pdf_generated_at',
-        'pdf_is_outdated',
         'created_at',
     )
-    list_filter = ('is_published', 'pdf_is_outdated', 'subject', 'subjects')
+    list_filter = ('is_published', 'subject', 'subjects')
     search_fields = (
         'title',
         'description',
@@ -55,8 +53,17 @@ class ModuleAdmin(admin.ModelAdmin):
 
 @admin.register(ModuleTopic)
 class ModuleTopicAdmin(admin.ModelAdmin):
-    list_display = ('title', 'module', 'competency_code', 'unit', 'order', 'is_published')
-    list_filter = ('is_published', 'module')
+    list_display = (
+        'title',
+        'module',
+        'competency_code',
+        'unit',
+        'order',
+        'is_published',
+        'pdf_generated_at',
+        'pdf_is_outdated',
+    )
+    list_filter = ('is_published', 'pdf_is_outdated', 'module')
     search_fields = (
         'title',
         'competency_code',
@@ -79,11 +86,9 @@ class ModuleLessonAdmin(admin.ModelAdmin):
         'topic',
         'order',
         'is_published',
-        'pdf_generated_at',
-        'pdf_is_outdated',
         'created_at',
     )
-    list_filter = ('is_published', 'pdf_is_outdated', 'topic__module')
+    list_filter = ('is_published', 'topic__module')
     search_fields = (
         'title',
         'objectives',

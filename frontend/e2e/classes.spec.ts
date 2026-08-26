@@ -221,6 +221,92 @@ test('opens the selected class subject module from the roster actions', async ({
   await expect(page.getByText('Resume Basics', { exact: true }).first()).toBeVisible()
 })
 
+test('activates and refreshes module access from the class roster without duplicate grants', async ({ page }) => {
+  const accessRequests: string[] = []
+  page.on('request', (request) => {
+    if (/\/api\/modules\/access\/(?:\d+\/)?$/.test(new URL(request.url()).pathname)) {
+      accessRequests.push(request.method())
+    }
+  })
+
+  await openClasses(page)
+  await page.locator('.class-list__item')
+    .filter({ hasText: 'E2EQ1' })
+    .filter({ hasText: 'E2E-C' })
+    .click()
+  await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
+
+  const alexRow = page.getByRole('row').filter({ hasText: 'Alex Rivera' })
+  await alexRow.getByRole('button', { name: 'More actions for Alex Rivera' }).click()
+  await page.getByRole('menuitem', { name: 'Modules' }).click()
+
+  let dialog = page.getByRole('dialog', { name: 'Module Access' })
+  const moduleSelect = dialog.locator('.student-module-grant-form select')
+  let enrolledModuleRow = dialog.locator('.student-module-access-section').first()
+    .locator('article')
+    .filter({ hasText: 'E2E Main Activity Workflow' })
+  let grantRow = dialog.locator('.student-module-access-section').nth(1)
+    .locator('article')
+    .filter({ hasText: 'E2E Main Activity Workflow' })
+  await expect(moduleSelect).toHaveValue(/\d+/)
+  await expect(moduleSelect.locator('option:checked')).toHaveText(
+    'E2EQ1 - E2E Main Activity Workflow',
+  )
+  await expect(enrolledModuleRow.getByText('Locked', { exact: true })).toBeVisible()
+
+  const activated = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/modules/access/',
+  )
+  await dialog.getByRole('button', { name: 'Activate Access' }).click()
+  expect((await activated).ok()).toBe(true)
+  await expect(dialog).toContainText('Module access activated.')
+  await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
+  await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
+
+  await dialog.getByTitle('Close').click()
+  await expect(dialog).toBeHidden()
+
+  await alexRow.getByRole('button', { name: 'More actions for Alex Rivera' }).click()
+  await page.getByRole('menuitem', { name: 'Modules' }).click()
+  dialog = page.getByRole('dialog', { name: 'Module Access' })
+  enrolledModuleRow = dialog.locator('.student-module-access-section').first()
+    .locator('article')
+    .filter({ hasText: 'E2E Main Activity Workflow' })
+  grantRow = dialog.locator('.student-module-access-section').nth(1)
+    .locator('article')
+    .filter({ hasText: 'E2E Main Activity Workflow' })
+  await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
+  await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
+
+  const reactivated = page.waitForResponse((response) =>
+    response.request().method() === 'PATCH'
+    && /\/api\/modules\/access\/\d+\/$/.test(new URL(response.url()).pathname),
+  )
+  await dialog.getByRole('button', { name: 'Activate Access' }).click()
+  expect((await reactivated).ok()).toBe(true)
+  expect(accessRequests.filter((method) => method === 'POST')).toHaveLength(1)
+
+  const revoked = page.waitForResponse((response) =>
+    response.request().method() === 'PATCH'
+    && /\/api\/modules\/access\/\d+\/$/.test(new URL(response.url()).pathname),
+  )
+  await grantRow.getByRole('button', { name: 'Revoke' }).click()
+  expect((await revoked).ok()).toBe(true)
+  await expect(enrolledModuleRow.getByText('Locked', { exact: true })).toBeVisible()
+  await expect(grantRow.getByText('Revoked', { exact: true })).toBeVisible()
+
+  await grantRow.getByRole('button', { name: 'Renew' }).click()
+  const renewed = page.waitForResponse((response) =>
+    response.request().method() === 'PATCH'
+    && /\/api\/modules\/access\/\d+\/$/.test(new URL(response.url()).pathname),
+  )
+  await dialog.getByRole('button', { name: 'Activate Access' }).click()
+  expect((await renewed).ok()).toBe(true)
+  await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
+  await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
+})
+
 test('loads the roster ten students at a time and exports the complete filtered list', async ({ page }) => {
   const rosterRequests: Array<{ limit: number; offset: number; search: string; status: string }> = []
   const students = Array.from({ length: 12 }, (_, index) => ({

@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon'
 import { LessonExampleCards } from '../components/LessonExampleCards'
 import { LessonMainActivityPanel } from '../components/LessonMainActivityPanel'
 import { RichLessonText } from '../components/RichLessonText'
+import { TopicPdfButton, TopicPdfDownloads } from '../components/TopicPdfDownloads'
 import { NotFoundState, Page, PageHeader } from '../components/ui'
 import { useActiveLessonSection } from '../hooks/useActiveLessonSection'
 import type { ModuleLesson, ModuleTopic } from '../types'
@@ -21,7 +22,6 @@ import {
 import type { LessonResumeTarget } from '../utils/modules'
 import {
   hasActiveModuleAccess,
-  isMockAssessment,
   moduleAccessLabel,
 } from '../utils/student'
 
@@ -252,7 +252,6 @@ export function ModuleDetailPage({
                 <span>Module Contents</span>
               </button>
             ) : null}
-            <ModulePdfButton api={api} module={module} />
           </>
         }
       />
@@ -280,8 +279,10 @@ export function ModuleDetailPage({
         />
       ) : selectedTopic ? (
         <TopicOverview
+          api={api}
           completedLessonIds={completedLessonIds}
           data={data}
+          module={module}
           onOpenContents={openContents}
           onOpenLesson={openLesson}
           startedLessonIds={startedLessonIds}
@@ -292,7 +293,6 @@ export function ModuleDetailPage({
           completedLessonIds={completedLessonIds}
           completionPercent={completionPercent}
           data={data}
-          moduleId={module.id}
           moduleOverview={module.lesson_overview}
           moduleOutcomes={module.learning_objectives}
           onOpenLesson={openLesson}
@@ -320,81 +320,22 @@ function LockedModuleDetail({
       </span>
       <div>
         <p className="eyebrow">Offline study</p>
-        <h2>PDF available</h2>
+        <h2>Download a topic</h2>
         <p>
-          Download the module PDF now. Your teacher can activate web lessons, activities,
-          coding exercises, assessments, mock exams, and progress tracking for five
-          months.
+          Published topics are ready for offline study. Your teacher can activate the
+          full module when it is time to use web lessons, coding exercises, progress,
+          and Main Activities online.
         </p>
       </div>
-      <ModulePdfButton api={api} module={module} />
+      <TopicPdfDownloads api={api} module={module} />
     </section>
   )
-}
-
-function ModulePdfButton({
-  api,
-  module,
-}: {
-  api: AuthedRequest
-  module: RouteData['modules'][number]
-}) {
-  const [downloading, setDownloading] = useState(false)
-  const [message, setMessage] = useState('')
-
-  async function downloadPdf() {
-    setDownloading(true)
-    setMessage('')
-    try {
-      const blob = await api<Blob>(
-        `/modules/modules/${module.id}/download-pdf/`,
-      )
-      downloadBlob(blob, `${module.slug || 'module'}.pdf`)
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError) || 'Printable PDF is not available yet.')
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  return (
-    <>
-      <button
-        className="button button--secondary"
-        disabled={downloading}
-        onClick={() => void downloadPdf()}
-        type="button"
-      >
-        <Icon name="file" />
-        <span>{downloading ? 'Downloading...' : 'Download Module PDF'}</span>
-      </button>
-      {message ? <p className="admin-message">{message}</p> : null}
-    </>
-  )
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
 }
 
 function ModuleContents({
   completedLessonIds,
   completionPercent,
   data,
-  moduleId,
   moduleOutcomes,
   moduleOverview,
   onOpenLesson,
@@ -406,7 +347,6 @@ function ModuleContents({
   completedLessonIds: Set<number>
   completionPercent: number
   data: RouteData
-  moduleId: number
   moduleOutcomes: string
   moduleOverview: string
   onOpenLesson: (lesson: ModuleLesson) => void
@@ -527,21 +467,24 @@ function ModuleContents({
           )
         })}
       </div>
-      <ModuleMockAssessments data={data} moduleId={moduleId} />
     </div>
   )
 }
 
 function TopicOverview({
+  api,
   completedLessonIds,
   data,
+  module,
   onOpenContents,
   onOpenLesson,
   startedLessonIds,
   topic,
 }: {
+  api: AuthedRequest
   completedLessonIds: Set<number>
   data: RouteData
+  module: RouteData['modules'][number]
   onOpenContents: () => void
   onOpenLesson: (lesson: ModuleLesson) => void
   startedLessonIds: Set<number>
@@ -582,19 +525,22 @@ function TopicOverview({
             <h2>{topic.title}</h2>
             <RichLessonText value={topic.overview} />
           </div>
-          {resumeTarget ? (
-            <button
-              className="button button--primary lesson-resume-action"
-              onClick={() => onOpenLesson(resumeTarget.lesson)}
-              type="button"
-            >
-              <Icon name="arrow-right" />
-              <span className="lesson-resume-action__copy">
-                <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
-                <small>{resumeTarget.lesson.title}</small>
-              </span>
-            </button>
-          ) : null}
+          <div className="student-lesson-context__actions">
+            {resumeTarget ? (
+              <button
+                className="button button--primary lesson-resume-action"
+                onClick={() => onOpenLesson(resumeTarget.lesson)}
+                type="button"
+              >
+                <Icon name="arrow-right" />
+                <span className="lesson-resume-action__copy">
+                  <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
+                  <small>{resumeTarget.lesson.title}</small>
+                </span>
+              </button>
+            ) : null}
+            <TopicPdfButton api={api} module={module} topic={topic} />
+          </div>
         </div>
         <div className="student-module-progress">
           <div>
@@ -723,9 +669,8 @@ function StudentLessonReader({
   topicLessons: ModuleLesson[]
 }) {
   const [sectionContainer, setSectionContainer] = useState<HTMLElement | null>(null)
-  const [pdfMessage, setPdfMessage] = useState('')
-  const [pdfDownloading, setPdfDownloading] = useState(false)
   const lessonHeadingRef = useRef<HTMLElement | null>(null)
+  const module = data.modules.find((candidate) => candidate.id === topic.module)
   const lessonExamples = useMemo(
     () => data.lessonExamples.filter((example) => example.lesson === lesson.id),
     [data.lessonExamples, lesson.id],
@@ -865,19 +810,6 @@ function StudentLessonReader({
     })
   }, [lesson.id])
 
-  async function downloadLessonPdf() {
-    setPdfDownloading(true)
-    setPdfMessage('')
-    try {
-      const blob = await api<Blob>(`/modules/lessons/${lesson.id}/download_pdf/`)
-      downloadBlob(blob, `${slugify(lesson.title) || 'lesson'}.pdf`)
-    } catch (caughtError) {
-      setPdfMessage(toErrorMessage(caughtError) || 'Printable PDF is not available yet.')
-    } finally {
-      setPdfDownloading(false)
-    }
-  }
-
   function runNextAction() {
     if (completed) {
       if (nextLesson) {
@@ -948,7 +880,7 @@ function StudentLessonReader({
           onClick={runNextAction}
           type="button"
         >
-          <Icon name={completed && nextLesson ? 'arrow-right' : completed ? 'module' : completionBlocked ? 'assessment' : 'check'} />
+          <Icon name={completed && nextLesson ? 'arrow-right' : completed ? 'module' : completionBlocked ? 'activity' : 'check'} />
           <span>{nextActionLabel}</span>
         </button>
       </section>
@@ -977,18 +909,15 @@ function StudentLessonReader({
             <Icon name="check" />
             <span>{completeButtonLabel}</span>
           </button>
-          <button
-            className="button button--secondary"
-            disabled={pdfDownloading}
-            onClick={() => void downloadLessonPdf()}
-            type="button"
-          >
-            <Icon name="file" />
-            <span>{pdfDownloading ? 'Downloading...' : 'Download Printable PDF'}</span>
-          </button>
+          {module ? (
+            <TopicPdfButton
+              api={api}
+              module={module}
+              topic={topic}
+            />
+          ) : null}
         </div>
       </section>
-      {pdfMessage ? <p className="admin-message">{pdfMessage}</p> : null}
       {apiMessage ? <p className="admin-message">{apiMessage}</p> : null}
       {mainActivity ? (
         <section className="lesson-progress-status">
@@ -1008,7 +937,7 @@ function StudentLessonReader({
           </div>
           <div className="lesson-progress-status__actions">
             <span className={mainActivityReviewUnlocked ? 'status-pill status-pill--success' : 'status-pill'}>
-              <Icon name={mainActivityReviewUnlocked ? 'check' : 'assessment'} />
+              <Icon name={mainActivityReviewUnlocked ? 'check' : 'activity'} />
               {challengeStatus}
             </span>
             {mainActivityReviewUnlocked && challengeSection ? (
@@ -1090,13 +1019,7 @@ function StudentLessonReader({
         {mainActivityInsertionIndex === displayedLessonSections.length
           ? mainActivityLessonBlock
           : null}
-        <LessonCodingAssessments data={data} lessonId={lesson.id} />
-        {lesson.assessment_url ? (
-          <a className="button button--secondary" href={lesson.assessment_url} rel="noreferrer" target="_blank">
-            <Icon name="assessment" />
-            <span>Open Assessment</span>
-          </a>
-        ) : null}
+        <LessonCodingPractice data={data} lessonId={lesson.id} />
         <section className="student-lesson-completion">
           <div>
             <p className="eyebrow">Lesson progress</p>
@@ -1212,55 +1135,6 @@ function TopicActivities({
   )
 }
 
-function ModuleMockAssessments({
-  data,
-  moduleId,
-}: {
-  data: RouteData
-  moduleId: number
-}) {
-  const assessments = data.assessments.filter(
-    (assessment) =>
-      assessment.module === moduleId &&
-      assessment.is_published &&
-      isMockAssessment(assessment),
-  )
-
-  if (!assessments.length) {
-    return null
-  }
-
-  return (
-    <section className="student-topic-work section-block">
-      <div className="student-topic-work__header">
-        <div>
-          <p className="eyebrow">Module practice</p>
-          <h2>Mock Exams</h2>
-        </div>
-        <span>{assessments.length} available</span>
-      </div>
-      <div className="card-list">
-        {assessments.map((assessment) => (
-          <Link
-            className="resource-row"
-            key={assessment.id}
-            to={`/assessments/${assessment.id}`}
-          >
-            <span className="resource-row__icon">
-              <Icon name="assessment" />
-            </span>
-            <div>
-              <strong>{assessment.title}</strong>
-              <span>Select topics and start a practice attempt.</span>
-            </div>
-            <Icon name="arrow-right" />
-          </Link>
-        ))}
-      </div>
-    </section>
-  )
-}
-
 function scrollToStudentSection(sectionId: string) {
   document.getElementById(sectionId)?.scrollIntoView({
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -1270,7 +1144,7 @@ function scrollToStudentSection(sectionId: string) {
   })
 }
 
-function LessonCodingAssessments({ data, lessonId }: { data: RouteData; lessonId: number }) {
+function LessonCodingPractice({ data, lessonId }: { data: RouteData; lessonId: number }) {
   const problems = data.problems.filter(
     (problem) => problem.lesson === lessonId && problem.is_published,
   )
@@ -1278,7 +1152,7 @@ function LessonCodingAssessments({ data, lessonId }: { data: RouteData; lessonId
 
   return (
     <section>
-      <h2>Coding Assessments</h2>
+      <h2>Coding Practice</h2>
       <div className="card-list">
         {problems.map((problem) => (
           <Link className="resource-row" key={problem.id} to={`/coding/${problem.id}`}>

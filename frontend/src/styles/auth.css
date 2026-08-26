@@ -107,7 +107,6 @@
 .section-heading h2,
 .module-card h2,
 .problem-card h2,
-.assessment-row h2,
 .profile-panel h2 {
   margin: 0;
   color: var(--text);
@@ -124,7 +123,6 @@
 .section-heading p,
 .module-card p,
 .problem-card p,
-.assessment-row p,
 .empty-state p {
   color: var(--text-muted);
 }

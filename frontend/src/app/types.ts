@@ -1,14 +1,9 @@
 import type { RequestOptions } from '../api'
 import type {
-  Answer,
-  Assessment,
-  AssessmentAttempt,
-  AssessmentAttemptQuestion,
   AttendanceRecord,
   AttendanceSession,
   Badge,
   CodeBlankAnswer,
-  Choice,
   CodeSubmission,
   FinalGrade,
   GradeCategory,
@@ -35,7 +30,6 @@ import type {
   PeriodGrade,
   PointLedger,
   ProgrammingProblem,
-  Question,
   ScheduleStudent,
   SchoolYear,
   SchoolYearSemester,
@@ -85,12 +79,6 @@ export type RouteData = {
   testCases: TestCase[]
   codeSubmissions: CodeSubmission[]
   codeBlankAnswers: CodeBlankAnswer[]
-  assessments: Assessment[]
-  attempts: AssessmentAttempt[]
-  attemptQuestions: AssessmentAttemptQuestion[]
-  questions: Question[]
-  choices: Choice[]
-  answers: Answer[]
   attendanceSessions: AttendanceSession[]
   attendanceRecords: AttendanceRecord[]
   gradingTemplates: GradingTemplate[]
@@ -112,10 +100,4 @@ export type RouteData = {
 
 export type RouteDataWithRefresh = RouteData & {
   refresh: () => Promise<void>
-}
-
-export type AnswerDraft = {
-  selected_choice: number | null
-  text_answer: string
-  code_answer: string
 }

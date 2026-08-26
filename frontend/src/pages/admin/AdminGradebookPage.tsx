@@ -16,7 +16,6 @@ import { displayScore, formatDate, numeric, toErrorMessage } from '../../utils/f
 const periods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
 const sourceTypes: { label: string; value: GradeItemSourceType }[] = [
   { label: 'Manual', value: 'MANUAL' },
-  { label: 'Assessment', value: 'ASSESSMENT' },
   { label: 'Module activity', value: 'MODULE_ACTIVITY' },
   { label: 'Attendance', value: 'ATTENDANCE' },
   { label: 'Coding', value: 'CODING' },
@@ -1451,9 +1450,6 @@ function MatrixScorePanel({
 }
 
 function getSourcePayload(sourceType: GradeItemSourceType, sourceId: string) {
-  if (sourceType === 'ASSESSMENT') {
-    return { assessment: Number(sourceId) }
-  }
   if (sourceType === 'MODULE_ACTIVITY') {
     return { module_activity: Number(sourceId) }
   }
@@ -1642,16 +1638,6 @@ function getSourceOptions(
 ) {
   if (!subjectId) {
     return []
-  }
-
-  if (sourceType === 'ASSESSMENT') {
-    return data.assessments
-      .filter((assessment) => assessment.subject === subjectId && assessment.counts_toward_grade)
-      .map((assessment) => ({
-        label: assessment.title,
-        points: assessment.points_possible,
-        value: String(assessment.id),
-      }))
   }
 
   if (sourceType === 'MODULE_ACTIVITY') {

@@ -218,7 +218,7 @@ export function LessonMainActivityPanel({
         </div>
         <div className="lesson-main-activity__status">
           <span className={bestAttempt ? 'status-pill status-pill--success' : 'status-pill'}>
-            <Icon name={bestAttempt ? 'check' : 'assessment'} />
+            <Icon name={bestAttempt ? 'check' : 'activity'} />
             {bestAttempt
               ? `Best ${numeric(bestAttempt.score)}/${numeric(bestAttempt.max_score)}`
               : `${activity.max_attempts - attempts.length} attempt${activity.max_attempts - attempts.length === 1 ? '' : 's'} left`}
@@ -264,7 +264,7 @@ export function LessonMainActivityPanel({
 
       {bestAttempt && !reviewUnlocked ? (
         <div className="inline-alert">
-          <Icon name="assessment" />
+          <Icon name="activity" />
           <span>
             Score recorded. Review the lesson notes, then use another attempt when ready.
           </span>

@@ -24,16 +24,24 @@ export function ManageStudentModulesDialog({
   studentName: string
 }) {
   const enrolledSubjectIds = useMemo(
-    () =>
-      new Set(
+    () => {
+      const activeScheduleIds = new Set(
+        data.schedules
+          .filter((schedule) => schedule.is_active)
+          .map((schedule) => schedule.id),
+      )
+      return new Set(
         data.enrollments
           .filter(
             (enrollment) =>
-              enrollment.student === studentId && enrollment.is_active,
+              enrollment.student === studentId &&
+              enrollment.is_active &&
+              activeScheduleIds.has(enrollment.schedule),
           )
           .map((enrollment) => enrollment.subject),
-      ),
-    [data.enrollments, studentId],
+      )
+    },
+    [data.enrollments, data.schedules, studentId],
   )
   const defaultModule = data.modules.find(
     (module) =>
@@ -48,9 +56,19 @@ export function ManageStudentModulesDialog({
   const [notes, setNotes] = useState('')
   const [message, setMessage] = useState('')
   const [savingId, setSavingId] = useState<number | 'new' | null>(null)
-  const grants = data.moduleAccess
-    .filter((grant) => grant.student === studentId)
-    .sort((first, second) => first.module_title.localeCompare(second.module_title))
+  const [grantUpdates, setGrantUpdates] = useState<ModuleAccess[]>([])
+  const grants = useMemo(
+    () => studentModuleGrants(
+      [
+        ...data.moduleAccess.filter(
+          (grant) => !grantUpdates.some((saved) => saved.id === grant.id),
+        ),
+        ...grantUpdates,
+      ],
+      studentId,
+    ),
+    [data.moduleAccess, grantUpdates, studentId],
+  )
   const enrolledModules = data.modules.filter(
     (module) =>
       module.is_published &&
@@ -72,15 +90,16 @@ export function ManageStudentModulesDialog({
     )
       ? 'ENROLLED'
       : 'ADVANCE_STUDY'
-    const existing = grants.find(
+    const moduleGrants = grants.filter((grant) => grant.module === module.id)
+    const existing = moduleGrants.find(
       (grant) =>
-        grant.module === module.id && grant.access_type === accessType,
-    )
+        grant.access_type === accessType,
+    ) ?? (moduleGrants.length === 1 ? moduleGrants[0] : undefined)
     setSavingId(existing?.id ?? 'new')
     setMessage('')
 
     try {
-      await api(
+      const saved = await api<ModuleAccess>(
         existing ? `/modules/access/${existing.id}/` : '/modules/access/',
         {
           body: JSON.stringify({
@@ -96,6 +115,7 @@ export function ManageStudentModulesDialog({
           method: existing ? 'PATCH' : 'POST',
         },
       )
+      setGrantUpdates((current) => upsertGrant(current, saved))
       setMessage('Module access activated.')
       await refresh()
     } catch (caughtError) {
@@ -109,10 +129,11 @@ export function ManageStudentModulesDialog({
     setSavingId(grant.id)
     setMessage('')
     try {
-      await api(`/modules/access/${grant.id}/`, {
+      const saved = await api<ModuleAccess>(`/modules/access/${grant.id}/`, {
         body: JSON.stringify({ is_active: false }),
         method: 'PATCH',
       })
+      setGrantUpdates((current) => upsertGrant(current, saved))
       setMessage('Module access revoked.')
       await refresh()
     } catch (caughtError) {
@@ -306,6 +327,19 @@ function moduleSubjectIds(module: Module) {
       ...(module.subject ? [module.subject] : []),
       ...module.subjects,
     ]),
+  )
+}
+
+function studentModuleGrants(grants: ModuleAccess[], studentId: number) {
+  return grants
+    .filter((grant) => grant.student === studentId)
+    .sort((first, second) => first.module_title.localeCompare(second.module_title))
+}
+
+function upsertGrant(grants: ModuleAccess[], saved: ModuleAccess) {
+  return studentModuleGrants(
+    [...grants.filter((grant) => grant.id !== saved.id), saved],
+    saved.student,
   )
 }
 

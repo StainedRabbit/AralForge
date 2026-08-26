@@ -15,7 +15,6 @@ def result_rows(response):
     return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
 
 from accounts.models import User
-from assessments.models import Assessment
 from coding.models import ProgrammingProblem
 from grades.models import (
     GradeCategory,
@@ -69,7 +68,7 @@ class ModuleAccessApiTests(APITestCase):
             school_year=school_year,
             semester=Semester.FIRST,
         )
-        schedule = SubjectSchedule.objects.create(
+        self.schedule = SubjectSchedule.objects.create(
             subject=self.subject,
             school_year_semester=term,
             days='TTH',
@@ -77,7 +76,7 @@ class ModuleAccessApiTests(APITestCase):
             end_time='11:30',
             section='A',
         )
-        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
         self.free_module = Module.objects.create(
             title='Free Topic',
             slug='free-topic',
@@ -133,6 +132,24 @@ class ModuleAccessApiTests(APITestCase):
             grant.expires_at.date(),
             add_calendar_months(grant.activated_at, 5).date(),
         )
+
+    def test_assessment_api_is_gone_and_module_workspace_has_no_assessment_data(self):
+        ModuleAccess.objects.create(
+            activated_by=self.teacher,
+            module=self.paid_module,
+            student=self.student,
+            is_active=True,
+        )
+        self.client.force_authenticate(self.student)
+
+        retired = self.client.get('/api/assessments/')
+        workspace = self.client.get(
+            f'/api/modules/modules/{self.paid_module.id}/workspace/',
+        )
+
+        self.assertEqual(retired.status_code, 404)
+        self.assertEqual(workspace.status_code, 200)
+        self.assertNotIn('assessments', workspace.data)
 
     def test_advance_study_grant_bypasses_enrollment(self):
         grant = ModuleAccess.objects.create(
@@ -230,6 +247,50 @@ class ModuleAccessApiTests(APITestCase):
         self.assertNotIn('amount_paid', response.data)
         self.assertNotIn('payment_reference', response.data)
 
+    def test_teacher_reactivates_historical_grant_and_becomes_activator(self):
+        historical = ModuleAccess.objects.create(
+            activated_by=None,
+            expires_at=None,
+            is_active=False,
+            module=self.paid_module,
+            student=self.student,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.patch(
+            f'/api/modules/access/{historical.id}/',
+            {'is_active': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        historical.refresh_from_db()
+        self.assertTrue(historical.is_active)
+        self.assertTrue(historical.is_available)
+        self.assertEqual(historical.activated_by, self.teacher)
+        self.assertGreater(historical.expires_at, timezone.now())
+
+    def test_access_type_uses_only_active_class_enrollment(self):
+        self.schedule.is_active = False
+        self.schedule.save(update_fields=['is_active'])
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/modules/access/',
+            {
+                'access_type': ModuleAccess.AccessType.ENROLLED,
+                'module': self.paid_module.id,
+                'student': self.student.id,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data['access_type'],
+            ModuleAccess.AccessType.ADVANCE_STUDY,
+        )
+
     def test_locked_enrolled_module_hides_child_content(self):
         topic = ModuleTopic.objects.create(
             module=self.paid_module,
@@ -257,13 +318,6 @@ class ModuleAccessApiTests(APITestCase):
             description='Solve after activation.',
             is_published=True,
         )
-        assessment = Assessment.objects.create(
-            module=self.paid_module,
-            subject=self.subject,
-            title='Locked Mock Exam',
-            kind=Assessment.Kind.MOCK_EXAM,
-            is_published=True,
-        )
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
@@ -275,18 +329,25 @@ class ModuleAccessApiTests(APITestCase):
         lesson_response = self.client.get('/api/modules/lessons/')
         activity_response = self.client.get('/api/modules/activities/')
         coding_response = self.client.get('/api/coding/problems/')
-        assessment_response = self.client.get('/api/assessments/assessments/')
         progress_response = self.client.get('/api/modules/lesson-progress/')
+        workspace_response = self.client.get(
+            f'/api/modules/modules/{self.paid_module.id}/workspace/',
+        )
 
         self.assertNotIn(topic.id, {item['id'] for item in result_rows(topic_response)})
         self.assertNotIn(lesson.id, {item['id'] for item in result_rows(lesson_response)})
         self.assertNotIn(activity.id, {item['id'] for item in result_rows(activity_response)})
         self.assertNotIn(problem.id, {item['id'] for item in result_rows(coding_response)})
-        self.assertNotIn(
-            assessment.id,
-            {item['id'] for item in result_rows(assessment_response)},
-        )
         self.assertNotIn(progress.id, {item['id'] for item in result_rows(progress_response)})
+        self.assertEqual(workspace_response.status_code, 200)
+        self.assertEqual(workspace_response.data['topics'], [])
+        self.assertEqual(workspace_response.data['lessons'], [])
+        self.assertEqual(workspace_response.data['activities'], [])
+        self.assertEqual(workspace_response.data['activity_attempts'], [])
+        self.assertEqual(workspace_response.data['problems'], [])
+        downloadable = workspace_response.data['module']['downloadable_topics']
+        self.assertEqual([item['id'] for item in downloadable], [topic.id])
+        self.assertNotIn('overview', downloadable[0])
 
     def test_enrolled_grant_unlocks_web_module_content(self):
         topic = ModuleTopic.objects.create(
@@ -315,13 +376,6 @@ class ModuleAccessApiTests(APITestCase):
             description='Solve it.',
             is_published=True,
         )
-        assessment = Assessment.objects.create(
-            module=self.paid_module,
-            subject=self.subject,
-            title='Paid Mock Exam',
-            kind=Assessment.Kind.MOCK_EXAM,
-            is_published=True,
-        )
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
@@ -340,35 +394,68 @@ class ModuleAccessApiTests(APITestCase):
             ('/api/modules/lessons/', lesson.id),
             ('/api/modules/activities/', activity.id),
             ('/api/coding/problems/', problem.id),
-            ('/api/assessments/assessments/', assessment.id),
             ('/api/modules/lesson-progress/', progress.id),
         ):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assertIn(expected_id, {item['id'] for item in result_rows(response)})
 
-    def test_enrolled_student_can_download_pdf_while_locked(self):
+    def test_locked_student_downloads_topic_pdf(self):
+        topic = ModuleTopic.objects.create(
+            module=self.paid_module,
+            title='Downloadable Topic',
+            is_published=True,
+        )
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
-                self.paid_module.pdf_file.save(
-                    'guide.pdf',
-                    ContentFile(b'%PDF-1.4 module guide'),
+                topic.pdf_file.save(
+                    'topic.pdf',
+                    ContentFile(b'%PDF-1.4 topic guide'),
                 )
                 self.client.force_authenticate(self.student)
-                response = self.client.get(
-                    f'/api/modules/modules/{self.paid_module.id}/download-pdf/',
+                topic_response = self.client.get(
+                    f'/api/modules/topics/{topic.id}/download_pdf/',
                 )
-                self.assertEqual(response.status_code, 200)
+                self.assertEqual(topic_response.status_code, 200)
                 self.assertEqual(
-                    b''.join(response.streaming_content),
-                    b'%PDF-1.4 module guide',
+                    b''.join(topic_response.streaming_content),
+                    b'%PDF-1.4 topic guide',
                 )
 
                 self.client.force_authenticate(self.other_student)
                 denied = self.client.get(
-                    f'/api/modules/modules/{self.paid_module.id}/download-pdf/',
+                    f'/api/modules/topics/{topic.id}/download_pdf/',
                 )
                 self.assertEqual(denied.status_code, 403)
+
+    def test_activated_student_can_download_topic_pdf(self):
+        ModuleAccess.objects.create(
+            activated_by=self.teacher,
+            module=self.paid_module,
+            student=self.student,
+        )
+        topic = ModuleTopic.objects.create(
+            module=self.paid_module,
+            title='Activated Download Topic',
+            is_published=True,
+        )
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                topic.pdf_file.save(
+                    'topic.pdf',
+                    ContentFile(b'%PDF-1.4 topic guide'),
+                )
+                self.client.force_authenticate(self.student)
+
+                response = self.client.get(
+                    f'/api/modules/topics/{topic.id}/download_pdf/',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    b''.join(response.streaming_content),
+                    b'%PDF-1.4 topic guide',
+                )
 
     def test_advance_study_unlocks_child_content_and_reactivation_preserves_progress(self):
         topic = ModuleTopic.objects.create(
@@ -397,13 +484,6 @@ class ModuleAccessApiTests(APITestCase):
             description='Solve it.',
             is_published=True,
         )
-        assessment = Assessment.objects.create(
-            module=self.advance_module,
-            subject=self.advance_subject,
-            title='Advanced Check',
-            kind=Assessment.Kind.PRACTICE,
-            is_published=True,
-        )
         grant = ModuleAccess.objects.create(
             access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
             activated_by=self.teacher,
@@ -422,7 +502,6 @@ class ModuleAccessApiTests(APITestCase):
             ('/api/modules/lessons/', lesson.id),
             ('/api/modules/activities/', activity.id),
             ('/api/coding/problems/', problem.id),
-            ('/api/assessments/assessments/', assessment.id),
             ('/api/modules/lesson-progress/', progress.id),
         ):
             response = self.client.get(path)
@@ -1561,53 +1640,29 @@ class PrintablePdfApiTests(APITestCase):
             student=self.student,
         )
 
-    def fake_module_pdf(self, module):
-        module.pdf_file.save(
-            'generated-module.pdf',
-            ContentFile(b'%PDF-1.4 generated module'),
+    def fake_topic_pdf(self, topic):
+        topic.pdf_file.save(
+            'generated-topic.pdf',
+            ContentFile(b'%PDF-1.4 generated topic'),
             save=False,
         )
-        module.pdf_generated_at = timezone.now()
-        module.pdf_is_outdated = False
-        module.save(update_fields=['pdf_file', 'pdf_generated_at', 'pdf_is_outdated'])
-        return module
+        topic.pdf_generated_at = timezone.now()
+        topic.pdf_is_outdated = False
+        topic.save(update_fields=['pdf_file', 'pdf_generated_at', 'pdf_is_outdated'])
+        return topic
 
-    def fake_lesson_pdf(self, lesson):
-        lesson.pdf_file.save(
-            'generated-lesson.pdf',
-            ContentFile(b'%PDF-1.4 generated lesson'),
-            save=False,
-        )
-        lesson.pdf_generated_at = timezone.now()
-        lesson.pdf_is_outdated = False
-        lesson.save(update_fields=['pdf_file', 'pdf_generated_at', 'pdf_is_outdated'])
-        return lesson
-
-    def test_published_module_pdf_generation_runs_after_commit(self):
-        with patch('learning_modules.models.safe_generate_module_pdf') as generate_pdf:
+    def test_published_topic_pdf_generation_runs_after_commit(self):
+        with patch('learning_modules.models.safe_generate_topic_pdf') as generate_pdf:
             with self.captureOnCommitCallbacks(execute=True) as callbacks:
-                module = Module.objects.create(
-                    title='Deferred Printable Module',
-                    slug='deferred-printable-module',
+                topic = ModuleTopic.objects.create(
+                    module=self.module,
+                    title='Deferred Printable Topic',
                     is_published=True,
                 )
                 generate_pdf.assert_not_called()
 
             self.assertEqual(len(callbacks), 1)
-            generate_pdf.assert_called_once_with(module)
-
-    def test_published_lesson_pdf_generation_runs_after_commit(self):
-        with patch('learning_modules.models.safe_generate_lesson_pdf') as generate_pdf:
-            with self.captureOnCommitCallbacks(execute=True) as callbacks:
-                lesson = ModuleLesson.objects.create(
-                    topic=self.topic,
-                    title='Deferred Printable Lesson',
-                    is_published=True,
-                )
-                generate_pdf.assert_not_called()
-
-            self.assertEqual(len(callbacks), 1)
-            generate_pdf.assert_called_once_with(lesson)
+            generate_pdf.assert_called_once_with(topic)
 
     def test_printable_lesson_sections_exclude_removed_fields(self):
         from learning_modules.services.pdf_generation import lesson_context
@@ -1626,44 +1681,130 @@ class PrintablePdfApiTests(APITestCase):
             'How We Show Learning',
         }.isdisjoint(section_titles))
 
-    def test_teacher_can_regenerate_module_pdf(self):
+    def test_retired_module_and_lesson_pdf_endpoints_return_not_found(self):
+        self.client.force_authenticate(self.teacher)
+
+        for method, path in (
+            ('get', f'/api/modules/modules/{self.module.id}/download-pdf/'),
+            ('post', f'/api/modules/modules/{self.module.id}/regenerate_pdf/'),
+            ('get', f'/api/modules/lessons/{self.lesson.id}/download_pdf/'),
+            ('post', f'/api/modules/lessons/{self.lesson.id}/regenerate_pdf/'),
+        ):
+            response = getattr(self.client, method)(path)
+            self.assertEqual(response.status_code, 404)
+
+    def test_module_and_lesson_payloads_exclude_retired_pdf_fields(self):
+        self.client.force_authenticate(self.teacher)
+
+        module_response = self.client.get(f'/api/modules/modules/{self.module.id}/')
+        lesson_response = self.client.get(f'/api/modules/lessons/{self.lesson.id}/')
+
+        self.assertEqual(module_response.status_code, 200)
+        self.assertEqual(lesson_response.status_code, 200)
+        for payload in (module_response.data, lesson_response.data):
+            self.assertTrue({
+                'pdf_file',
+                'pdf_generated_at',
+                'pdf_is_outdated',
+                'has_pdf',
+            }.isdisjoint(payload))
+
+    def test_teacher_can_regenerate_topic_pdf(self):
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
                 self.client.force_authenticate(self.teacher)
                 with patch(
-                    'learning_modules.views.generate_module_pdf',
-                    side_effect=self.fake_module_pdf,
+                    'learning_modules.views.generate_topic_pdf',
+                    side_effect=self.fake_topic_pdf,
                 ):
                     response = self.client.post(
-                        f'/api/modules/modules/{self.module.id}/regenerate_pdf/',
+                        f'/api/modules/topics/{self.topic.id}/regenerate_pdf/',
                     )
 
                 self.assertEqual(response.status_code, 200)
-                self.module.refresh_from_db()
-                self.assertTrue(self.module.pdf_file)
-                self.assertFalse(self.module.pdf_is_outdated)
-                self.assertIsNotNone(self.module.pdf_generated_at)
+                self.topic.refresh_from_db()
+                self.assertTrue(self.topic.pdf_file)
+                self.assertFalse(self.topic.pdf_is_outdated)
+                self.assertIsNotNone(self.topic.pdf_generated_at)
 
-    def test_teacher_can_regenerate_lesson_pdf(self):
+    def test_topic_pdf_contains_published_lessons_and_blank_main_activity(self):
+        from learning_modules.services.pdf_generation import generate_topic_pdf
+
+        self.lesson.teacher_notes = 'hidden teacher note'
+        self.lesson.answer_key = 'hidden answer key'
+        self.lesson.save()
+        unpublished_lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Hidden Draft Lesson',
+            is_published=False,
+        )
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson,
+            title='Printable Main Activity',
+            instructions='Complete the blank worksheet.',
+            is_published=True,
+        )
+        question = ModuleActivityQuestion.objects.create(
+            activity=activity,
+            question_type=ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            prompt='Which answer is correct?',
+            explanation='hidden explanation',
+            points=25,
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='Visible option',
+            is_correct=True,
+        )
+
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
-                self.client.force_authenticate(self.teacher)
                 with patch(
-                    'learning_modules.views.generate_lesson_pdf',
-                    side_effect=self.fake_lesson_pdf,
-                ):
-                    response = self.client.post(
-                        f'/api/modules/lessons/{self.lesson.id}/regenerate_pdf/',
-                    )
+                    'learning_modules.services.pdf_generation.render_pdf',
+                    return_value=b'%PDF-1.4 generated topic',
+                ) as render_pdf:
+                    generate_topic_pdf(self.topic)
 
-                self.assertEqual(response.status_code, 200)
-                self.lesson.refresh_from_db()
-                self.assertTrue(self.lesson.pdf_file)
-                self.assertFalse(self.lesson.pdf_is_outdated)
-                self.assertIsNotNone(self.lesson.pdf_generated_at)
+        html = render_pdf.call_args.args[0]
+        self.assertIn(self.topic.title, html)
+        self.assertIn(self.lesson.title, html)
+        self.assertIn('Printable Main Activity', html)
+        self.assertIn('Which answer is correct?', html)
+        self.assertIn('Visible option', html)
+        self.assertNotIn(unpublished_lesson.title, html)
+        self.assertNotIn('hidden teacher note', html)
+        self.assertNotIn('hidden answer key', html)
+        self.assertNotIn('hidden explanation', html)
+        self.assertNotIn('25 pts', html)
 
-    def test_lesson_pdf_includes_main_activity_preview_without_answers_or_points(self):
-        from learning_modules.services.pdf_generation import generate_lesson_pdf
+    def test_main_activity_question_change_invalidates_topic_pdf(self):
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson,
+            title='Main Activity',
+            instructions='Answer the questions.',
+            is_published=True,
+        )
+        generated_at = timezone.now()
+        ModuleTopic.objects.filter(pk=self.topic.pk).update(
+            pdf_generated_at=generated_at,
+            pdf_is_outdated=False,
+        )
+
+        ModuleActivityQuestion.objects.create(
+            activity=activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='A newly added printable question',
+        )
+
+        self.topic.refresh_from_db()
+        self.assertTrue(self.topic.pdf_is_outdated)
+
+    def test_topic_pdf_includes_main_activity_formats_without_answers_or_points(self):
+        from learning_modules.services.pdf_generation import generate_topic_pdf
 
         activity = ModuleActivity.objects.create(
             module=self.module,
@@ -1743,9 +1884,9 @@ class PrintablePdfApiTests(APITestCase):
             with override_settings(MEDIA_ROOT=media_root):
                 with patch(
                     'learning_modules.services.pdf_generation.render_pdf',
-                    return_value=b'%PDF-1.4 generated lesson',
+                    return_value=b'%PDF-1.4 generated topic',
                 ) as render_pdf:
-                    generate_lesson_pdf(self.lesson)
+                    generate_topic_pdf(self.topic)
 
         html = render_pdf.call_args.args[0]
         self.assertIn('Main Activity Worksheet', html)
@@ -1764,113 +1905,16 @@ class PrintablePdfApiTests(APITestCase):
         self.assertNotIn('99 pts', html)
         self.assertNotIn('attempt', html.lower())
 
-    def test_student_downloads_saved_lesson_pdf(self):
-        with tempfile.TemporaryDirectory() as media_root:
-            with override_settings(MEDIA_ROOT=media_root):
-                self.lesson.pdf_file.save(
-                    'lesson.pdf',
-                    ContentFile(b'%PDF-1.4 saved lesson'),
-                )
-                self.lesson.pdf_generated_at = timezone.now()
-                self.lesson.pdf_is_outdated = False
-                self.lesson.save(update_fields=[
-                    'pdf_file',
-                    'pdf_generated_at',
-                    'pdf_is_outdated',
-                ])
-                self.client.force_authenticate(self.student)
-
-                response = self.client.get(
-                    f'/api/modules/lessons/{self.lesson.id}/download_pdf/',
-                )
-
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(
-                    b''.join(response.streaming_content),
-                    b'%PDF-1.4 saved lesson',
-                )
-                self.assertTrue(response.closed)
-
-    def test_student_download_does_not_regenerate_outdated_existing_pdf(self):
-        with tempfile.TemporaryDirectory() as media_root:
-            with override_settings(MEDIA_ROOT=media_root):
-                self.lesson.pdf_file.save(
-                    'lesson.pdf',
-                    ContentFile(b'%PDF-1.4 old lesson'),
-                )
-                self.lesson.pdf_generated_at = timezone.now()
-                self.lesson.pdf_is_outdated = True
-                self.lesson.save(update_fields=[
-                    'pdf_file',
-                    'pdf_generated_at',
-                    'pdf_is_outdated',
-                ])
-                self.client.force_authenticate(self.student)
-
-                with patch(
-                    'learning_modules.views.generate_lesson_pdf',
-                    side_effect=AssertionError('should not regenerate'),
-                ):
-                    response = self.client.get(
-                        f'/api/modules/lessons/{self.lesson.id}/download_pdf/',
-                    )
-
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(
-                    b''.join(response.streaming_content),
-                    b'%PDF-1.4 old lesson',
-                )
-                self.assertTrue(response.closed)
-
-    def test_student_download_generates_once_when_published_pdf_missing(self):
-        with tempfile.TemporaryDirectory() as media_root:
-            with override_settings(MEDIA_ROOT=media_root):
-                self.lesson.pdf_file = ''
-                self.lesson.pdf_generated_at = None
-                self.lesson.pdf_is_outdated = True
-                self.lesson.save(update_fields=[
-                    'pdf_file',
-                    'pdf_generated_at',
-                    'pdf_is_outdated',
-                ])
-                self.client.force_authenticate(self.student)
-                with patch(
-                    'learning_modules.views.generate_lesson_pdf',
-                    side_effect=self.fake_lesson_pdf,
-                ) as generate_lesson_pdf:
-                    response = self.client.get(
-                        f'/api/modules/lessons/{self.lesson.id}/download_pdf/',
-                    )
-
-                self.assertEqual(response.status_code, 200)
-                b''.join(response.streaming_content)
-                self.assertTrue(response.closed)
-                self.assertEqual(generate_lesson_pdf.call_count, 1)
-                self.lesson.refresh_from_db()
-                self.assertTrue(self.lesson.pdf_file)
-                self.assertFalse(self.lesson.pdf_is_outdated)
-
-    def test_lesson_edit_marks_generated_pdf_outdated(self):
-        self.lesson.pdf_generated_at = timezone.now()
-        self.lesson.pdf_is_outdated = False
-        self.lesson.save(update_fields=['pdf_generated_at', 'pdf_is_outdated'])
+    def test_lesson_edit_marks_topic_pdf_outdated(self):
+        self.topic.pdf_generated_at = timezone.now()
+        self.topic.pdf_is_outdated = False
+        self.topic.save(update_fields=['pdf_generated_at', 'pdf_is_outdated'])
 
         self.lesson.title = 'Updated Printable Lesson'
         self.lesson.save()
 
-        self.lesson.refresh_from_db()
-        self.assertTrue(self.lesson.pdf_is_outdated)
-
-    def test_unpublished_lesson_pdf_is_not_available_to_student(self):
-        self.lesson.is_published = False
-        self.lesson.save()
-        self.client.force_authenticate(self.student)
-
-        response = self.client.get(
-            f'/api/modules/lessons/{self.lesson.id}/download_pdf/',
-        )
-
-        self.assertEqual(response.status_code, 404)
+        self.topic.refresh_from_db()
+        self.assertTrue(self.topic.pdf_is_outdated)
 
     def test_markdown_image_paths_are_rewritten_for_pdf(self):
         from learning_modules.services.pdf_generation import markdown_html

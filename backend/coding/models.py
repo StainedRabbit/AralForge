@@ -42,13 +42,6 @@ class ProgrammingProblem(models.Model):
         null=True,
         blank=True,
     )
-    assessment_question = models.OneToOneField(
-        'assessments.Question',
-        on_delete=models.SET_NULL,
-        related_name='programming_problem',
-        null=True,
-        blank=True,
-    )
     points_possible = models.DecimalField(max_digits=6, decimal_places=2, default=100)
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -123,13 +116,6 @@ class CodeSubmission(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='code_submissions',
-    )
-    assessment_attempt = models.ForeignKey(
-        'assessments.AssessmentAttempt',
-        on_delete=models.SET_NULL,
-        related_name='code_submissions',
-        null=True,
-        blank=True,
     )
     language = models.CharField(max_length=50)
     source_code = models.TextField()

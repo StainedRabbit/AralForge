@@ -43,7 +43,7 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
       />
       <div className="dashboard-hero__content">
         <p className="eyebrow">Today in AralForge</p><h1>{greeting(currentUser)}</h1>
-        <p>Keep your modules, coding work, assessments, and grades moving from one focused academic workspace.</p>
+        <p>Keep your modules, Main Activities, coding work, and grades moving from one focused academic workspace.</p>
         <div className="hero-actions">
           <Link className="button button--primary" to="/modules"><Icon name="book" /><span>Continue learning</span></Link>
           <button className="button button--ghost" onClick={() => dashboard.refetch()} type="button"><Icon name="spark" /><span>Refresh</span></button>

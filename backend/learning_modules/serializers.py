@@ -74,10 +74,30 @@ def masked_pair_order(pair):
     return int(digest[:8], 16)
 
 
+class DownloadableModuleTopicSerializer(serializers.ModelSerializer):
+    has_pdf = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ModuleTopic
+        fields = (
+            'id',
+            'title',
+            'order',
+            'unit',
+            'competency_code',
+            'has_pdf',
+            'pdf_generated_at',
+            'pdf_is_outdated',
+        )
+
+    def get_has_pdf(self, obj):
+        return bool(obj.pdf_file)
+
+
 class ModuleSerializer(serializers.ModelSerializer):
     is_accessible = serializers.SerializerMethodField()
     access_status = serializers.SerializerMethodField()
-    has_pdf = serializers.SerializerMethodField()
+    downloadable_topics = serializers.SerializerMethodField()
 
     class Meta:
         model = Module
@@ -95,12 +115,9 @@ class ModuleSerializer(serializers.ModelSerializer):
             'teacher_notes',
             'student_activities',
             'resources',
-            'pdf_file',
-            'pdf_generated_at',
-            'pdf_is_outdated',
             'is_accessible',
             'access_status',
-            'has_pdf',
+            'downloadable_topics',
             'subjects',
             'is_published',
             'created_at',
@@ -110,9 +127,7 @@ class ModuleSerializer(serializers.ModelSerializer):
             'id',
             'is_accessible',
             'access_status',
-            'has_pdf',
-            'pdf_generated_at',
-            'pdf_is_outdated',
+            'downloadable_topics',
             'created_at',
             'updated_at',
         )
@@ -143,8 +158,9 @@ class ModuleSerializer(serializers.ModelSerializer):
             else 'ENROLLED_ACTIVE'
         )
 
-    def get_has_pdf(self, obj):
-        return bool(obj.pdf_file)
+    def get_downloadable_topics(self, obj):
+        topics = obj.topics.filter(is_published=True).order_by('order', 'id')
+        return DownloadableModuleTopicSerializer(topics, many=True).data
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -159,7 +175,6 @@ class ModuleSerializer(serializers.ModelSerializer):
                 'teacher_notes',
                 'student_activities',
                 'resources',
-                'pdf_file',
             ):
                 data.pop(field, None)
         return data
@@ -234,8 +249,21 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
             )
             and attrs.get('is_active', True)
         )
-        if 'expires_at' not in attrs and (not self.instance or renewing):
+        if not attrs.get('expires_at') and (not self.instance or renewing):
             attrs['expires_at'] = add_calendar_months(timezone.now(), 5)
+
+        next_active = attrs.get(
+            'is_active',
+            self.instance.is_active if self.instance else True,
+        )
+        next_expiry = attrs.get(
+            'expires_at',
+            self.instance.expires_at if self.instance else None,
+        )
+        if next_active and next_expiry and next_expiry <= timezone.now():
+            raise serializers.ValidationError({
+                'expires_at': 'Active module access must expire in the future.',
+            })
 
         if request and not request.user.is_admin_teacher:
             raise serializers.ValidationError('Only teachers can activate module access.')
@@ -243,6 +271,8 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
 
 
 class ModuleTopicSerializer(serializers.ModelSerializer):
+    has_pdf = serializers.SerializerMethodField()
+
     class Meta:
         model = ModuleTopic
         fields = (
@@ -260,16 +290,29 @@ class ModuleTopicSerializer(serializers.ModelSerializer):
             'performance_task',
             'success_criteria',
             'values_focus',
+            'pdf_file',
+            'pdf_generated_at',
+            'pdf_is_outdated',
+            'has_pdf',
             'is_published',
             'created_at',
             'updated_at',
         )
-        read_only_fields = ('id', 'legacy_module', 'created_at', 'updated_at')
+        read_only_fields = (
+            'id',
+            'legacy_module',
+            'has_pdf',
+            'pdf_generated_at',
+            'pdf_is_outdated',
+            'created_at',
+            'updated_at',
+        )
+
+    def get_has_pdf(self, obj):
+        return bool(obj.pdf_file)
 
 
 class ModuleLessonSerializer(serializers.ModelSerializer):
-    has_pdf = serializers.SerializerMethodField()
-
     class Meta:
         model = ModuleLesson
         fields = (
@@ -299,11 +342,6 @@ class ModuleLessonSerializer(serializers.ModelSerializer):
             'enrichment',
             'student_activities',
             'resources',
-            'assessment_url',
-            'pdf_file',
-            'pdf_generated_at',
-            'pdf_is_outdated',
-            'has_pdf',
             'is_published',
             'created_at',
             'updated_at',
@@ -312,13 +350,7 @@ class ModuleLessonSerializer(serializers.ModelSerializer):
             'id',
             'created_at',
             'updated_at',
-            'has_pdf',
-            'pdf_generated_at',
-            'pdf_is_outdated',
         )
-
-    def get_has_pdf(self, obj):
-        return bool(obj.pdf_file)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

@@ -28,7 +28,6 @@ class ProgrammingProblemViewSet(viewsets.ModelViewSet):
             'module',
             'topic',
             'lesson',
-            'assessment_question',
         ).prefetch_related('test_cases', 'blanks')
 
         if self.request.user.is_admin_teacher:
@@ -88,7 +87,7 @@ class CodeSubmissionViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = CodeSubmission.objects.select_related('problem', 'student', 'assessment_attempt')
+        queryset = CodeSubmission.objects.select_related('problem', 'student')
 
         if self.request.user.is_admin_teacher:
             return queryset

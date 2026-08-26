@@ -178,7 +178,6 @@ export function CodingBlankPanel({
         body: JSON.stringify({
           problem: problem.id,
           student: currentUser.id,
-          assessment_attempt: null,
           language: problem.expected_language || 'python',
           source_code: sourceCode || problem.starter_code || problem.description,
         }),

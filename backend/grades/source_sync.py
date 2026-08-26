@@ -15,30 +15,6 @@ def _normalized_score(earned, maximum, item_maximum):
     return min(max(value, Decimal('0')), Decimal(item_maximum))
 
 
-def _assessment_result(item, student):
-    assessment = item.assessment
-    if not assessment or not assessment.counts_toward_grade:
-        return None
-    candidates = []
-    for attempt in assessment.attempts.filter(student=student, is_submitted=True).prefetch_related(
-        'answers', 'selected_questions'
-    ):
-        questions = list(
-            attempt.selected_questions.values_list('question_id', flat=True)
-            if attempt.selected_questions.exists()
-            else assessment.questions.values_list('id', flat=True)
-        )
-        answers = {answer.question_id: answer for answer in attempt.answers.all()}
-        if not questions or any(qid not in answers or answers[qid].points_earned is None for qid in questions):
-            continue
-        earned = sum((answers[qid].points_earned for qid in questions), Decimal('0'))
-        maximum = sum(assessment.questions.filter(id__in=questions).values_list('points', flat=True), Decimal('0'))
-        score = _normalized_score(earned, maximum, item.points_possible)
-        if score is not None:
-            candidates.append(score)
-    return max(candidates) if candidates else None
-
-
 def _module_activity_result(item, student):
     activity = item.module_activity
     if not activity:
@@ -86,7 +62,6 @@ def _coding_result(item, student):
 
 def source_score(item, student):
     return {
-        GradeItemSourceType.ASSESSMENT: _assessment_result,
         GradeItemSourceType.MODULE_ACTIVITY: _module_activity_result,
         GradeItemSourceType.ATTENDANCE: _attendance_result,
         GradeItemSourceType.CODING: _coding_result,
@@ -131,7 +106,7 @@ def sync_grade_item(item):
 
 def sync_items(queryset):
     return sum(sync_grade_item(item) for item in queryset.select_related(
-        'schedule', 'assessment', 'module_activity', 'attendance_session', 'coding_problem'
+        'schedule', 'module_activity', 'attendance_session', 'coding_problem'
     ))
 
 

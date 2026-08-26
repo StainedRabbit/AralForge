@@ -11,6 +11,7 @@ async function openModuleWorkspace(page: Page) {
   await page.waitForURL(/\/admin(?:\/)?$/)
 
   await page.goto('/admin/modules/new')
+  await expect(page.getByText('Printable PDF', { exact: true })).toHaveCount(0)
   await page.getByLabel('Title').fill('E2E Programming Module')
   await page.getByLabel('Subject').selectOption({ label: 'E2E101 - Programming Fundamentals' })
   await page.getByRole('button', { name: 'Save module' }).click()
@@ -313,6 +314,7 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
   await expect(topicSelect).toHaveValue(/\d+/)
   await page.getByRole('link', { name: 'New Lesson' }).click()
   await expect(page.getByRole('heading', { name: 'Create Lesson' })).toBeVisible()
+  await expect(page.getByText('Printable PDF', { exact: true })).toHaveCount(0)
   await page.getByLabel('Lesson Title').fill('Persisted Scoped Lesson')
   await page.getByLabel('Order').fill('1')
 
@@ -324,6 +326,9 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
   await expect((await createResponse).status()).toBe(201)
   await page.waitForURL(/\/admin\/modules\?subject=\d+&topic=\d+&lesson=\d+/)
   await expect(page.getByRole('heading', { name: /Persisted Scoped Lesson/ })).toBeVisible()
+  await expect(page.getByText('Topic PDF', { exact: true })).toBeVisible()
+  await expect(page.getByText('Module PDF', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Lesson PDF', { exact: true })).toHaveCount(0)
 
   const savedUrl = page.url()
   await page.reload()
@@ -338,6 +343,15 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
 })
 
 test('starts, resumes, continues, and reviews lessons from module pages', async ({ page }) => {
+  const topicDownloadPaths: string[] = []
+  await page.route(/\/api\/modules\/topics\/\d+\/download_pdf\/$/, async (route) => {
+    topicDownloadPaths.push(new URL(route.request().url()).pathname)
+    await route.fulfill({
+      body: Buffer.from('%PDF-1.4 topic fixture'),
+      contentType: 'application/pdf',
+      status: 200,
+    })
+  })
   await page.goto('/modules')
   await page.getByLabel('Student number').fill('E2E-001')
   await page.getByLabel('Password').fill('e2e-password')
@@ -357,9 +371,21 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await progressPromise
   await expect(page.getByRole('heading', { name: 'Resume Basics' })).toBeVisible()
   await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Download Module PDF' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Download Printable PDF' })).toHaveCount(0)
+  const topicDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download Topic PDF' }).click()
+  expect((await topicDownload).suggestedFilename()).toBe(
+    'e2e-resume-learning-module-resume-topic.pdf',
+  )
+  expect(topicDownloadPaths).toHaveLength(1)
 
   await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
   await expect(page.getByRole('button', { name: /Resume Lesson.*Resume Basics/ })).toBeVisible()
+  await page.getByRole('button', { name: 'View topic overview' }).click()
+  await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
+  await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
 
   await page.goto(moduleLibraryUrl)
   await expect(page.getByRole('link', { name: /Resume Lesson.*Resume Basics/ })).toBeVisible()

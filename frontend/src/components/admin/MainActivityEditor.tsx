@@ -1420,7 +1420,7 @@ function ActivityPreview({
       </div>
       {mode === 'score_only' ? (
         <div className="inline-alert">
-          <Icon name="assessment" />
+          <Icon name="activity" />
           <span>Score recorded. Correct answers stay hidden while attempts remain.</span>
         </div>
       ) : null}

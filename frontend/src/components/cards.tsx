@@ -1,12 +1,9 @@
 import { Link } from 'react-router-dom'
 import type { RouteData } from '../app/types'
 import type {
-  Assessment,
-  AssessmentAttempt,
   Module,
   ModuleActivity,
   ProgrammingProblem,
-  Subject,
 } from '../types'
 import {
   activityTypeLabel,
@@ -66,7 +63,6 @@ export function ModuleCard({ data, module }: { data: RouteData; module: Module }
     </article>
   )
 }
-
 export function ModuleRow({ data, module }: { data: RouteData; module: Module }) {
   const activities = getModuleActivities(data, module.id)
   const submittedCount = activities.filter((activity) =>
@@ -90,7 +86,6 @@ export function ModuleRow({ data, module }: { data: RouteData; module: Module })
     </Link>
   )
 }
-
 export function ActivityCard({
   activity,
   data,
@@ -115,7 +110,6 @@ export function ActivityCard({
     </Link>
   )
 }
-
 export function ActivityTimelineItem({
   activity,
   data,
@@ -175,61 +169,6 @@ export function ProblemCard({
         <Icon name="code" />
         <span>Open problem</span>
       </Link>
-    </article>
-  )
-}
-
-export function AssessmentRow({
-  assessment,
-  attempts,
-  isSaving,
-  onStart,
-  subject,
-}: {
-  assessment: Assessment
-  attempts: AssessmentAttempt[]
-  isSaving: boolean
-  onStart: () => void
-  subject?: Subject
-}) {
-  const submittedAttempts = attempts.filter((attempt) => attempt.is_submitted).length
-  const canStart = attempts.length < assessment.max_attempts
-
-  return (
-    <article className="assessment-row">
-      <span className="assessment-row__icon">
-        <Icon name="assessment" />
-      </span>
-      <div>
-        <div className="assessment-row__title">
-          <h2>{assessment.title}</h2>
-          <span className="subject-chip">{assessment.kind}</span>
-        </div>
-        <p>{assessment.instructions || 'Open assessment when your teacher enables questions.'}</p>
-        <MetaStrip
-          items={[
-            ['Subject', subject ? subject.code : 'General'],
-            ['Limit', assessment.time_limit_minutes ? `${assessment.time_limit_minutes}m` : 'None'],
-            ['Attempts', `${attempts.length}/${assessment.max_attempts}`],
-            ['Submitted', submittedAttempts.toString()],
-          ]}
-        />
-      </div>
-      <div className="assessment-actions">
-        <Link className="button button--primary" to={`/assessments/${assessment.id}`}>
-          <Icon name="assessment" />
-          <span>Open</span>
-        </Link>
-        <button
-          className="button button--secondary"
-          disabled={!canStart || isSaving}
-          onClick={onStart}
-          type="button"
-        >
-          <Icon name="send" />
-          <span>{isSaving ? 'Starting...' : canStart ? 'New attempt' : 'Maxed'}</span>
-        </button>
-      </div>
     </article>
   )
 }

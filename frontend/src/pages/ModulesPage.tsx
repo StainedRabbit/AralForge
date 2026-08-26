@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { RichLessonText } from '../components/RichLessonText'
+import { TopicPdfDownloads } from '../components/TopicPdfDownloads'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard } from '../components/ui'
 import type { ModuleLesson, ModuleTopic } from '../types'
 import {
@@ -18,7 +19,6 @@ import {
   getStudentModuleSubjectIds,
   moduleAccessLabel,
 } from '../utils/student'
-import { toErrorMessage } from '../utils/format'
 
 type ModuleSearchResult =
   | { kind: 'topic'; topic: ModuleTopic }
@@ -245,7 +245,14 @@ export function ModulesPage({
               <div className="student-module-browser__actions">
                 <div className="student-module-browser__meta">
                   <span>{moduleAccessLabel(data, selectedModule)}</span>
-                  <span>{publishedTopics.length} topic{publishedTopics.length === 1 ? '' : 's'}</span>
+                  <span>
+                    {selectedModule.is_accessible
+                      ? publishedTopics.length
+                      : selectedModule.downloadable_topics.length}{' '}
+                    topic{(selectedModule.is_accessible
+                      ? publishedTopics.length
+                      : selectedModule.downloadable_topics.length) === 1 ? '' : 's'}
+                  </span>
                   <Link to={`/modules/${selectedModule.id}`}>Module Contents</Link>
                 </div>
                 {resumeTarget ? (
@@ -324,29 +331,6 @@ function LockedModuleSummary({
   api: AuthedRequest
   module: RouteData['modules'][number]
 }) {
-  const [downloading, setDownloading] = useState(false)
-  const [message, setMessage] = useState('')
-
-  async function downloadPdf() {
-    setDownloading(true)
-    setMessage('')
-    try {
-      const blob = await api<Blob>(
-        `/modules/modules/${module.id}/download-pdf/`,
-      )
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${module.slug || 'module'}.pdf`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError) || 'Printable PDF is not available yet.')
-    } finally {
-      setDownloading(false)
-    }
-  }
-
   return (
     <div className="locked-module-summary">
       <span className="locked-module-summary__icon">
@@ -354,24 +338,14 @@ function LockedModuleSummary({
       </span>
       <div>
         <p className="eyebrow">Module access</p>
-        <h3>PDF available</h3>
+        <h3>Topics available for download</h3>
         <p>
-          Download the module PDF for offline study. Ask your teacher to activate web
-          lessons, activities, coding exercises, mock exams, and progress tracking.
+          Download each published topic for offline study. Ask your teacher to activate
+          the module when it is time to open web lessons, coding exercises, progress,
+          and Main Activities online.
         </p>
       </div>
-      <div className="locked-module-summary__actions">
-        <button
-          className="button button--secondary"
-          disabled={downloading}
-          onClick={() => void downloadPdf()}
-          type="button"
-        >
-          <Icon name="file" />
-          <span>{downloading ? 'Downloading...' : 'Download Module PDF'}</span>
-        </button>
-        {message ? <p className="admin-message">{message}</p> : null}
-      </div>
+      <TopicPdfDownloads api={api} module={module} />
     </div>
   )
 }

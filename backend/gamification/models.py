@@ -4,7 +4,6 @@ from django.db import models
 
 class PointLedger(models.Model):
     class Source(models.TextChoices):
-        ASSESSMENT = 'ASSESSMENT', 'Assessment'
         ATTENDANCE = 'ATTENDANCE', 'Attendance'
         MODULE_ACTIVITY = 'MODULE_ACTIVITY', 'Module Activity'
         CODING = 'CODING', 'Coding'

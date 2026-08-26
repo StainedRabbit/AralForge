@@ -6,7 +6,6 @@ import { MobileHeader, MobileTabbar, Sidebar, type NavItem } from '../components
 import { RouteWorkspace } from '../components/RouteWorkspace'
 import type { WorkspaceResource } from '../queries/useScopedWorkspace'
 import { SkeletonList } from '../components/ui'
-const AdminAssessmentsPage = lazy(() => import('../pages/admin/AdminAssessmentsPage').then(module => ({ default: module.AdminAssessmentsPage })))
 const AdminAttendancePage = lazy(() => import('../pages/admin/AdminAttendancePage').then(module => ({ default: module.AdminAttendancePage })))
 const AdminCodingPage = lazy(() => import('../pages/admin/AdminCodingPage').then(module => ({ default: module.AdminCodingPage })))
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage').then(module => ({ default: module.AdminDashboardPage })))
@@ -23,21 +22,20 @@ const AdminClassesPage = lazy(() => import('../pages/admin/AdminClassesPage').th
 const nav: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' }, { to: '/admin/students', label: 'Students', icon: 'users' },
   { to: '/admin/classes', label: 'Classes', icon: 'calendar' }, { to: '/admin/modules', label: 'Modules', icon: 'module' },
-  { to: '/admin/coding', label: 'Coding', icon: 'code' }, { to: '/admin/assessments', label: 'Assessments', icon: 'assessment' },
+  { to: '/admin/coding', label: 'Coding', icon: 'code' },
   { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' }, { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]
-const mobile = nav.filter(item => ['/admin','/admin/students','/admin/classes','/admin/assessments','/admin/grades'].includes(item.to)).map(item => item.to === '/admin' ? { ...item, label: 'Home' } : item)
+const mobile = nav.filter(item => ['/admin','/admin/students','/admin/classes','/admin/gradebook','/admin/grades'].includes(item.to)).map(item => item.to === '/admin' ? { ...item, label: 'Home' } : item)
 
 const STUDENTS: WorkspaceResource[] = ['users','profiles','subjects','schedules','enrollments','modules','moduleAccess']
-const CLASSES: WorkspaceResource[] = ['users','profiles','subjects','schoolYears','terms','schedules','enrollments','modules','attendanceSessions','attendanceRecords','gradeCategories','gradeItems','gradeItemScores','categoryGrades','periodGrades','finalGrades']
+const CLASSES: WorkspaceResource[] = ['users','profiles','subjects','schoolYears','terms','schedules','enrollments','modules','moduleAccess','attendanceSessions','attendanceRecords','gradeCategories','gradeItems','gradeItemScores','categoryGrades','periodGrades','finalGrades']
 const MODULES: WorkspaceResource[] = ['subjects','modules']
-const EDITOR: WorkspaceResource[] = ['users','profiles','schedules','enrollments','gradeCategories','gradeItems',...MODULES,'moduleTopics','moduleLessons','lessonExamples','lessonAssets','activities','activityQuestions','activityChoices','activityMatchingPairs','problems','testCases','assessments','questions','choices']
+const EDITOR: WorkspaceResource[] = ['users','profiles','schedules','enrollments','gradeCategories','gradeItems',...MODULES,'moduleTopics','moduleLessons','lessonExamples','lessonAssets','activities','activityQuestions','activityChoices','activityMatchingPairs','problems','testCases']
 const LESSON_EDITOR: WorkspaceResource[] = []
-const CODING: WorkspaceResource[] = ['users','subjects','modules','moduleTopics','moduleLessons','problems','testCases','codeSubmissions','codeBlankAnswers','attempts','questions']
-const ASSESSMENTS: WorkspaceResource[] = ['users','subjects','modules','assessments','questions','choices','attempts','attemptQuestions','answers']
+const CODING: WorkspaceResource[] = ['users','subjects','modules','moduleTopics','moduleLessons','problems','testCases','codeSubmissions','codeBlankAnswers']
 const ATTENDANCE: WorkspaceResource[] = ['users','subjects','terms','schedules','enrollments','attendanceSessions','attendanceRecords']
 const GRADES: WorkspaceResource[] = ['users','subjects','schedules','gradingTemplates','gradingTemplateItems','subjectGradingPolicies','gradeCategories','gradeItems','categoryGrades','periodGrades','finalGrades','points','badges','studentBadges','levels']
-const GRADEBOOK: WorkspaceResource[] = ['users','schedules','enrollments','modules','activities','activityAttempts','assessments','problems','attendanceSessions','gradeCategories','gradeItems','gradeItemScores','categoryGrades']
+const GRADEBOOK: WorkspaceResource[] = ['users','schedules','enrollments','modules','activities','activityAttempts','problems','attendanceSessions','gradeCategories','gradeItems','gradeItemScores','categoryGrades']
 
 export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: { api: AuthedRequest; currentUser: User; profile: StudentProfile | null; pendingCount: number; onLogout: () => void }) {
   const scoped = (resources: readonly WorkspaceResource[], render: Parameters<typeof RouteWorkspace>[0]['children']) => <RouteWorkspace api={api} currentUser={currentUser} profile={profile} resources={resources}>{render}</RouteWorkspace>
@@ -59,7 +57,7 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/modules/:moduleId/present" element={scoped(EDITOR, data => <LessonPresentationPage data={data} />)} />
         <Route path="/admin/modules/:moduleId/progress" element={scoped(['modules'], data => <ModuleProgressPage api={api} data={data} />)} />
         <Route path="/admin/coding" element={scoped(CODING, data => <AdminCodingPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/assessments" element={scoped(ASSESSMENTS, data => <AdminAssessmentsPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/assessments/*" element={<Navigate replace to="/admin/gradebook" />} />
         <Route path="/admin/attendance" element={scoped(ATTENDANCE, data => <AdminAttendancePage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/grades" element={scoped(GRADES, data => <AdminGradesPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/gradebook" element={scoped(GRADEBOOK, data => <AdminGradebookPage api={api} data={data} refresh={data.refresh} />)} />

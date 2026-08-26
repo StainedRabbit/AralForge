@@ -10,7 +10,6 @@ class AralForgeQueryFilterBackend(BaseFilterBackend):
         'topic': 'topic_id',
         'lesson': 'lesson_id',
         'activity': 'activity_id',
-        'assessment': 'assessment_id',
         'attempt': 'attempt_id',
         'student': 'student_id',
         'schedule': 'schedule_id',

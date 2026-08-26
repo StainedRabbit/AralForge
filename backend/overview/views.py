@@ -4,8 +4,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import StudentProfile, User
-from assessments.models import Answer, Assessment, AssessmentAttempt, Question
-from assessments.serializers import AssessmentAttemptSerializer
 from attendance.models import AttendanceSession
 from attendance.serializers import AttendanceSessionSerializer
 from coding.models import CodeBlank, CodeSubmission, ProgrammingProblem
@@ -14,6 +12,8 @@ from learning_modules.models import (
     Module,
     ModuleAccess,
     ModuleActivity,
+    ModuleActivityAttempt,
+    ModuleActivityQuestion,
     ModuleActivitySubmission,
     ModuleProgress,
     active_module_access_filter,
@@ -22,6 +22,7 @@ from learning_modules.models import (
 from learning_modules.serializers import (
     ModuleAccessSerializer,
     ModuleActivitySerializer,
+    ModuleActivityAttemptSummarySerializer,
     ModuleActivitySubmissionSerializer,
     ModuleSerializer,
 )
@@ -33,7 +34,6 @@ class NavigationView(APIView):
         if request.user.is_admin_teacher:
             pending = (
                 ModuleActivitySubmission.objects.filter(score__isnull=True).count()
-                + Answer.objects.filter(points_earned__isnull=True).count()
                 + CodeSubmission.objects.filter(score__isnull=True).count()
             )
             return Response({'role': 'teacher', 'pending_count': pending})
@@ -113,9 +113,9 @@ def teacher_dashboard(request):
     ungraded_submissions = ModuleActivitySubmission.objects.filter(
         score__isnull=True,
     ).select_related('activity', 'student').order_by('-submitted_at')
-    recent_attempts = AssessmentAttempt.objects.select_related(
-        'assessment', 'student',
-    ).prefetch_related('selected_questions').order_by('-started_at')[:8]
+    recent_activity_attempts = ModuleActivityAttempt.objects.select_related(
+        'activity', 'student',
+    ).order_by('-started_at')[:8]
     recent_access = ModuleAccess.objects.select_related(
         'module', 'student', 'activated_by',
     ).order_by('-updated_at')[:8]
@@ -131,9 +131,9 @@ def teacher_dashboard(request):
             'profile_count': StudentProfile.objects.count(),
             'module_count': Module.objects.count(),
             'published_modules': Module.objects.filter(is_published=True).count(),
-            'assessment_count': Assessment.objects.count(),
-            'question_count': Question.objects.count(),
-            'grade_queue': ungraded_submissions.count() + Answer.objects.filter(points_earned__isnull=True).count(),
+            'main_activity_count': ModuleActivity.objects.count(),
+            'activity_question_count': ModuleActivityQuestion.objects.count(),
+            'grade_queue': ungraded_submissions.count(),
             'module_grants': ModuleAccess.objects.count(),
             'active_module_grants': ModuleAccess.objects.filter(
                 is_active=True,
@@ -147,8 +147,8 @@ def teacher_dashboard(request):
         'ungraded_submissions': ModuleActivitySubmissionSerializer(
             ungraded_submissions[:8], many=True, context={'request': request},
         ).data,
-        'recent_attempts': AssessmentAttemptSerializer(
-            recent_attempts, many=True, context={'request': request},
+        'recent_activity_attempts': ModuleActivityAttemptSummarySerializer(
+            recent_activity_attempts, many=True, context={'request': request},
         ).data,
         'recent_module_access': ModuleAccessSerializer(
             recent_access, many=True, context={'request': request},

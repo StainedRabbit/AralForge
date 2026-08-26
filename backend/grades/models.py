@@ -35,7 +35,6 @@ class GradeCategoryChoices(models.TextChoices):
 
 class GradeItemSourceType(models.TextChoices):
     MANUAL = 'MANUAL', 'Manual'
-    ASSESSMENT = 'ASSESSMENT', 'Assessment'
     MODULE_ACTIVITY = 'MODULE_ACTIVITY', 'Module activity'
     ATTENDANCE = 'ATTENDANCE', 'Attendance'
     CODING = 'CODING', 'Coding'
@@ -327,13 +326,6 @@ class GradeItem(models.Model):
         choices=GradeItemSourceType,
         default=GradeItemSourceType.MANUAL,
     )
-    assessment = models.ForeignKey(
-        'assessments.Assessment',
-        on_delete=models.SET_NULL,
-        related_name='grade_items',
-        null=True,
-        blank=True,
-    )
     module_activity = models.ForeignKey(
         'learning_modules.ModuleActivity',
         on_delete=models.SET_NULL,
@@ -368,8 +360,6 @@ class GradeItem(models.Model):
 
     @property
     def source_title(self):
-        if self.source_type == GradeItemSourceType.ASSESSMENT and self.assessment_id:
-            return self.assessment.title
         if self.source_type == GradeItemSourceType.MODULE_ACTIVITY and self.module_activity_id:
             return self.module_activity.title
         if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:
@@ -380,8 +370,6 @@ class GradeItem(models.Model):
 
     @property
     def source_points_possible(self):
-        if self.source_type == GradeItemSourceType.ASSESSMENT and self.assessment_id:
-            return self.assessment.points_possible
         if self.source_type == GradeItemSourceType.MODULE_ACTIVITY and self.module_activity_id:
             return self.module_activity.points_possible
         if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:

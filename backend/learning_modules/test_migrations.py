@@ -1,6 +1,9 @@
+import tempfile
+
+from django.core.files.base import ContentFile
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import User
@@ -86,3 +89,92 @@ class RemoveModulePaymentsMigrationTests(TransactionTestCase):
         self.assertNotIn('payment_status', access_fields)
         self.assertNotIn('amount_paid', access_fields)
         self.assertNotIn('payment_reference', access_fields)
+
+
+class TopicPdfOnlyMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    migrate_from = ('learning_modules', '0022_moduletopic_printable_pdf')
+
+    def setUp(self):
+        super().setUp()
+        self.media_root = tempfile.TemporaryDirectory()
+        self.settings_override = override_settings(MEDIA_ROOT=self.media_root.name)
+        self.settings_override.enable()
+
+        executor = MigrationExecutor(connection)
+        self.latest_targets = executor.loader.graph.leaf_nodes()
+        old_targets = [
+            self.migrate_from if target[0] == 'learning_modules' else target
+            for target in self.latest_targets
+        ]
+        executor.migrate(old_targets)
+        self.old_apps = executor.loader.project_state(old_targets).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.latest_targets)
+        self.settings_override.disable()
+        self.media_root.cleanup()
+        super().tearDown()
+
+    def test_migration_deletes_module_and_lesson_pdfs_but_preserves_topic_pdf(self):
+        Module = self.old_apps.get_model('learning_modules', 'Module')
+        ModuleTopic = self.old_apps.get_model('learning_modules', 'ModuleTopic')
+        ModuleLesson = self.old_apps.get_model('learning_modules', 'ModuleLesson')
+
+        module = Module.objects.create(
+            title='Migration Printable Module',
+            slug='migration-printable-module',
+        )
+        topic = ModuleTopic.objects.create(
+            module=module,
+            title='Migration Printable Topic',
+        )
+        lesson = ModuleLesson.objects.create(
+            topic=topic,
+            title='Migration Printable Lesson',
+        )
+        module.pdf_file.save('module.pdf', ContentFile(b'module pdf'))
+        topic.pdf_file.save('topic.pdf', ContentFile(b'topic pdf'))
+        lesson.pdf_file.save('lesson.pdf', ContentFile(b'lesson pdf'))
+
+        module_name = module.pdf_file.name
+        topic_name = topic.pdf_file.name
+        lesson_name = lesson.pdf_file.name
+        storage = topic.pdf_file.storage
+        self.assertTrue(storage.exists(module_name))
+        self.assertTrue(storage.exists(topic_name))
+        self.assertTrue(storage.exists(lesson_name))
+
+        MigrationExecutor(connection).migrate(self.latest_targets)
+
+        from learning_modules.models import Module as CurrentModule
+        from learning_modules.models import ModuleLesson as CurrentModuleLesson
+        from learning_modules.models import ModuleTopic as CurrentModuleTopic
+
+        self.assertTrue(CurrentModule.objects.filter(pk=module.pk).exists())
+        self.assertTrue(CurrentModuleTopic.objects.filter(pk=topic.pk).exists())
+        self.assertTrue(CurrentModuleLesson.objects.filter(pk=lesson.pk).exists())
+        self.assertFalse(storage.exists(module_name))
+        self.assertTrue(storage.exists(topic_name))
+        self.assertFalse(storage.exists(lesson_name))
+
+        with connection.cursor() as cursor:
+            module_columns = {
+                column.name
+                for column in connection.introspection.get_table_description(
+                    cursor,
+                    CurrentModule._meta.db_table,
+                )
+            }
+            lesson_columns = {
+                column.name
+                for column in connection.introspection.get_table_description(
+                    cursor,
+                    CurrentModuleLesson._meta.db_table,
+                )
+            }
+
+        retired_columns = {'pdf_file', 'pdf_generated_at', 'pdf_is_outdated'}
+        self.assertTrue(retired_columns.isdisjoint(module_columns))
+        self.assertTrue(retired_columns.isdisjoint(lesson_columns))

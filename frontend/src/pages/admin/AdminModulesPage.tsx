@@ -991,12 +991,10 @@ function ModuleLessonWorkspace({
         {selectedLesson ? (
           <div className="lesson-material module-lesson-preview" id="selected-lesson">
             <LessonPreview
-              api={api}
               lesson={selectedLesson}
               module={module}
               navigateLesson={navigateLesson}
               lessonExamples={data.lessonExamples.filter((example) => example.lesson === selectedLesson.id)}
-              refresh={refresh}
               topic={selectedTopic}
               topicLessons={topicLessons}
             />
@@ -1217,11 +1215,11 @@ function TopicSummaryCard({
         </div>
         <PdfControls
           api={api}
-          downloadPath={`/modules/modules/${module.id}/download-pdf/`}
-          filename={`${module.slug || 'module'}.pdf`}
-          item={module}
-          label="Module PDF"
-          regeneratePath={`/modules/modules/${module.id}/regenerate_pdf/`}
+          downloadPath={`/modules/topics/${selectedTopic.id}/download_pdf/`}
+          filename={`${module.slug || 'module'}-${slugify(selectedTopic.title) || 'topic'}.pdf`}
+          item={selectedTopic}
+          label="Topic PDF"
+          regeneratePath={`/modules/topics/${selectedTopic.id}/regenerate_pdf/`}
           refresh={refresh}
         />
         {workspaceMessage ? <p className="admin-message">{workspaceMessage}</p> : null}
@@ -1379,21 +1377,17 @@ function ModuleManageMenu({
 }
 
 function LessonPreview({
-  api,
   lesson,
   module,
   navigateLesson,
   lessonExamples,
-  refresh,
   topic,
   topicLessons,
 }: {
-  api: AuthedRequest
   lesson: ModuleLesson
   module: Module
   navigateLesson: (lessonId: number) => void
   lessonExamples: ModuleLessonExample[]
-  refresh: () => Promise<void>
   topic: ModuleTopic
   topicLessons: ModuleLesson[]
 }) {
@@ -1420,7 +1414,6 @@ function LessonPreview({
         <div>
           <p className="eyebrow">Modules / {topic.title} / Lesson {lesson.order || lessonIndex + 1}</p>
           <h2>Lesson {lesson.order || lessonIndex + 1}: {lesson.title}</h2>
-          {lesson.pdf_generated_at ? <small>Generated {formatDateTime(lesson.pdf_generated_at)}</small> : null}
           <div className="module-topic-pills" aria-label="Lesson metadata">
             <span>{lesson.is_published ? 'Published' : 'Draft'}</span>
             <span>{lessonSections.length} section{lessonSections.length === 1 ? '' : 's'}</span>
@@ -1443,17 +1436,6 @@ function LessonPreview({
             <span>Edit Lesson</span>
           </Link>
         </div>
-      </div>
-      <div className="lesson-workspace-utility">
-        <PdfControls
-          api={api}
-          downloadPath={`/modules/lessons/${lesson.id}/download_pdf/`}
-          filename={`${slugify(lesson.title) || 'lesson'}.pdf`}
-          item={lesson}
-          label="Lesson PDF"
-          regeneratePath={`/modules/lessons/${lesson.id}/regenerate_pdf/`}
-          refresh={refresh}
-        />
       </div>
       {lessonSections.length ? (
         <LessonSectionNavigation

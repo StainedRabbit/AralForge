@@ -2575,7 +2575,6 @@ function formatGradeValue(value: string | number | null) {
 
 function sourceTypeLabel(value: string) {
   const labels: Record<string, string> = {
-    ASSESSMENT: 'Assessment',
     ATTENDANCE: 'Attendance',
     CODING: 'Coding',
     MANUAL: 'Manual',

@@ -99,7 +99,6 @@
 .stat-card__icon,
 .resource-row__icon,
 .activity-card__icon,
-.assessment-row__icon,
 .timeline-dot {
   display: inline-grid;
   place-items: center;
@@ -112,7 +111,6 @@
 .stat-card__icon > .icon,
 .resource-row__icon > .icon,
 .activity-card__icon > .icon,
-.assessment-row__icon > .icon,
 .timeline-dot > .icon {
   grid-area: 1 / 1;
   margin: auto;

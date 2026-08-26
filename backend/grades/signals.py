@@ -1,7 +1,6 @@
 from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
 
-from assessments.models import Answer, Assessment, AssessmentAttempt
 from attendance.models import AttendanceRecord, AttendanceSession
 from coding.models import CodeSubmission, ProgrammingProblem
 from learning_modules.models import (
@@ -60,15 +59,6 @@ def _items_for_source(source_type, field, source_id):
     return GradeItem.objects.filter(source_type=source_type, **{field: source_id})
 
 
-@receiver(post_save, sender=AssessmentAttempt)
-@receiver(post_delete, sender=AssessmentAttempt)
-@receiver(post_save, sender=Answer)
-@receiver(post_delete, sender=Answer)
-def sync_assessment_scores(sender, instance, **kwargs):
-    assessment_id = instance.assessment_id if sender is AssessmentAttempt else instance.attempt.assessment_id
-    sync_items(_items_for_source(GradeItemSourceType.ASSESSMENT, 'assessment_id', assessment_id))
-
-
 @receiver(post_save, sender=ModuleActivityAttempt)
 @receiver(post_delete, sender=ModuleActivityAttempt)
 def sync_interactive_activity_scores(sender, instance, **kwargs):
@@ -94,14 +84,12 @@ def sync_coding_scores(sender, instance, **kwargs):
 
 
 SOURCE_MODELS = {
-    Assessment: (GradeItemSourceType.ASSESSMENT, 'assessment_id'),
     ModuleActivity: (GradeItemSourceType.MODULE_ACTIVITY, 'module_activity_id'),
     AttendanceSession: (GradeItemSourceType.ATTENDANCE, 'attendance_session_id'),
     ProgrammingProblem: (GradeItemSourceType.CODING, 'coding_problem_id'),
 }
 
 
-@receiver(post_save, sender=Assessment)
 @receiver(post_save, sender=ModuleActivity)
 @receiver(post_save, sender=AttendanceSession)
 @receiver(post_save, sender=ProgrammingProblem)
@@ -123,7 +111,6 @@ def sync_source_metadata(sender, instance, **kwargs):
             )
 
 
-@receiver(pre_delete, sender=Assessment)
 @receiver(pre_delete, sender=ModuleActivity)
 @receiver(pre_delete, sender=AttendanceSession)
 @receiver(pre_delete, sender=ProgrammingProblem)

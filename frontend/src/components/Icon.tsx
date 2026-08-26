@@ -6,7 +6,6 @@ export type IconName =
   | 'arrow-right'
   | 'arrow-up'
   | 'arrow-down'
-  | 'assessment'
   | 'archive'
   | 'award'
   | 'book'
@@ -65,16 +64,6 @@ const iconPaths: Record<IconName, ReactNode> = {
     <>
       <path d="m6 9 6 6 6-6" />
       <path d="M12 5v10" />
-    </>
-  ),
-  assessment: (
-    <>
-      <path d="M8 6h10" />
-      <path d="M8 12h10" />
-      <path d="M8 18h6" />
-      <path d="M4 6h.01" />
-      <path d="M4 12h.01" />
-      <path d="M4 18h.01" />
     </>
   ),
   award: (

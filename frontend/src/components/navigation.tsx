@@ -15,7 +15,6 @@ const studentNavItems: NavItem[] = [
   { to: '/classes', label: 'Classes', icon: 'users' },
   { to: '/modules', label: 'Modules', icon: 'module' },
   { to: '/coding', label: 'Coding', icon: 'code' },
-  { to: '/assessments', label: 'Assessments', icon: 'assessment' },
   { to: '/attendance', label: 'Attendance', icon: 'check' },
   { to: '/grades', label: 'Grades', icon: 'grade' },
   { to: '/profile', label: 'Profile', icon: 'profile' },
@@ -25,7 +24,6 @@ const mobileNavItems: NavItem[] = [
   { to: '/', label: 'Home', icon: 'dashboard' },
   { to: '/modules', label: 'Modules', icon: 'module' },
   { to: '/classes', label: 'Classes', icon: 'users' },
-  { to: '/assessments', label: 'Tests', icon: 'assessment' },
   { to: '/grades', label: 'Grades', icon: 'grade' },
 ]
 

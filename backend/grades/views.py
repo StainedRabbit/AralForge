@@ -158,7 +158,6 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'grade_category',
             'grade_category__subject',
             'schedule',
-            'assessment',
             'module_activity',
             'attendance_session',
             'coding_problem',

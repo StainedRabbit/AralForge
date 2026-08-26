@@ -5,7 +5,7 @@ import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
 import type { Module } from '../../types'
-import { formatDateTime, toErrorMessage } from '../../utils/format'
+import { toErrorMessage } from '../../utils/format'
 import { subjectName } from '../../utils/modules'
 
 type ModuleDraft = {
@@ -13,7 +13,6 @@ type ModuleDraft = {
   is_published: boolean
   learning_objectives: string
   lesson_overview: string
-  pdf_file: File | null
   resources: string
   slug: string
   subject: string
@@ -40,8 +39,6 @@ export function AdminModuleEditorPage({
     createModuleDraft(editingModule, selectedSubjectId),
   )
   const [message, setMessage] = useState('')
-  const [pdfMessage, setPdfMessage] = useState('')
-  const [pdfBusy, setPdfBusy] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
   const subjectOptions = useMemo(
@@ -74,7 +71,7 @@ export function AdminModuleEditorPage({
       const saved = await api<Module>(
         isEditing ? `/modules/modules/${editingModule?.id}/` : '/modules/modules/',
         {
-          body: payload instanceof FormData ? payload : JSON.stringify(payload),
+          body: JSON.stringify(payload),
           method: isEditing ? 'PATCH' : 'POST',
         },
       )
@@ -105,43 +102,6 @@ export function AdminModuleEditorPage({
           ? slugify(String(value))
           : current.slug,
     }))
-  }
-
-  async function regeneratePdf() {
-    if (!editingModule) {
-      return
-    }
-
-    setPdfBusy(true)
-    setPdfMessage('')
-    try {
-      await api<Module>(`/modules/modules/${editingModule.id}/regenerate_pdf/`, {
-        method: 'POST',
-      })
-      await refresh()
-      setPdfMessage('Printable PDF generated.')
-    } catch (caughtError) {
-      setPdfMessage(toErrorMessage(caughtError))
-    } finally {
-      setPdfBusy(false)
-    }
-  }
-
-  async function downloadPdf() {
-    if (!editingModule) {
-      return
-    }
-
-    setPdfBusy(true)
-    setPdfMessage('')
-    try {
-      const blob = await api<Blob>(`/modules/modules/${editingModule.id}/download-pdf/`)
-      downloadBlob(blob, `${editingModule.slug || 'module'}.pdf`)
-    } catch (caughtError) {
-      setPdfMessage(toErrorMessage(caughtError))
-    } finally {
-      setPdfBusy(false)
-    }
   }
 
   async function deleteModule() {
@@ -268,39 +228,6 @@ export function AdminModuleEditorPage({
             <span>Published</span>
           </label>
 
-          <label className="admin-field">
-            <span>Printable PDF</span>
-            <input
-              onChange={(event) => updateDraft('pdf_file', event.target.files?.[0] ?? null)}
-              type="file"
-            />
-          </label>
-
-          {editingModule ? (
-            <div className="pdf-status-card">
-              <span className={`pdf-status-card__pill pdf-status-card__pill--${pdfStatusKind(editingModule)}`}>
-                {pdfStatusLabel(editingModule)}
-              </span>
-              {editingModule.pdf_generated_at ? (
-                <small>Generated {formatDateTime(editingModule.pdf_generated_at)}</small>
-              ) : (
-                <small>No generated printable PDF yet.</small>
-              )}
-              <div className="pdf-status-card__actions">
-                <button className="button button--secondary button--compact" disabled={pdfBusy} onClick={() => void regeneratePdf()} type="button">
-                  <Icon name="save" />
-                  <span>{editingModule.has_pdf ? 'Regenerate PDF' : 'Generate PDF'}</span>
-                </button>
-                {editingModule.has_pdf ? (
-                  <button className="button button--secondary button--compact" disabled={pdfBusy} onClick={() => void downloadPdf()} type="button">
-                    <Icon name="file" />
-                    <span>Download PDF</span>
-                  </button>
-                ) : null}
-              </div>
-              {pdfMessage ? <small>{pdfMessage}</small> : null}
-            </div>
-          ) : null}
         </section>
 
         {message ? <p className="admin-message">{message}</p> : null}
@@ -320,29 +247,6 @@ export function AdminModuleEditorPage({
       </form>
     </Page>
   )
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-function pdfStatusLabel(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
-  if (!item.has_pdf && !item.pdf_generated_at) {
-    return 'Not generated'
-  }
-  return item.pdf_is_outdated ? 'Outdated' : 'Updated'
-}
-
-function pdfStatusKind(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
-  if (!item.has_pdf && !item.pdf_generated_at) {
-    return 'missing'
-  }
-  return item.pdf_is_outdated ? 'outdated' : 'updated'
 }
 
 function TextArea({
@@ -374,7 +278,6 @@ function createModuleDraft(module?: Module, selectedSubjectId?: string | null): 
     is_published: module?.is_published ?? false,
     learning_objectives: module?.learning_objectives ?? '',
     lesson_overview: module?.lesson_overview ?? '',
-    pdf_file: null,
     resources: module?.resources ?? '',
     slug: module?.slug ?? '',
     subject: module?.subject ? String(module.subject) : selectedSubjectId ?? '',
@@ -384,31 +287,8 @@ function createModuleDraft(module?: Module, selectedSubjectId?: string | null): 
 }
 
 function buildModulePayload(draft: ModuleDraft) {
-  if (draft.pdf_file) {
-    const formData = new FormData()
-
-    Object.entries(draft).forEach(([key, value]) => {
-      if (key === 'pdf_file') {
-        if (value instanceof File) {
-          formData.append(key, value)
-        }
-        return
-      }
-
-      if (key === 'subjects' && Array.isArray(value)) {
-        value.forEach((subject) => formData.append('subjects', subject))
-        return
-      }
-
-      formData.append(key, String(value))
-    })
-
-    return formData
-  }
-
   return {
     ...draft,
-    pdf_file: undefined,
     subject: draft.subject ? Number(draft.subject) : null,
     subjects: draft.subjects.map(Number),
   }

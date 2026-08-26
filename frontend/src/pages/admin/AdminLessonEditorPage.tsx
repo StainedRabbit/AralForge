@@ -17,7 +17,7 @@ import type {
   ModuleLessonExample,
   ModuleTopic,
 } from '../../types'
-import { formatDateTime, toErrorMessage } from '../../utils/format'
+import { toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
   lessonDraftKey,
@@ -34,7 +34,6 @@ type LessonDraft = {
   learning_targets: string
   lets_practice: string
   order: string
-  pdf_file: File | null
   resources: string
   short_discussion: string
   title: string
@@ -55,7 +54,7 @@ type LessonExampleDraft = {
   deleted?: boolean
 }
 
-type SerializableLessonDraft = Omit<LessonDraft, 'pdf_file'>
+type SerializableLessonDraft = LessonDraft
 type SaveState = 'clean' | 'local' | 'saved' | 'saving' | 'unsaved'
 type LessonImportMode = 'empty' | 'replace'
 type LessonTemplateFieldKey =
@@ -229,8 +228,6 @@ function AdminLessonEditorForm({
   )
   const [hasInteracted, setHasInteracted] = useState(false)
   const [message, setMessage] = useState('')
-  const [pdfMessage, setPdfMessage] = useState('')
-  const [pdfBusy, setPdfBusy] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('clean')
@@ -242,7 +239,7 @@ function AdminLessonEditorForm({
   )
   const examplesDirty = serializeExampleDrafts(exampleDrafts) !== baselineExamples || exampleDrafts.some((example) => example.image)
   const isTextDirty = !draftsMatch(serializableDraft, baselineDraft)
-  const hasUnsavedChanges = isTextDirty || examplesDirty || Boolean(draft.pdf_file)
+  const hasUnsavedChanges = isTextDirty || examplesDirty
 
   useEffect(() => {
     if (!hasInteracted) {
@@ -252,18 +249,18 @@ function AdminLessonEditorForm({
     if (!isTextDirty) {
       const timeout = window.setTimeout(() => {
         removeLessonDraft(storageKey)
-        setSaveState(draft.pdf_file ? 'unsaved' : 'clean')
+        setSaveState('clean')
       })
       return () => window.clearTimeout(timeout)
     }
 
     const timeout = window.setTimeout(() => {
       const stored = writeLessonDraft(storageKey, serializableDraft)
-      setSaveState(stored && !draft.pdf_file ? 'local' : 'unsaved')
+      setSaveState(stored ? 'local' : 'unsaved')
     }, 700)
 
     return () => window.clearTimeout(timeout)
-  }, [draft.pdf_file, hasInteracted, isTextDirty, serializableDraft, storageKey])
+  }, [hasInteracted, isTextDirty, serializableDraft, storageKey])
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -405,7 +402,7 @@ function AdminLessonEditorForm({
       return
     }
 
-    setDraft({ ...recoveryDraft.value, pdf_file: null })
+    setDraft(recoveryDraft.value)
     setRecoveryDraft(null)
     setHasInteracted(true)
     setSaveState('local')
@@ -474,43 +471,6 @@ function AdminLessonEditorForm({
     setHasInteracted(true)
     setSaveState('unsaved')
     return [...imageResult.messages, ...exampleImport.messages]
-  }
-
-  async function regeneratePdf() {
-    if (!editingLesson || hasUnsavedChanges) {
-      return
-    }
-
-    setPdfBusy(true)
-    setPdfMessage('')
-    try {
-      await api<ModuleLesson>(`/modules/lessons/${editingLesson.id}/regenerate_pdf/`, {
-        method: 'POST',
-      })
-      await refresh()
-      setPdfMessage('Printable PDF generated.')
-    } catch (caughtError) {
-      setPdfMessage(toErrorMessage(caughtError))
-    } finally {
-      setPdfBusy(false)
-    }
-  }
-
-  async function downloadPdf() {
-    if (!editingLesson) {
-      return
-    }
-
-    setPdfBusy(true)
-    setPdfMessage('')
-    try {
-      const blob = await api<Blob>(`/modules/lessons/${editingLesson.id}/download_pdf/`)
-      downloadBlob(blob, `${slugify(editingLesson.title) || 'lesson'}.pdf`)
-    } catch (caughtError) {
-      setPdfMessage(toErrorMessage(caughtError))
-    } finally {
-      setPdfBusy(false)
-    }
   }
 
   async function deleteLesson() {
@@ -707,47 +667,6 @@ function AdminLessonEditorForm({
                   rows={5}
                   value={draft.resources}
                 />
-                <label className="admin-field">
-                  <span>Printable PDF</span>
-                  <input
-                    accept="application/pdf"
-                    onChange={(event) =>
-                      updateDraft('pdf_file', event.target.files?.[0] ?? null)
-                    }
-                    type="file"
-                  />
-                </label>
-                {editingLesson ? (
-                  <div className="pdf-status-card">
-                    <span className={`pdf-status-card__pill pdf-status-card__pill--${pdfStatusKind(editingLesson)}`}>
-                      {pdfStatusLabel(editingLesson)}
-                    </span>
-                    {editingLesson.pdf_generated_at ? (
-                      <small>Generated {formatDateTime(editingLesson.pdf_generated_at)}</small>
-                    ) : (
-                      <small>No generated printable PDF yet.</small>
-                    )}
-                    <div className="pdf-status-card__actions">
-                      <button
-                        className="button button--secondary button--compact"
-                        disabled={pdfBusy || hasUnsavedChanges}
-                        onClick={() => void regeneratePdf()}
-                        type="button"
-                      >
-                        <Icon name="save" />
-                        <span>{editingLesson.has_pdf ? 'Regenerate PDF' : 'Generate PDF'}</span>
-                      </button>
-                      {editingLesson.has_pdf ? (
-                        <button className="button button--secondary button--compact" disabled={pdfBusy} onClick={() => void downloadPdf()} type="button">
-                          <Icon name="file" />
-                          <span>Download PDF</span>
-                        </button>
-                      ) : null}
-                    </div>
-                    {hasUnsavedChanges ? <small>Save the lesson before regenerating its PDF.</small> : null}
-                    {pdfMessage ? <small>{pdfMessage}</small> : null}
-                  </div>
-                ) : null}
               </div>
             </section>
 
@@ -779,8 +698,7 @@ function AdminLessonEditorForm({
               <div className={`lesson-save-status lesson-save-status--${saveState}`}>
                 <Icon name={saveState === 'saved' || saveState === 'clean' || saveState === 'local' ? 'check' : saveState === 'saving' ? 'save' : 'warning'} />
                 <span>
-                  <strong>{saveStateLabel(saveState, Boolean(draft.pdf_file))}</strong>
-                  {draft.pdf_file ? <small>Text can recover locally; the selected PDF saves only with the lesson.</small> : null}
+                  <strong>{saveStateLabel(saveState)}</strong>
                 </span>
               </div>
               <div className="lesson-editor__actions">
@@ -855,32 +773,8 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function pdfStatusLabel(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
-  if (!item.has_pdf && !item.pdf_generated_at) {
-    return 'Not generated'
-  }
-  return item.pdf_is_outdated ? 'Outdated' : 'Updated'
-}
-
-function pdfStatusKind(item: { has_pdf?: boolean; pdf_generated_at?: string | null; pdf_is_outdated?: boolean }) {
-  if (!item.has_pdf && !item.pdf_generated_at) {
-    return 'missing'
-  }
-  return item.pdf_is_outdated ? 'outdated' : 'updated'
-}
-
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
 function toSerializableLessonDraft(draft: LessonDraft): SerializableLessonDraft {
-  return Object.fromEntries(
-    Object.entries(draft).filter(([key]) => key !== 'pdf_file'),
-  ) as SerializableLessonDraft
+  return { ...draft }
 }
 
 function draftsMatch(
@@ -897,14 +791,14 @@ function formatDraftTime(savedAt: string) {
     : date.toLocaleString()
 }
 
-function saveStateLabel(saveState: SaveState, hasPdf: boolean) {
+function saveStateLabel(saveState: SaveState) {
   if (saveState === 'saving') {
     return 'Saving'
   }
   if (saveState === 'saved') {
     return 'Saved'
   }
-  if (saveState === 'local' && !hasPdf) {
+  if (saveState === 'local') {
     return 'Draft saved locally'
   }
   if (saveState === 'clean') {
@@ -2023,7 +1917,6 @@ function createLessonDraft(topicId: string, lesson?: ModuleLesson): LessonDraft 
     learning_targets: lesson?.learning_targets ?? '',
     lets_practice: lesson?.lets_practice ?? '',
     order: lesson?.order ? String(lesson.order) : '0',
-    pdf_file: null,
     resources: lesson?.resources ?? '',
     short_discussion: lesson?.short_discussion ?? '',
     title: lesson?.title ?? '',
@@ -2057,14 +1950,5 @@ function buildLessonPayload(draft: LessonDraft) {
     transfer: '',
   }
 
-  if (!draft.pdf_file) {
-    return JSON.stringify(payload)
-  }
-
-  const formData = new FormData()
-  Object.entries(payload).forEach(([key, value]) => {
-    formData.append(key, String(value))
-  })
-  formData.append('pdf_file', draft.pdf_file)
-  return formData
+  return JSON.stringify(payload)
 }

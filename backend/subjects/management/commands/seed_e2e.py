@@ -70,6 +70,7 @@ class Command(BaseCommand):
         databases = Subject.objects.create(code='E2E102', name='Database Systems')
         overflow_subject = Subject.objects.create(code='E2EO1', name='Lesson Overflow Fixtures')
         authoring_subject = Subject.objects.create(code='E2EL1', name='Lesson Authoring')
+        past_subject = Subject.objects.create(code='E2EP1', name='Archived Foundations')
         GradeCategory.objects.create(
             subject=programming,
             grading_period=GradingPeriod.PRELIM,
@@ -97,6 +98,20 @@ class Command(BaseCommand):
         )
         for student in students[:2]:
             ScheduleStudent.objects.create(schedule=class_a, student=student)
+        past_class = SubjectSchedule.objects.create(
+            subject=past_subject,
+            school_year_semester=first_term,
+            days='FR',
+            start_time=time(8, 0),
+            end_time=time(9, 0),
+            section='E2E-PAST',
+            is_active=False,
+        )
+        ScheduleStudent.objects.create(
+            schedule=past_class,
+            student=students[0],
+            is_active=False,
+        )
 
         overflow_module = Module.objects.create(
             title='E2E Lesson Overflow Module',

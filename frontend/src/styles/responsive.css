@@ -116,20 +116,6 @@
     width: 100%;
   }
 
-  .assessment-row {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  .assessment-actions {
-    grid-column: 1 / -1;
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
-  .assessment-actions .button {
-    flex: 1 1 180px;
-  }
-
   .attendance-row,
   .grade-row {
     grid-template-columns: 1fr;

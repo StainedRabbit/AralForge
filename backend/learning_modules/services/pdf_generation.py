@@ -27,94 +27,42 @@ LESSON_SECTION_FIELDS = (
 )
 
 
-def generate_module_pdf(module):
-    module = module.__class__.objects.select_related('subject').prefetch_related(
-        'topics__lessons__lesson_examples',
-        'activities',
-        'subjects',
-    ).get(pk=module.pk)
-    topics = list(module.topics.filter(is_published=True).order_by('order', 'id'))
-    activities_by_topic = {}
-    for activity in module.activities.filter(
-        is_published=True,
-        lesson_id__isnull=True,
-    ).order_by('order', 'id'):
-        activities_by_topic.setdefault(activity.topic_id, []).append(activity)
-
-    rendered_topics = []
-    for topic in topics:
-        lessons = [
+def generate_topic_pdf(topic):
+    topic = topic.__class__.objects.select_related(
+        'module',
+        'module__subject',
+    ).prefetch_related(
+        'module__subjects',
+        'lessons__lesson_examples',
+    ).get(pk=topic.pk)
+    module = topic.module
+    rendered_topic = {
+        'activities': [],
+        'lessons': [
             lesson_context(lesson)
             for lesson in topic.lessons.filter(is_published=True).order_by('order', 'id')
-        ]
-        rendered_topics.append({
-            'activities': [
-                activity_context(activity)
-                for activity in activities_by_topic.get(topic.id, [])
-            ],
-            'lessons': lessons,
-            'meta': compact_join(topic.unit, topic.competency_code),
-            'sections': [
-                content_section('Overview', topic.overview),
-                content_section('Essential Question', topic.essential_question),
-                content_section('Performance Task', topic.performance_task),
-                content_section('Success Criteria', topic.success_criteria),
-            ],
+        ],
+        'meta': compact_join(topic.unit, topic.competency_code),
+        'sections': [
+            content_section('Competency', topic.competency_text),
+            content_section('Overview', topic.overview),
+            content_section('Essential Question', topic.essential_question),
+            content_section('Enduring Understanding', topic.enduring_understanding),
+            content_section('Performance Task', topic.performance_task),
+            content_section('Success Criteria', topic.success_criteria),
+            content_section('Values Focus', topic.values_focus),
+        ],
+        'title': topic.title,
+    }
+
+    return render_pdf_to_model(
+        topic,
+        f'{slugify(module.slug or module.title) or "module"}-{slugify(topic.title) or "topic"}.pdf',
+        {
+            'context_label': compact_join(subject_label(module), module.title),
+            'generated_at': timezone.now(),
             'title': topic.title,
-        })
-
-    module_level_activities = [
-        activity_context(activity)
-        for activity in module.activities.filter(
-            is_published=True,
-            topic_id__isnull=True,
-        ).order_by('order', 'id')
-    ]
-
-    return render_pdf_to_model(
-        module,
-        f'{slugify(module.slug or module.title) or "module"}-printable.pdf',
-        {
-            'context_label': subject_label(module),
-            'generated_at': timezone.now(),
-            'kind': 'module',
-            'module': module,
-            'module_level_activities': module_level_activities,
-            'sections': [
-                content_section('Description', module.description),
-                content_section('Content', module.content),
-                content_section('Learning Objectives', module.learning_objectives),
-                content_section('Lesson Overview', module.lesson_overview),
-                content_section('Detailed Discussion', module.detailed_discussion),
-                content_section('Examples', module.examples),
-                content_section('Student Activities', module.student_activities),
-                content_section('Resources / References', module.resources),
-            ],
-            'title': module.title,
-            'topics': rendered_topics,
-        },
-    )
-
-
-def generate_lesson_pdf(lesson):
-    lesson = lesson.__class__.objects.select_related(
-        'topic',
-        'topic__module',
-        'topic__module__subject',
-    ).prefetch_related('lesson_examples').get(pk=lesson.pk)
-    module = lesson.topic.module
-
-    return render_pdf_to_model(
-        lesson,
-        f'{slugify(lesson.title) or "lesson"}-printable.pdf',
-        {
-            'context_label': compact_join(subject_label(module), module.title, lesson.topic.title),
-            'generated_at': timezone.now(),
-            'kind': 'lesson',
-            'lesson': lesson_context(lesson),
-            'module': module,
-            'title': lesson.title,
-            'topics': [],
+            'topics': [rendered_topic],
         },
     )
 
@@ -177,7 +125,6 @@ def lesson_context(lesson):
         })
 
     return {
-        'assessment_url': lesson.assessment_url,
         'examples': examples,
         'main_activity': main_activity_context(lesson),
         'order': lesson.order,

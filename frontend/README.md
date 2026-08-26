@@ -1,6 +1,6 @@
 # AralForge Frontend
 
-AralForge is an academic coding platform for lessons, activities, assessments, attendance, grades, and student progress.
+AralForge is an academic coding platform for lessons, Main Activities, coding practice, attendance, grades, and student progress.
 
 ## Development
 

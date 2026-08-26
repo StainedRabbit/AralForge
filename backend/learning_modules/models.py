@@ -4,6 +4,8 @@ from django.conf import settings
 from django.core.validators import FileExtensionValidator
 from django.db import models, transaction
 from django.db.models import Q
+from django.db.models.signals import m2m_changed
+from django.dispatch import receiver
 from django.utils import timezone
 
 class Module(models.Model):
@@ -25,9 +27,6 @@ class Module(models.Model):
     teacher_notes = models.TextField(blank=True)
     student_activities = models.TextField(blank=True)
     resources = models.TextField(blank=True)
-    pdf_file = models.FileField(upload_to='module_pdfs/', blank=True)
-    pdf_generated_at = models.DateTimeField(null=True, blank=True)
-    pdf_is_outdated = models.BooleanField(default=True)
     subjects = models.ManyToManyField(
         'subjects.Subject',
         blank=True,
@@ -50,37 +49,15 @@ class Module(models.Model):
                 'title',
                 'slug',
                 'subject_id',
-                'description',
-                'content',
-                'learning_objectives',
-                'lesson_overview',
-                'detailed_discussion',
-                'examples',
-                'student_activities',
-                'resources',
-                'pdf_file',
-                'pdf_generated_at',
-                'is_published',
             ).first()
-
-        if previous and previous['pdf_generated_at'] and module_pdf_content_changed(
-            self,
-            previous,
-        ):
-            self.pdf_is_outdated = True
 
         super().save(*args, **kwargs)
 
-        if (
-            self.is_published
-            and not self.pdf_file
-            and (not previous or not previous['is_published'])
+        if previous and any(
+            getattr(self, field) != previous[field]
+            for field in ('title', 'slug', 'subject_id')
         ):
-            transaction.on_commit(
-                lambda: safe_generate_module_pdf(self),
-                using=self._state.db,
-            )
-
+            mark_module_topic_pdfs_outdated(self)
 
 class ModuleTopic(models.Model):
     module = models.ForeignKey(
@@ -106,6 +83,9 @@ class ModuleTopic(models.Model):
     performance_task = models.TextField(blank=True)
     success_criteria = models.TextField(blank=True)
     values_focus = models.TextField(blank=True)
+    pdf_file = models.FileField(upload_to='module_topic_pdfs/', blank=True)
+    pdf_generated_at = models.DateTimeField(null=True, blank=True)
+    pdf_is_outdated = models.BooleanField(default=True)
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -123,12 +103,32 @@ class ModuleTopic(models.Model):
         return f'{self.module}: {self.title}'
 
     def save(self, *args, **kwargs):
+        is_new = self.pk is None
         previous = None
         if self.pk:
             previous = ModuleTopic.objects.filter(pk=self.pk).values(
                 'module_id',
+                'title',
+                'order',
+                'competency_code',
+                'competency_text',
+                'unit',
+                'overview',
+                'essential_question',
+                'enduring_understanding',
+                'performance_task',
+                'success_criteria',
+                'values_focus',
+                'pdf_file',
+                'pdf_generated_at',
                 'is_published',
             ).first()
+
+        if previous and previous['pdf_generated_at'] and topic_pdf_content_changed(
+            self,
+            previous,
+        ):
+            self.pdf_is_outdated = True
 
         super().save(*args, **kwargs)
 
@@ -142,17 +142,23 @@ class ModuleTopic(models.Model):
                 ).first()
                 if previous_module:
                     sync_module_progress_for_students(previous_module)
-                    mark_module_pdf_outdated(previous_module)
             sync_module_progress_for_students(self.module)
-        if previous:
-            mark_module_pdf_outdated(self.module)
+
+        if (
+            self.is_published
+            and not self.pdf_file
+            and (is_new or not previous or not previous['is_published'])
+        ):
+            transaction.on_commit(
+                lambda: safe_generate_topic_pdf(self),
+                using=self._state.db,
+            )
 
     def delete(self, *args, **kwargs):
         module = self.module
         student_ids = progress_student_ids_for_module(module)
         result = super().delete(*args, **kwargs)
         sync_module_progress_for_students(module, student_ids=student_ids)
-        mark_module_pdf_outdated(module)
         return result
 
 
@@ -186,10 +192,6 @@ class ModuleLesson(models.Model):
     enrichment = models.TextField(blank=True)
     student_activities = models.TextField(blank=True)
     resources = models.TextField(blank=True)
-    assessment_url = models.URLField(blank=True)
-    pdf_file = models.FileField(upload_to='module_lesson_pdfs/', blank=True)
-    pdf_generated_at = models.DateTimeField(null=True, blank=True)
-    pdf_is_outdated = models.BooleanField(default=True)
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -221,9 +223,6 @@ class ModuleLesson(models.Model):
                 'overview',
                 'student_activities',
                 'resources',
-                'assessment_url',
-                'pdf_file',
-                'pdf_generated_at',
             ).first()
             if previous:
                 previous_is_published = previous['is_published']
@@ -232,44 +231,24 @@ class ModuleLesson(models.Model):
                         pk=previous['topic_id'],
                     ).first()
 
-        if previous and previous['pdf_generated_at'] and lesson_pdf_content_changed(
-            self,
-            previous,
-        ):
-            self.pdf_is_outdated = True
-
         super().save(*args, **kwargs)
 
         if previous_topic:
             sync_progress_for_topic_students(previous_topic)
-            mark_module_pdf_outdated(previous_topic.module)
-        mark_module_pdf_outdated(self.topic.module)
+            mark_topic_pdf_outdated(previous_topic)
+        mark_topic_pdf_outdated(self.topic)
         if (is_new and self.is_published) or previous_topic or (
             previous_is_published is not None
             and previous_is_published != self.is_published
         ):
             sync_progress_for_topic_students(self.topic)
 
-        if (
-            self.is_published
-            and not self.pdf_file
-            and (
-                is_new
-                or previous_is_published is None
-                or previous_is_published != self.is_published
-            )
-        ):
-            transaction.on_commit(
-                lambda: safe_generate_lesson_pdf(self),
-                using=self._state.db,
-            )
-
     def delete(self, *args, **kwargs):
         topic = self.topic
         student_ids = progress_student_ids_for_topic(topic)
         result = super().delete(*args, **kwargs)
         sync_progress_for_topic_students(topic, student_ids=student_ids)
-        mark_module_pdf_outdated(topic.module)
+        mark_topic_pdf_outdated(topic)
         return result
 
 
@@ -422,72 +401,70 @@ def add_calendar_months(value, months):
     return value.replace(year=year, month=month, day=day)
 
 
-MODULE_PDF_CONTENT_FIELDS = (
-    'title',
-    'slug',
-    'subject_id',
-    'description',
-    'content',
-    'learning_objectives',
-    'lesson_overview',
-    'detailed_discussion',
-    'examples',
-    'student_activities',
-    'resources',
-)
-
-LESSON_PDF_CONTENT_FIELDS = (
-    'topic_id',
+TOPIC_PDF_CONTENT_FIELDS = (
+    'module_id',
     'title',
     'order',
-    'learning_targets',
-    'before_you_start',
-    'short_discussion',
-    'guided_examples',
-    'lets_practice',
-    'challenge_task',
-    'objectives',
+    'competency_code',
+    'competency_text',
+    'unit',
     'overview',
-    'student_activities',
-    'resources',
-    'assessment_url',
+    'essential_question',
+    'enduring_understanding',
+    'performance_task',
+    'success_criteria',
+    'values_focus',
 )
 
 
-def module_pdf_content_changed(module, previous):
-    return any(getattr(module, field) != previous[field] for field in MODULE_PDF_CONTENT_FIELDS)
+def topic_pdf_content_changed(topic, previous):
+    return any(getattr(topic, field) != previous[field] for field in TOPIC_PDF_CONTENT_FIELDS)
 
 
-def lesson_pdf_content_changed(lesson, previous):
-    return any(getattr(lesson, field) != previous[field] for field in LESSON_PDF_CONTENT_FIELDS)
+def mark_topic_pdf_outdated(topic):
+    if topic:
+        ModuleTopic.objects.filter(
+            pk=topic.pk,
+            pdf_generated_at__isnull=False,
+            pdf_is_outdated=False,
+        ).update(pdf_is_outdated=True)
 
 
-def mark_module_pdf_outdated(module):
-    if module and module.pdf_generated_at and not module.pdf_is_outdated:
-        Module.objects.filter(pk=module.pk).update(pdf_is_outdated=True)
+def mark_module_topic_pdfs_outdated(module):
+    ModuleTopic.objects.filter(
+        module=module,
+        pdf_generated_at__isnull=False,
+        pdf_is_outdated=False,
+    ).update(pdf_is_outdated=True)
 
 
-def mark_lesson_pdf_outdated(lesson):
-    if lesson and lesson.pdf_generated_at and not lesson.pdf_is_outdated:
-        ModuleLesson.objects.filter(pk=lesson.pk).update(pdf_is_outdated=True)
+@receiver(m2m_changed, sender=Module.subjects.through)
+def mark_module_topics_outdated_after_subject_change(
+    sender,
+    instance,
+    action,
+    **kwargs,
+):
+    if action in {'post_add', 'post_remove', 'post_clear'}:
+        mark_module_topic_pdfs_outdated(instance)
 
 
-def safe_generate_module_pdf(module):
+def mark_lesson_topic_pdf_outdated(lesson):
+    mark_topic_pdf_outdated(lesson.topic)
+
+
+def mark_activity_printables_outdated(activity):
+    if activity.lesson_id:
+        mark_lesson_topic_pdf_outdated(activity.lesson)
+    elif activity.topic_id:
+        mark_topic_pdf_outdated(activity.topic)
+
+
+def safe_generate_topic_pdf(topic):
     try:
-        from .services.pdf_generation import generate_module_pdf
+        from .services.pdf_generation import generate_topic_pdf
 
-        generate_module_pdf(module)
-    except Exception:
-        # Publishing should not fail just because the optional PDF renderer is
-        # unavailable. Manual regeneration reports generation errors directly.
-        return
-
-
-def safe_generate_lesson_pdf(lesson):
-    try:
-        from .services.pdf_generation import generate_lesson_pdf
-
-        generate_lesson_pdf(lesson)
+        generate_topic_pdf(topic)
     except Exception:
         # Publishing should not fail just because the optional PDF renderer is
         # unavailable. Manual regeneration reports generation errors directly.
@@ -526,15 +503,12 @@ class ModuleLessonExample(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        mark_lesson_pdf_outdated(self.lesson)
-        mark_module_pdf_outdated(self.lesson.topic.module)
+        mark_lesson_topic_pdf_outdated(self.lesson)
 
     def delete(self, *args, **kwargs):
         lesson = self.lesson
-        module = lesson.topic.module
         result = super().delete(*args, **kwargs)
-        mark_lesson_pdf_outdated(lesson)
-        mark_module_pdf_outdated(module)
+        mark_lesson_topic_pdf_outdated(lesson)
         return result
 
 
@@ -566,15 +540,12 @@ class ModuleLessonAsset(models.Model):
         if self.file and not self.original_name:
             self.original_name = self.file.name.rsplit('/', 1)[-1]
         super().save(*args, **kwargs)
-        mark_lesson_pdf_outdated(self.lesson)
-        mark_module_pdf_outdated(self.lesson.topic.module)
+        mark_lesson_topic_pdf_outdated(self.lesson)
 
     def delete(self, *args, **kwargs):
         lesson = self.lesson
-        module = lesson.topic.module
         result = super().delete(*args, **kwargs)
-        mark_lesson_pdf_outdated(lesson)
-        mark_module_pdf_outdated(module)
+        mark_lesson_topic_pdf_outdated(lesson)
         return result
 
 
@@ -649,12 +620,19 @@ class ModuleActivity(models.Model):
             self.accepts_file = False
             self.accepts_code = False
         super().save(*args, **kwargs)
-        mark_module_pdf_outdated(self.module)
+        if self.lesson_id:
+            mark_lesson_topic_pdf_outdated(self.lesson)
+        elif self.topic_id:
+            mark_topic_pdf_outdated(self.topic)
 
     def delete(self, *args, **kwargs):
-        module = self.module
+        lesson = self.lesson
+        topic = self.topic
         result = super().delete(*args, **kwargs)
-        mark_module_pdf_outdated(module)
+        if lesson:
+            mark_lesson_topic_pdf_outdated(lesson)
+        elif topic:
+            mark_topic_pdf_outdated(topic)
         return result
 
 
@@ -689,6 +667,16 @@ class ModuleActivityQuestion(models.Model):
     def __str__(self):
         return f'{self.activity}: Question {self.order}'
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        mark_activity_printables_outdated(self.activity)
+
+    def delete(self, *args, **kwargs):
+        activity = self.activity
+        result = super().delete(*args, **kwargs)
+        mark_activity_printables_outdated(activity)
+        return result
+
 
 class ModuleActivityQuestionChoice(models.Model):
     question = models.ForeignKey(
@@ -706,6 +694,16 @@ class ModuleActivityQuestionChoice(models.Model):
     def __str__(self):
         return self.text
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        mark_activity_printables_outdated(self.question.activity)
+
+    def delete(self, *args, **kwargs):
+        activity = self.question.activity
+        result = super().delete(*args, **kwargs)
+        mark_activity_printables_outdated(activity)
+        return result
+
 
 class ModuleActivityMatchingPair(models.Model):
     question = models.ForeignKey(
@@ -722,6 +720,16 @@ class ModuleActivityMatchingPair(models.Model):
 
     def __str__(self):
         return f'{self.left_text} -> {self.right_text}'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        mark_activity_printables_outdated(self.question.activity)
+
+    def delete(self, *args, **kwargs):
+        activity = self.question.activity
+        result = super().delete(*args, **kwargs)
+        mark_activity_printables_outdated(activity)
+        return result
 
 
 class ModuleActivityAttempt(models.Model):

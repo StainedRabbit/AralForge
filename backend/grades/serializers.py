@@ -187,7 +187,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
             'order',
             'is_required',
             'source_type',
-            'assessment',
             'module_activity',
             'attendance_session',
             'coding_problem',
@@ -202,7 +201,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
         source_type = attrs.get('source_type', getattr(self.instance, 'source_type', 'MANUAL'))
         grade_category = attrs.get('grade_category', getattr(self.instance, 'grade_category', None))
         source_fields = {
-            'ASSESSMENT': 'assessment',
             'MODULE_ACTIVITY': 'module_activity',
             'ATTENDANCE': 'attendance_session',
             'CODING': 'coding_problem',
@@ -228,8 +226,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({required_field: 'This source does not belong to the selected subject.'})
             if source_type == 'ATTENDANCE' and schedule and source_value.schedule_id != schedule.id:
                 raise serializers.ValidationError({required_field: 'This attendance session does not belong to the selected class.'})
-            if source_type == 'ASSESSMENT' and not source_value.counts_toward_grade:
-                raise serializers.ValidationError({required_field: 'This assessment does not count toward grades.'})
             if (
                 source_type == 'MODULE_ACTIVITY'
                 and schedule
@@ -326,8 +322,6 @@ class StudentGradeItemScoreSerializer(serializers.ModelSerializer):
 
 
 def source_matches_subject(source_type, source, subject_id):
-    if source_type == 'ASSESSMENT':
-        return source.subject_id == subject_id
     if source_type == 'ATTENDANCE':
         return source.subject_id == subject_id
     if source_type == 'MODULE_ACTIVITY':

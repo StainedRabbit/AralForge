@@ -10,7 +10,6 @@ def result_rows(response):
     return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
 
 from accounts.models import User
-from assessments.models import Answer, Assessment, AssessmentAttempt, Choice, Question
 from grades.models import (
     GradeCategory,
     GradeCategoryChoices,
@@ -114,25 +113,6 @@ class GradeComputationTests(TestCase):
 
         self.assertEqual(grade.transmuted_grade, Decimal('88'))
         self.assertEqual(grade.weighted_score, Decimal('35.2000'))
-
-    def test_source_linked_grade_item_uses_source_title_and_points(self):
-        assessment = Assessment.objects.create(
-            title='Quiz 1',
-            kind=Assessment.Kind.QUIZ,
-            subject=self.subject,
-            points_possible=Decimal('25.00'),
-        )
-
-        item = GradeItem.objects.create(
-            grade_category=self.quiz_category,
-            title='',
-            points_possible=Decimal('100.00'),
-            source_type=GradeItemSourceType.ASSESSMENT,
-            assessment=assessment,
-        )
-
-        self.assertEqual(item.title, 'Quiz 1')
-        self.assertEqual(item.points_possible, Decimal('25.00'))
 
     def test_item_scores_compute_category_period_and_final_grades(self):
         quiz_one = GradeItem.objects.create(
@@ -645,37 +625,6 @@ class ClassScopedGradeTests(APITestCase):
             StudentCategoryGrade.objects.get(schedule=self.schedule_b, student=self.student).raw_score,
             Decimal('9.00'),
         )
-
-    def test_linked_assessment_uses_highest_fully_graded_attempt(self):
-        assessment = Assessment.objects.create(
-            title='Linked quiz', kind=Assessment.Kind.QUIZ, subject=self.subject,
-            points_possible=Decimal('10.00'), counts_toward_grade=True,
-        )
-        question = Question.objects.create(
-            assessment=assessment, question_type=Question.QuestionType.MULTIPLE_CHOICE,
-            prompt='Pick one', points=Decimal('10.00'),
-        )
-        correct = Choice.objects.create(question=question, text='Correct', is_correct=True)
-        wrong = Choice.objects.create(question=question, text='Wrong', is_correct=False)
-        item = GradeItem.objects.create(
-            schedule=self.schedule_a, grade_category=self.category, title='',
-            source_type=GradeItemSourceType.ASSESSMENT, assessment=assessment,
-        )
-
-        high = AssessmentAttempt.objects.create(assessment=assessment, student=self.student, attempt_number=1)
-        Answer.objects.create(attempt=high, question=question, selected_choice=correct)
-        high.score_multiple_choice_answers()
-        low = AssessmentAttempt.objects.create(assessment=assessment, student=self.student, attempt_number=2)
-        Answer.objects.create(attempt=low, question=question, selected_choice=wrong)
-        low.score_multiple_choice_answers()
-
-        score = StudentGradeItemScore.objects.get(grade_item=item, student=self.student)
-        self.assertEqual(score.raw_score, Decimal('10.00'))
-        self.assertEqual(score.origin, StudentGradeItemScore.Origin.AUTOMATIC)
-
-        high.delete()
-        score.refresh_from_db()
-        self.assertEqual(score.raw_score, Decimal('0.00'))
 
     def test_excused_item_resolves_without_adding_to_denominator(self):
         first = GradeItem.objects.create(

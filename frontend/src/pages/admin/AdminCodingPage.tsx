@@ -17,7 +17,6 @@ import {
   difficultyOptions,
   moduleName,
   problemName,
-  questionName,
   studentUsers,
   subjectName,
   toOptions,
@@ -44,23 +43,12 @@ export function AdminCodingPage({
   const moduleOptions = toOptions(data.modules, (module) => module.id, (module) => module.title)
   const topicOptions = toOptions(data.moduleTopics, (topic) => topic.id, (topic) => topic.title)
   const lessonOptions = toOptions(data.moduleLessons, (lesson) => lesson.id, (lesson) => lesson.title)
-  const questionOptions = toOptions(
-    data.questions,
-    (question) => question.id,
-    (question) => questionName(data.questions, question.id),
-  )
   const problemOptions = toOptions(
     data.problems,
     (problem) => problem.id,
     (problem) => problem.title,
   )
   const studentOptions = toOptions(studentUsers(data.users), (user) => user.id, fullName)
-  const attemptOptions = toOptions(
-    data.attempts,
-    (attempt) => attempt.id,
-    (attempt) =>
-      `${userName(data.users, attempt.student)} - ${attempt.attempt_number}`,
-  )
   const blankOptions = toOptions(
     blanks,
     (blank) => blank.id,
@@ -93,7 +81,7 @@ export function AdminCodingPage({
           { header: 'Published', render: (problem) => booleanLabel(problem.is_published) },
         ]}
         endpoint="/coding/problems/"
-        fields={problemFields(subjectOptions, moduleOptions, topicOptions, lessonOptions, questionOptions)}
+        fields={problemFields(subjectOptions, moduleOptions, topicOptions, lessonOptions)}
         getSearchText={(problem) =>
           `${problem.title} ${problem.slug} ${problem.description} ${problem.expected_language}`
         }
@@ -149,7 +137,7 @@ export function AdminCodingPage({
           { header: 'Submitted', render: (submission) => formatDateTime(submission.submitted_at) },
         ]}
         endpoint="/coding/submissions/"
-        fields={submissionFields(problemOptions, studentOptions, attemptOptions)}
+        fields={submissionFields(problemOptions, studentOptions)}
         getSearchText={(submission) =>
           `${submission.language} ${submission.source_code} ${submission.output} ${submission.error}`
         }
@@ -189,7 +177,6 @@ function problemFields(
   moduleOptions: { label: string; value: number | string }[],
   topicOptions: { label: string; value: number | string }[],
   lessonOptions: { label: string; value: number | string }[],
-  questionOptions: { label: string; value: number | string }[],
 ) {
   return [
     { label: 'Title', name: 'title', required: true, type: 'text' },
@@ -234,14 +221,6 @@ function problemFields(
       name: 'lesson',
       nullable: true,
       options: lessonOptions,
-      parse: (value) => (value ? Number(value) : null),
-      type: 'select',
-    },
-    {
-      label: 'Assessment question',
-      name: 'assessment_question',
-      nullable: true,
-      options: questionOptions,
       parse: (value) => (value ? Number(value) : null),
       type: 'select',
     },
@@ -297,7 +276,6 @@ function testCaseFields(problemOptions: { label: string; value: number | string 
 function submissionFields(
   problemOptions: { label: string; value: number | string }[],
   studentOptions: { label: string; value: number | string }[],
-  attemptOptions: { label: string; value: number | string }[],
 ) {
   return [
     {
@@ -314,14 +292,6 @@ function submissionFields(
       options: studentOptions,
       parse: Number,
       required: true,
-      type: 'select',
-    },
-    {
-      label: 'Assessment attempt',
-      name: 'assessment_attempt',
-      nullable: true,
-      options: attemptOptions,
-      parse: (value) => (value ? Number(value) : null),
       type: 'select',
     },
     { defaultValue: 'python', label: 'Language', name: 'language', required: true, type: 'text' },

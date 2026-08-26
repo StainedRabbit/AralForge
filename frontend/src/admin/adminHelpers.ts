@@ -1,6 +1,5 @@
 import type { AdminOption } from '../components/admin/AdminResourcePanel'
 import type {
-  Assessment,
   AttendanceSession,
   Badge,
   GradeCategory,
@@ -9,7 +8,6 @@ import type {
   Module,
   ModuleActivity,
   ProgrammingProblem,
-  Question,
   Subject,
   SubjectSchedule,
   User,
@@ -45,23 +43,6 @@ export const codeStatusOptions: AdminOption[] = [
   { label: 'Time limit', value: 'TIME_LIMIT' },
 ]
 
-export const assessmentKindOptions: AdminOption[] = [
-  { label: 'Quiz', value: 'QUIZ' },
-  { label: 'Exam', value: 'EXAM' },
-  { label: 'Activity', value: 'ACTIVITY' },
-  { label: 'Mock quiz', value: 'MOCK_QUIZ' },
-  { label: 'Mock exam', value: 'MOCK_EXAM' },
-  { label: 'Practice', value: 'PRACTICE' },
-]
-
-export const questionTypeOptions: AdminOption[] = [
-  { label: 'Multiple choice', value: 'MULTIPLE_CHOICE' },
-  { label: 'True/false', value: 'TRUE_FALSE' },
-  { label: 'Short answer', value: 'SHORT_ANSWER' },
-  { label: 'Essay', value: 'ESSAY' },
-  { label: 'Coding', value: 'CODING' },
-]
-
 export const attendanceStatusOptions: AdminOption[] = [
   { label: 'Present', value: 'PRESENT' },
   { label: 'Late', value: 'LATE' },
@@ -86,7 +67,6 @@ export const gradeCategoryOptions: AdminOption[] = [
 ]
 
 export const pointSourceOptions: AdminOption[] = [
-  { label: 'Assessment', value: 'ASSESSMENT' },
   { label: 'Attendance', value: 'ATTENDANCE' },
   { label: 'Module activity', value: 'MODULE_ACTIVITY' },
   { label: 'Coding', value: 'CODING' },
@@ -134,18 +114,6 @@ export function problemName(
   id: number | null | undefined,
 ) {
   return problems.find((item) => item.id === id)?.title ?? 'No problem'
-}
-
-export function assessmentName(
-  assessments: Assessment[],
-  id: number | null | undefined,
-) {
-  return assessments.find((item) => item.id === id)?.title ?? 'No assessment'
-}
-
-export function questionName(questions: Question[], id: number | null | undefined) {
-  const question = questions.find((item) => item.id === id)
-  return question ? `Q${question.order}: ${question.prompt.slice(0, 56)}` : 'No question'
 }
 
 export function scheduleName(

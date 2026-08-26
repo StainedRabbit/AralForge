@@ -653,7 +653,6 @@ summary {
 .module-row,
 .resource-row,
 .activity-card,
-.assessment-row,
 .admin-feed__item,
 .student-learning-result {
   transition:
@@ -666,7 +665,6 @@ summary {
 .module-row:hover,
 .resource-row:hover,
 .activity-card:hover,
-.assessment-row:hover,
 .admin-feed__item:hover,
 .student-learning-result:hover {
   border-color: rgba(var(--ember-orange-rgb), 0.32);
@@ -679,7 +677,6 @@ summary {
 .resource-row__icon,
 .activity-card__icon,
 .timeline-dot,
-.assessment-row__icon,
 .student-learning-result__icon,
 .topic-row__icon {
   color: var(--primary-dark);

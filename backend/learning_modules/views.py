@@ -9,8 +9,6 @@ from rest_framework.exceptions import PermissionDenied
 
 from accounts.serializers import UserSerializer
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from assessments.models import Assessment
-from assessments.serializers import AssessmentSerializer
 from coding.models import ProgrammingProblem
 from coding.serializers import ProgrammingProblemSerializer
 from grades.models import GradeCategory, GradeItem
@@ -73,7 +71,7 @@ from .services.activity_snapshots import (
     normalize_draft_answers,
     validate_activity_window,
 )
-from .services.pdf_generation import generate_lesson_pdf, generate_module_pdf
+from .services.pdf_generation import generate_topic_pdf
 
 
 def serialize_main_activity_editor_workspace(activity, request):
@@ -203,7 +201,10 @@ class ModuleViewSet(viewsets.ModelViewSet):
     search_fields = ('title', 'description', 'slug')
 
     def get_queryset(self):
-        queryset = Module.objects.select_related('subject').prefetch_related('subjects')
+        queryset = Module.objects.select_related('subject').prefetch_related(
+            'subjects',
+            'topics',
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -222,6 +223,30 @@ class ModuleViewSet(viewsets.ModelViewSet):
     )
     def workspace(self, request, pk=None):
         module = self.get_object()
+        context = {'request': request}
+        subjects = Subject.objects.filter(modules=module) | Subject.objects.filter(
+            learning_module=module,
+        )
+        if (
+            not request.user.is_admin_teacher
+            and not user_has_module_access(request.user, module)
+        ):
+            return response.Response({
+                'module': ModuleSerializer(module, context=context).data,
+                'topics': [],
+                'lessons': [],
+                'lesson_examples': [],
+                'lesson_progress': [],
+                'activities': [],
+                'activity_attempts': [],
+                'problems': [],
+                'subjects': SubjectSerializer(
+                    subjects,
+                    many=True,
+                    context=context,
+                ).data,
+            })
+
         topics = ModuleTopic.objects.filter(module=module)
         lessons = ModuleLesson.objects.filter(topic__module=module)
         activities = ModuleActivity.objects.filter(module=module)
@@ -242,7 +267,6 @@ class ModuleViewSet(viewsets.ModelViewSet):
         ).defer(
             'question_snapshot', 'draft_answers',
         ) if not request.user.is_admin_teacher else ModuleActivityAttempt.objects.none()
-        context = {'request': request}
         return response.Response({
             'module': ModuleSerializer(module, context=context).data,
             'topics': ModuleTopicSerializer(topics, many=True, context=context).data,
@@ -255,15 +279,12 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 many=True,
                 context=context,
             ).data,
-            'assessments': AssessmentSerializer(
-                Assessment.objects.filter(module=module), many=True, context=context,
-            ).data,
             'problems': ProgrammingProblemSerializer(
                 ProgrammingProblem.objects.filter(module=module).prefetch_related('test_cases', 'blanks'),
                 many=True, context=context,
             ).data,
             'subjects': SubjectSerializer(
-                Subject.objects.filter(modules=module) | Subject.objects.filter(learning_module=module),
+                subjects,
                 many=True, context=context,
             ).data,
         })
@@ -421,53 +442,6 @@ class ModuleViewSet(viewsets.ModelViewSet):
         }
         return response.Response(summary)
 
-    @decorators.action(
-        detail=True,
-        methods=['get'],
-        permission_classes=[permissions.IsAuthenticated],
-        url_path='download-pdf',
-    )
-    def download_pdf(self, request, pk=None):
-        module = Module.objects.filter(pk=pk).first()
-        if not module or (not module.is_published and not request.user.is_admin_teacher):
-            return response.Response({'detail': 'Module not found.'}, status=404)
-        if not request.user.is_admin_teacher and not (
-            user_has_module_class_access(request.user, module)
-            or user_has_module_access(request.user, module)
-        ):
-            raise PermissionDenied('This module PDF is not available for your account.')
-        if not module.pdf_file and module.is_published:
-            try:
-                module = generate_module_pdf(module)
-            except Exception as error:
-                return response.Response(
-                    {'detail': f'The module PDF could not be generated: {error}'},
-                    status=503,
-                )
-        return pdf_file_response(module, 'This module does not have a PDF.')
-
-    @decorators.action(
-        detail=True,
-        methods=['post'],
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def regenerate_pdf(self, request, pk=None):
-        if not request.user.is_admin_teacher:
-            self.permission_denied(request)
-
-        module = self.get_object()
-        try:
-            module = generate_module_pdf(module)
-        except Exception as error:
-            return response.Response(
-                {'detail': f'The module PDF could not be generated: {error}'},
-                status=503,
-            )
-
-        serializer = self.get_serializer(module)
-        return response.Response(serializer.data)
-
-
 def pdf_file_response(instance, missing_message):
     if not instance.pdf_file:
         return response.Response({'detail': missing_message}, status=404)
@@ -538,6 +512,15 @@ class ModuleAccessViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(activated_by=self.request.user)
 
+    def perform_update(self, serializer):
+        next_active = serializer.validated_data.get(
+            'is_active',
+            serializer.instance.is_active,
+        )
+        serializer.save(
+            **({'activated_by': self.request.user} if next_active else {}),
+        )
+
 
 class ModuleTopicViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleTopicSerializer
@@ -556,6 +539,62 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
         ).distinct()
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path='download_pdf',
+    )
+    def download_pdf(self, request, pk=None):
+        topic = ModuleTopic.objects.select_related('module').prefetch_related(
+            'module__subjects',
+        ).filter(pk=pk).first()
+        if not topic or (
+            not request.user.is_admin_teacher
+            and not (
+                topic.is_published
+                and topic.module.is_published
+            )
+        ):
+            return response.Response({'detail': 'Topic not found.'}, status=404)
+        if not request.user.is_admin_teacher and not (
+            user_has_module_class_access(request.user, topic.module)
+            or user_has_module_access(request.user, topic.module)
+        ):
+            raise PermissionDenied('This topic PDF is not available for your account.')
+        if not topic.pdf_file and topic.is_published:
+            try:
+                topic = generate_topic_pdf(topic)
+            except Exception as error:
+                return response.Response(
+                    {'detail': f'The topic PDF could not be generated: {error}'},
+                    status=503,
+                )
+        return pdf_file_response(topic, 'This topic does not have a PDF.')
+
+    @decorators.action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path='regenerate_pdf',
+    )
+    def regenerate_pdf(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            self.permission_denied(request)
+
+        topic = self.get_object()
+        try:
+            topic = generate_topic_pdf(topic)
+        except Exception as error:
+            return response.Response(
+                {'detail': f'The topic PDF could not be generated: {error}'},
+                status=503,
+            )
+
+        return response.Response(
+            self.get_serializer(topic).data,
+        )
 
 
 class ModuleLessonViewSet(viewsets.ModelViewSet):
@@ -595,61 +634,6 @@ class ModuleLessonViewSet(viewsets.ModelViewSet):
 
     @decorators.action(
         detail=True,
-        methods=['get'],
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def download_pdf(self, request, pk=None):
-        lesson = ModuleLesson.objects.select_related(
-            'topic',
-            'topic__module',
-        ).filter(pk=pk).first()
-        if not lesson or (
-            not request.user.is_admin_teacher
-            and not (
-                lesson.is_published
-                and lesson.topic.is_published
-                and lesson.topic.module.is_published
-            )
-        ):
-            return response.Response({'detail': 'Lesson not found.'}, status=404)
-        if (
-            not request.user.is_admin_teacher
-            and not user_has_module_access(request.user, lesson.topic.module)
-        ):
-            raise PermissionDenied('This lesson PDF is not available for your account.')
-        if not lesson.pdf_file and lesson.is_published:
-            try:
-                lesson = generate_lesson_pdf(lesson)
-            except Exception as error:
-                return response.Response(
-                    {'detail': f'The lesson PDF could not be generated: {error}'},
-                    status=503,
-                )
-        return pdf_file_response(lesson, 'This lesson does not have a PDF.')
-
-    @decorators.action(
-        detail=True,
-        methods=['post'],
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def regenerate_pdf(self, request, pk=None):
-        if not request.user.is_admin_teacher:
-            self.permission_denied(request)
-
-        lesson = self.get_object()
-        try:
-            lesson = generate_lesson_pdf(lesson)
-        except Exception as error:
-            return response.Response(
-                {'detail': f'The lesson PDF could not be generated: {error}'},
-                status=503,
-            )
-
-        serializer = self.get_serializer(lesson)
-        return response.Response(serializer.data)
-
-    @decorators.action(
-        detail=True,
         methods=['post'],
         permission_classes=[permissions.IsAuthenticated],
     )
@@ -684,8 +668,6 @@ class ModuleLessonViewSet(viewsets.ModelViewSet):
             enrichment=lesson.enrichment,
             student_activities=lesson.student_activities,
             resources=lesson.resources,
-            assessment_url=lesson.assessment_url,
-            pdf_file=lesson.pdf_file,
             is_published=False,
         )
         for example in lesson.lesson_examples.all():

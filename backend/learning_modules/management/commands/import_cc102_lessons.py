@@ -2058,6 +2058,5 @@ class Command(BaseCommand):
                 'JDK, IDE, projector or screenshots, printed worksheets, notebook, sample code snippets, '
                 'and teacher-created answer guides.'
             ),
-            'assessment_url': '',
             'is_published': True,
         }

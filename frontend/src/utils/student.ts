@@ -1,13 +1,10 @@
-import type { AnswerDraft, RouteData } from '../app/types'
+import type { RouteData } from '../app/types'
 import type {
   AttendanceRecord,
-  Assessment,
   GradeCategory,
   LevelRule,
   Module,
   ModuleActivity,
-  AssessmentAttempt,
-  Question,
   SubjectSchedule,
   User,
 } from '../types'
@@ -87,64 +84,6 @@ export function isModuleGrantAvailable(grant: RouteData['moduleAccess'][number])
   return grant.is_available
 }
 
-export function hasActiveAssessmentAccess(
-  data: RouteData,
-  assessment: Assessment,
-) {
-  if (assessment.module) {
-    const module = data.modules.find((item) => item.id === assessment.module)
-    return module ? hasActiveModuleAccess(data, module) : false
-  }
-
-  return hasActiveSubjectAccess(data, assessment.subject)
-}
-
-export function isMockAssessment(assessment: Assessment) {
-  return assessment.kind === 'MOCK_EXAM' || assessment.kind === 'MOCK_QUIZ'
-}
-
-export function getMockTopicModules(data: RouteData, assessment: Assessment) {
-  return data.moduleTopics
-    .filter((topic) => {
-      const module = data.modules.find((item) => item.id === topic.module)
-      if (!module || !topic.is_published || !module.is_published || !hasActiveModuleAccess(data, module)) {
-        return false
-      }
-
-      if (assessment.subject) {
-        return module.subject === assessment.subject || module.subjects.includes(assessment.subject)
-      }
-
-      return true
-    })
-    .sort((first, second) => first.title.localeCompare(second.title))
-}
-
-export function getAssessmentQuestions(
-  data: RouteData,
-  assessment: Assessment,
-  attempt?: AssessmentAttempt | null,
-) {
-  if (isMockAssessment(assessment) && attempt) {
-    const selectedQuestionIds = attempt.selected_question_ids.length
-      ? attempt.selected_question_ids
-      : data.attemptQuestions
-          .filter((item) => item.attempt === attempt.id)
-          .sort((first, second) => first.order - second.order || first.id - second.id)
-          .map((item) => item.question)
-
-    if (selectedQuestionIds.length) {
-      return selectedQuestionIds
-        .map((id) => data.questions.find((question) => question.id === id))
-        .filter((question): question is Question => Boolean(question))
-    }
-  }
-
-  return data.questions
-    .filter((question) => question.assessment === assessment.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
-}
-
 export function scheduleTime(schedule?: SubjectSchedule) {
   if (!schedule) {
     return 'No schedule'
@@ -173,26 +112,6 @@ export function attendanceStatusLabel(status: AttendanceRecord['status']) {
   }
 
   return labels[status]
-}
-
-export function getQuestionChoices(data: RouteData, question: Question) {
-  const nestedChoices = question.choices ?? []
-
-  if (nestedChoices.length) {
-    return nestedChoices
-  }
-
-  return data.choices
-    .filter((choice) => choice.question === question.id)
-    .sort((first, second) => first.order - second.order || first.id - second.id)
-}
-
-export function emptyAnswerDraft(): AnswerDraft {
-  return {
-    code_answer: '',
-    selected_choice: null,
-    text_answer: '',
-  }
 }
 
 export function calculateLevelState(levels: LevelRule[], points: number) {
