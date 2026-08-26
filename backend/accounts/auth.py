@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 from django.contrib.auth import authenticate, get_user_model
@@ -15,6 +16,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import StudentProfile
 
 
+LEGACY_STUDENT_USERNAME_PATTERN = re.compile(r'^student-(\d+)$')
+
+
 class PasswordSetupToken(Token):
     token_type = 'password_setup'
     lifetime = timedelta(minutes=15)
@@ -28,8 +32,10 @@ class AralForgeTokenObtainPairSerializer(TokenObtainPairSerializer):
         user = authenticate(request=request, username=identifier, password=password)
 
         if user is None:
+            legacy_match = LEGACY_STUDENT_USERNAME_PATTERN.fullmatch(identifier)
+            student_number = legacy_match.group(1) if legacy_match else identifier
             profiles = StudentProfile.objects.select_related('user').filter(
-                student_number__iexact=identifier,
+                student_number__iexact=student_number,
                 is_active=True,
                 user__is_active=True,
                 user__role=get_user_model().Role.STUDENT,

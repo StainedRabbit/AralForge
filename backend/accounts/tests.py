@@ -289,6 +289,24 @@ class TemporaryPasswordSetupTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
 
+    def test_number_only_student_accepts_number_and_legacy_prefixed_login(self):
+        self.student.username = '130183'
+        self.student.must_change_password = False
+        self.student.save(update_fields=['username', 'must_change_password'])
+        self.student.student_profile.student_number = '130183'
+        self.student.student_profile.save(update_fields=['student_number'])
+
+        for identifier in ('130183', 'student-130183'):
+            with self.subTest(identifier=identifier):
+                response = self.client.post(
+                    reverse('token_obtain_pair'),
+                    {'username': identifier, 'password': 'TemporaryPass!482'},
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertIn('access', response.data)
+
     def test_expired_password_setup_token_is_rejected(self):
         token = PasswordSetupToken.for_user(self.student)
         token.set_exp(lifetime=timedelta(seconds=-1))

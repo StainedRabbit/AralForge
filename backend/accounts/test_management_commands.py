@@ -118,3 +118,88 @@ class SyncStudentCredentialsCommandTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command('sync_student_credentials', dry_run=True, stdout=StringIO())
+
+
+class ConvertStudentUsernamesCommandTests(TestCase):
+    def create_student(self, username, student_number, *, password='ExistingPass!482'):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username=username,
+            password=password,
+            role=user_model.Role.STUDENT,
+        )
+        from .models import StudentProfile
+
+        profile = StudentProfile.objects.create(
+            user=user,
+            student_number=student_number,
+        )
+        return user, profile
+
+    def test_default_dry_run_reports_candidates_without_changing_data(self):
+        student, _profile = self.create_student('student-130183', '130183')
+        teacher = get_user_model().objects.create_user(
+            username='student-777777',
+            password='TeacherPass!482',
+            role=get_user_model().Role.TEACHER,
+        )
+        unmatched, _profile = self.create_student('student-ABC', 'ABC')
+        output = StringIO()
+
+        call_command('convert_student_usernames', stdout=output)
+
+        student.refresh_from_db()
+        teacher.refresh_from_db()
+        unmatched.refresh_from_db()
+        self.assertEqual(student.username, 'student-130183')
+        self.assertEqual(teacher.username, 'student-777777')
+        self.assertEqual(unmatched.username, 'student-ABC')
+        self.assertIn('found=2', output.getvalue())
+        self.assertIn('changed=0', output.getvalue())
+        self.assertIn('would_change=1', output.getvalue())
+        self.assertIn('skipped=1', output.getvalue())
+        self.assertIn('conflicted=0', output.getvalue())
+
+    def test_apply_changes_only_username_and_preserves_related_account_data(self):
+        student, profile = self.create_student('student-130183', '130183')
+        original_user_id = student.id
+        original_profile_id = profile.id
+        original_password = student.password
+        output = StringIO()
+
+        call_command('convert_student_usernames', apply=True, stdout=output)
+
+        student.refresh_from_db()
+        profile.refresh_from_db()
+        self.assertEqual(student.id, original_user_id)
+        self.assertEqual(profile.id, original_profile_id)
+        self.assertEqual(student.username, '130183')
+        self.assertEqual(student.password, original_password)
+        self.assertEqual(student.role, get_user_model().Role.STUDENT)
+        self.assertEqual(profile.student_number, '130183')
+        self.assertIn('found=1', output.getvalue())
+        self.assertIn('changed=1', output.getvalue())
+        self.assertIn('skipped=0', output.getvalue())
+        self.assertIn('conflicted=0', output.getvalue())
+
+    def test_collision_aborts_all_changes(self):
+        first, _profile = self.create_student('student-130183', '130183')
+        second, _profile = self.create_student('student-130184', '130184')
+        get_user_model().objects.create_user(
+            username='130183',
+            password='TeacherPass!482',
+            role=get_user_model().Role.TEACHER,
+        )
+        output = StringIO()
+
+        with self.assertRaises(CommandError):
+            call_command('convert_student_usernames', apply=True, stdout=output)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.username, 'student-130183')
+        self.assertEqual(second.username, 'student-130184')
+        self.assertIn('found=2', output.getvalue())
+        self.assertIn('changed=0', output.getvalue())
+        self.assertIn('would_change=1', output.getvalue())
+        self.assertIn('conflicted=1', output.getvalue())
