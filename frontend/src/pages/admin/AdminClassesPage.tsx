@@ -307,6 +307,7 @@ export function AdminClassesPage({
       <ClassRoster
         api={api}
         data={data}
+        key={selectedSchedule?.id ?? 'no-class'}
         refresh={refreshClasses}
         selectedSchedule={selectedSchedule}
       />
@@ -841,9 +842,12 @@ function ClassRoster({
   selectedSchedule: SubjectSchedule | null
 }) {
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [isAdding, setIsAdding] = useState(false)
-  const [isAttendanceOpen, setIsAttendanceOpen] = useState(false)
+  const [isAttendanceOpen, setIsAttendanceOpen] = useState(
+    searchParams.get('action') === 'attendance',
+  )
   const [isScoresOpen, setIsScoresOpen] = useState(false)
   const scoresButtonRef = useRef<HTMLButtonElement>(null)
   const rosterLoadMoreRef = useRef<HTMLDivElement>(null)
@@ -893,6 +897,7 @@ function ClassRoster({
   const inactiveCount = firstRosterPage?.inactive_count
     ?? localRoster.length - activeCount
   const totalCount = firstRosterPage?.total_count ?? localRoster.length
+
   const refreshClassRoster = useCallback(async () => {
     await refresh()
     await queryClient.invalidateQueries({

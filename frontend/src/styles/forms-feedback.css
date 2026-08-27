@@ -92,6 +92,11 @@ code {
   font-weight: 650;
 }
 
+.inline-alert--success {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
 .status-banner {
   width: min(1180px, 100%);
   margin: 0 auto 18px;

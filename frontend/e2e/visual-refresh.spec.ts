@@ -17,6 +17,7 @@ async function signIn(page: Page, username: string) {
 }
 
 test('Modern Forge surfaces render across roles and responsive viewports', async ({ page }) => {
+  test.setTimeout(60_000)
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
   const missingAssets: string[] = []
@@ -67,6 +68,15 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-modules-tablet-768x1024.png` })
 
+  const databaseSubjectId = await page.evaluate(() => {
+    const subjectSelect = document.querySelector<HTMLSelectElement>('.student-module-control select')
+    return Array.from(subjectSelect?.options ?? []).find(
+      (option) => option.textContent?.includes('E2E102 - Database Systems'),
+    )?.value
+  })
+  expect(databaseSubjectId).toBeTruthy()
+  await page.goto(`/modules?subject=${databaseSubjectId}`)
+  await expect(page.locator('.student-module-browser')).toBeVisible()
   const lessonLinks = page.locator('a[href*="lesson="]')
   expect(await lessonLinks.count()).toBeGreaterThan(0)
   const lessonHref = await lessonLinks.first().getAttribute('href')
@@ -89,7 +99,7 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.setViewportSize({ width: 1440, height: 900 })
   await signIn(page, 'e2e-teacher')
   await page.waitForURL(/\/admin(?:\/)?$/)
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-dashboard-desktop-1440x900.png` })
 

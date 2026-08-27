@@ -1,28 +1,201 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import type { AuthedRequest } from '../../app/types'
-import type { AttendanceSession, ModuleAccess, ModuleActivityAttempt, ModuleActivitySubmission, User } from '../../types'
-import { Icon } from '../../components/Icon'
-import { Page, PageHeader, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../../components/ui'
+import { Icon, type IconName } from '../../components/Icon'
+import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../../components/ui'
 import { queryKeys } from '../../queries/queryKeys'
-import { formatDateTime } from '../../utils/format'
+import type { User } from '../../types'
+import { formatDateTime, formatTime } from '../../utils/format'
 import { fullName } from '../../utils/student'
 
-type TeacherDashboard = { role: 'teacher'; metrics: Record<string, number>; ungraded_submissions: ModuleActivitySubmission[]; recent_activity_attempts: ModuleActivityAttempt[]; recent_module_access: ModuleAccess[]; recent_attendance: AttendanceSession[] }
+type AttendanceStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE'
 
-export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
-  const query = useQuery({ queryKey: queryKeys.dashboard, queryFn: ({ signal }) => api<TeacherDashboard>('/overview/dashboard/', { signal }), staleTime: 30_000 })
-  if (query.isPending) return <Page><SkeletonList count={4} /></Page>
-  if (!query.data || query.error) return <Page><StatusBanner tone="warning" title="Dashboard could not load" message="Retry the dashboard request." /></Page>
-  const { metrics, ungraded_submissions: submissions, recent_activity_attempts: attempts, recent_module_access: grants, recent_attendance: attendance } = query.data
-  return <Page>
-    <PageHeader eyebrow="Admin workspace" title={`Teacher Console, ${fullName(currentUser)}.`} description="Manage students, classes, modules, Main Activities, attendance, grades, and rewards." actions={<button className="button button--secondary" onClick={() => query.refetch()} type="button"><Icon name="spark" /><span>Refresh</span></button>} />
-    <section className="stat-grid"><StatCard icon="users" label="Students" value={metrics.student_count} detail={`${metrics.profile_count} profiles`} /><StatCard icon="module" label="Modules" value={metrics.module_count} detail={`${metrics.published_modules} published`} /><StatCard icon="activity" label="Main Activities" value={metrics.main_activity_count} detail={`${metrics.activity_question_count} questions`} /><StatCard icon="grade" label="Grade queue" value={metrics.grade_queue} detail="Ungraded work" /></section>
-    <section className="admin-quick-grid"><Quick to="/admin/students" icon="shield" label="Module access" detail={`${metrics.module_grants} grants`} /><Quick to="/admin/classes" icon="calendar" label="Classes" detail={`${metrics.schedule_count} schedules`} /><Quick to="/admin/attendance" icon="calendar" label="Attendance" detail={`${metrics.attendance_today} sessions today`} /><Quick to="/admin/grades" icon="grade" label="Grades" detail="Open grade management" /></section>
-    <section className="content-grid"><Feed title="Submission Queue" empty="No ungraded module submissions.">{submissions.map((item) => <div className="admin-feed__item" key={item.id}><Icon name="activity" /><span><strong>Submission #{item.id}</strong><small>{formatDateTime(item.submitted_at)}</small></span><Link to="/admin/modules">Grade</Link></div>)}</Feed><Feed title="Main Activity Attempts" empty="No Main Activity attempts yet.">{attempts.map((item) => <div className="admin-feed__item" key={item.id}><Icon name="activity" /><span><strong>Student #{item.student}</strong><small>{formatDateTime(item.started_at)}</small></span></div>)}</Feed></section>
-    <section className="content-grid"><Feed title="Module Access" empty="No module grants yet.">{grants.map((item) => <div className="admin-feed__item" key={item.id}><Icon name="shield" /><span><strong>{item.student_name}</strong><small>{item.is_available ? 'Available' : 'Inactive'}</small></span></div>)}</Feed><Feed title="Attendance" empty="No attendance sessions yet.">{attendance.map((item) => <div className="admin-feed__item" key={item.id}><Icon name="calendar" /><span><strong>{item.title || 'Class meeting'}</strong><small>{item.date}</small></span></div>)}</Feed></section>
-  </Page>
+type AttentionItem = {
+  id: number
+  student_name: string
+  activity_title: string
+  module_title: string
+  submitted_at: string
+  has_file: boolean
 }
 
-function Quick({ to, icon, label, detail }: { to: string; icon: 'calendar'|'grade'|'shield'; label: string; detail: string }) { return <Link className="admin-quick-link" to={to}><span className="stat-card__icon"><Icon name={icon} /></span><span><strong>{label}</strong><small>{detail}</small></span></Link> }
-function Feed({ title, empty, children }: { title: string; empty: string; children: React.ReactNode }) { return <div className="section-block"><SectionHeading subtitle="Recent activity" title={title} /><div className="admin-feed">{children || <p className="admin-empty-line">{empty}</p>}</div></div> }
+type TodayClass = {
+  schedule_id: number
+  subject_code: string
+  subject_name: string
+  section: string
+  room: string
+  start_time: string
+  end_time: string
+  active_student_count: number
+  attendance_status: AttendanceStatus
+}
+
+type RecentActivity = {
+  kind: 'ACTIVITY_ATTEMPT' | 'SUBMISSION_REVIEW' | 'ATTENDANCE'
+  id: number
+  title: string
+  detail: string
+  occurred_at: string
+  module_id: number | null
+  submission_id: number | null
+  schedule_id: number | null
+  attendance_session_id: number | null
+}
+
+type TeacherDashboard = {
+  role: 'teacher'
+  metrics: {
+    attention_count: number
+    today_class_count: number
+    attendance_complete_count: number
+    active_class_count: number
+    active_student_count: number
+  }
+  attention_items: AttentionItem[]
+  today_classes: TodayClass[]
+  recent_activity: RecentActivity[]
+}
+
+export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
+  const query = useQuery({
+    queryKey: queryKeys.dashboard,
+    queryFn: ({ signal }) => api<TeacherDashboard>('/overview/dashboard/', { signal }),
+    staleTime: 30_000,
+  })
+
+  if (query.isPending) return <Page><SkeletonList count={4} /></Page>
+  if (!query.data || query.error) {
+    return <Page><StatusBanner tone="warning" title="Overview could not load" message="Retry the overview request." /></Page>
+  }
+
+  const { attention_items: attentionItems, metrics, recent_activity: recentActivity, today_classes: todayClasses } = query.data
+  const attendanceDetail = metrics.today_class_count
+    ? `${metrics.attendance_complete_count} of ${metrics.today_class_count} complete`
+    : 'No classes scheduled'
+
+  return (
+    <Page>
+      <PageHeader
+        eyebrow="Overview"
+        title={`Welcome back, ${fullName(currentUser)}.`}
+        description={overviewSummary(metrics)}
+        actions={
+          <button className="button button--secondary" onClick={() => query.refetch()} type="button">
+            <Icon name="spark" />
+            <span>Refresh</span>
+          </button>
+        }
+      />
+
+      <section className="stat-grid">
+        <StatCard icon="grade" label="Needs review" value={metrics.attention_count} detail="Text and file submissions" />
+        <StatCard icon="calendar" label="Classes today" value={metrics.today_class_count} detail={`${metrics.active_class_count} active classes`} />
+        <StatCard icon="check" label="Attendance complete" value={metrics.attendance_complete_count} detail={attendanceDetail} />
+        <StatCard icon="users" label="Active students" value={metrics.active_student_count} detail="Across active classes" />
+      </section>
+
+      <div className="teacher-overview-grid">
+        <section className="section-block teacher-overview-panel">
+          <SectionHeading subtitle={`${metrics.attention_count} waiting for review`} title="Needs attention" />
+          {attentionItems.length ? (
+            <div className="teacher-overview-list">
+              {attentionItems.map((item) => (
+                <article className="teacher-overview-row" key={item.id}>
+                  <span aria-hidden="true" className="teacher-overview-row__icon"><Icon name={item.has_file ? 'file' : 'activity'} /></span>
+                  <div className="teacher-overview-row__body">
+                    <strong>{item.student_name}</strong>
+                    <span>{item.activity_title}</span>
+                    <small>{item.module_title} · {formatDateTime(item.submitted_at)}</small>
+                  </div>
+                  <Link className="button button--primary button--compact" to={`/admin/submissions/${item.id}`}>
+                    <span>Review</span><Icon name="arrow-right" />
+                  </Link>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon="check" title="You're all caught up" message="New text and file submissions will appear here for review." />
+          )}
+        </section>
+
+        <section className="section-block teacher-overview-panel">
+          <SectionHeading subtitle={`${todayClasses.length} scheduled`} title="Today's classes" />
+          {todayClasses.length ? (
+            <div className="teacher-overview-list">
+              {todayClasses.map((classItem) => (
+                <article className="teacher-class-row" key={classItem.schedule_id}>
+                  <div className="teacher-class-row__time">
+                    <strong>{formatTime(classItem.start_time)}</strong>
+                    <small>{formatTime(classItem.end_time)}</small>
+                  </div>
+                  <div className="teacher-class-row__body">
+                    <strong>{classItem.subject_code} · {classItem.section || 'No section'}</strong>
+                    <span>{classItem.subject_name}</span>
+                    <small>{classItem.room || 'Room not set'} · {classItem.active_student_count} student{classItem.active_student_count === 1 ? '' : 's'}</small>
+                  </div>
+                  <div className="teacher-class-row__action">
+                    <span className={`overview-status overview-status--${classItem.attendance_status.toLowerCase().replace('_', '-')}`}>
+                      {attendanceStatusLabel(classItem.attendance_status)}
+                    </span>
+                    <Link className="button button--secondary button--compact" to={`/admin/classes?schedule=${classItem.schedule_id}&action=attendance`}>
+                      <span>{classItem.attendance_status === 'COMPLETE' ? 'Review' : 'Take attendance'}</span>
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon="calendar" title="No classes today" message="Your next scheduled class will appear here on its meeting day." />
+          )}
+        </section>
+      </div>
+
+      <section className="section-block teacher-recent-panel">
+        <SectionHeading subtitle="Latest classroom updates" title="Recent activity" />
+        {recentActivity.length ? (
+          <div className="teacher-recent-list">
+            {recentActivity.map((item) => {
+              const target = recentTarget(item)
+              const content = <><span aria-hidden="true" className="teacher-overview-row__icon"><Icon name={recentIcon(item.kind)} /></span><span><strong>{item.title}</strong><small>{item.detail} · {formatDateTime(item.occurred_at)}</small></span></>
+              return target
+                ? <Link className="teacher-recent-item" key={`${item.kind}-${item.id}`} to={target}>{content}<Icon name="arrow-right" /></Link>
+                : <div className="teacher-recent-item" key={`${item.kind}-${item.id}`}>{content}</div>
+            })}
+          </div>
+        ) : (
+          <p className="admin-empty-line">Classroom activity will appear here as students submit work and attendance is recorded.</p>
+        )}
+      </section>
+    </Page>
+  )
+}
+
+function overviewSummary(metrics: TeacherDashboard['metrics']) {
+  if (metrics.attention_count) {
+    return `${metrics.attention_count} submission${metrics.attention_count === 1 ? '' : 's'} need your review today.`
+  }
+  if (metrics.today_class_count) return `You're caught up on reviews. ${metrics.today_class_count} class${metrics.today_class_count === 1 ? '' : 'es'} on today's schedule.`
+  return "You're caught up, with no classes scheduled today."
+}
+
+function attendanceStatusLabel(status: AttendanceStatus) {
+  return { COMPLETE: 'Complete', IN_PROGRESS: 'In progress', NOT_STARTED: 'Not started' }[status]
+}
+
+function recentIcon(kind: RecentActivity['kind']): IconName {
+  if (kind === 'ATTENDANCE') return 'calendar'
+  if (kind === 'SUBMISSION_REVIEW') return 'grade'
+  return 'activity'
+}
+
+function recentTarget(item: RecentActivity) {
+  if (item.submission_id) return `/admin/submissions/${item.submission_id}`
+  if (item.schedule_id) {
+    const params = new URLSearchParams({ schedule: String(item.schedule_id) })
+    if (item.attendance_session_id) params.set('session', String(item.attendance_session_id))
+    return `/admin/attendance?${params.toString()}`
+  }
+  if (item.module_id) return `/admin/modules/${item.module_id}/edit`
+  return null
+}

@@ -82,6 +82,37 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    new_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    confirm_password = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+
+        if not user.check_password(attrs['current_password']):
+            raise serializers.ValidationError({
+                'current_password': 'Your current password is incorrect.'
+            })
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match.'
+            })
+        if user.check_password(attrs['new_password']):
+            raise serializers.ValidationError({
+                'new_password': 'Your new password must be different from your current password.'
+            })
+
+        try:
+            validate_password(attrs['new_password'], user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({
+                'new_password': error.messages
+            }) from error
+
+        return attrs
+
+
 class AvailableStudentSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     enrollment_status = serializers.SerializerMethodField()

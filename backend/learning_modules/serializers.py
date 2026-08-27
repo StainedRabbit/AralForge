@@ -1,4 +1,5 @@
 import hashlib
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.db import models
@@ -598,6 +599,23 @@ class ModuleActivitySubmissionSerializer(serializers.ModelSerializer):
                 )
 
         return attrs
+
+
+class ModuleActivitySubmissionGradeSerializer(serializers.Serializer):
+    score = serializers.DecimalField(
+        decimal_places=2,
+        max_digits=6,
+        min_value=Decimal('0'),
+    )
+    feedback = serializers.CharField(allow_blank=True, required=False)
+
+    def validate_score(self, value):
+        submission = self.context['submission']
+        if value > submission.activity.points_possible:
+            raise serializers.ValidationError(
+                f'Score cannot exceed {submission.activity.points_possible}.',
+            )
+        return value
 
 
 class ModuleActivityQuestionSerializer(serializers.ModelSerializer):

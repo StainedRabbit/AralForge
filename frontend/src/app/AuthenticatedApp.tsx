@@ -54,7 +54,7 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
           <Route path="/assessments/*" element={<Navigate to="/modules" replace />} />
           <Route path="/attendance" element={scoped(['attendanceSessions','attendanceRecords','schedules','enrollments'], data => <AttendancePage data={data} />)} />
           <Route path="/grades" element={<GradeOverviewRoute api={api} currentUser={user} profile={profile} />} />
-          <Route path="/profile" element={scoped([], data => <ProfilePage data={data} />)} />
+          <Route path="/profile" element={scoped([], data => <ProfilePage api={api} data={data} />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

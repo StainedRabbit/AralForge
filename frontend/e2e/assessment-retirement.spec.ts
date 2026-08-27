@@ -24,13 +24,21 @@ test('students have no Assessment or Test navigation and legacy URLs redirect to
 })
 
 
-test('teachers have no Assessment navigation and the legacy authoring URL redirects to Gradebook', async ({ page }) => {
+test('teachers open Gradebook contextually while the legacy authoring URL remains supported', async ({ page }) => {
   await page.goto('/admin')
   await signIn(page, 'e2e-teacher')
   await page.waitForURL(/\/admin\/?$/)
 
   await expect(page.locator('a[href^="/admin/assessments"]')).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Assessments', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Gradebook', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Grades' })).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.mobile-tabbar')).toBeVisible()
+  await expect(page.locator('.mobile-tabbar').getByRole('link')).toHaveCount(4)
+  await expect(page.locator('.mobile-tabbar').getByRole('link', { name: 'Gradebook', exact: true })).toHaveCount(0)
+  await expect(page.locator('.mobile-tabbar').getByRole('link', { name: 'Grades' })).toBeVisible()
 
   await page.goto('/admin/assessments')
   await expect(page).toHaveURL(/\/admin\/gradebook(?:\?.*)?$/)

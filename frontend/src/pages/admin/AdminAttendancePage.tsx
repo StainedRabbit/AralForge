@@ -25,7 +25,12 @@ export function AdminAttendancePage({ api, data, refresh }: {
     requestedSchedule?.id.toString() ?? '',
   )
   const [query, setQuery] = useState('')
-  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
+  const requestedSessionId = Number(searchParams.get('session'))
+  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(
+    data.attendanceSessions.some((session) => session.id === requestedSessionId)
+      ? requestedSessionId
+      : null,
+  )
   const schedules = data.schedules.filter(
     (schedule) => !termId || schedule.school_year_semester === Number(termId),
   )

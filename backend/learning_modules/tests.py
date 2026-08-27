@@ -2663,3 +2663,127 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual({row['id'] for row in response.data['grade_items']}, {item.id})
         self.assertEqual({row['id'] for row in response.data['extensions']}, {extension.id})
         self.assertNotIn(outside_schedule.id, {row['id'] for row in response.data['schedules']})
+
+
+class SubmissionReviewApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='review-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='review-student',
+            password='testpass123',
+            first_name='Review',
+            last_name='Student',
+            role=User.Role.STUDENT,
+        )
+        self.subject = Subject.objects.create(code='REV101', name='Submission Review')
+        school_year = SchoolYear.objects.create(start_year=2039, end_year=2040)
+        self.term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        self.schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=self.term,
+            days='MO',
+            start_time='09:00',
+            end_time='10:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
+        self.module = Module.objects.create(
+            subject=self.subject,
+            title='Review Module',
+            slug='review-module',
+        )
+        self.activity = ModuleActivity.objects.create(
+            module=self.module,
+            title='Written Reflection',
+            instructions='Submit a reflection.',
+            activity_type=ModuleActivity.ActivityType.TEXT,
+            points_possible=Decimal('50.00'),
+        )
+        self.submission = ModuleActivitySubmission.objects.create(
+            activity=self.activity,
+            student=self.student,
+            text_answer='My reflection.',
+        )
+
+    def test_teacher_can_review_unlinked_submission(self):
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.get(
+            f'/api/modules/submissions/{self.submission.id}/review/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['student_name'], 'Review Student')
+        self.assertEqual(response.data['activity_title'], 'Written Reflection')
+        self.assertEqual(response.data['module_title'], 'Review Module')
+        self.assertEqual(response.data['text_answer'], 'My reflection.')
+        self.assertEqual(response.data['linked_grade_items'], [])
+
+    def test_student_cannot_open_submission_review(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/submissions/{self.submission.id}/review/',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        grade_response = self.client.post(
+            f'/api/modules/submissions/{self.submission.id}/grade/',
+            {'score': '10.00'},
+            format='json',
+        )
+        self.assertEqual(grade_response.status_code, 403)
+
+    def test_grade_action_validates_score_and_synchronizes_linked_gradebook(self):
+        category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Reflections',
+            weight=Decimal('100.00'),
+        )
+        item = GradeItem.objects.create(
+            schedule=self.schedule,
+            grade_category=category,
+            title=self.activity.title,
+            points_possible=self.activity.points_possible,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        invalid = self.client.post(
+            f'/api/modules/submissions/{self.submission.id}/grade/',
+            {'score': '51.00', 'feedback': 'Too high'},
+            format='json',
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn('score', invalid.data)
+
+        response = self.client.post(
+            f'/api/modules/submissions/{self.submission.id}/grade/',
+            {'score': '42.00', 'feedback': 'Clear and thoughtful.'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data['linked_grade_items']), 1)
+        self.submission.refresh_from_db()
+        self.assertEqual(self.submission.score, Decimal('42.00'))
+        self.assertEqual(self.submission.feedback, 'Clear and thoughtful.')
+        self.assertIsNotNone(self.submission.graded_at)
+        score = StudentGradeItemScore.objects.get(
+            grade_item=item,
+            student=self.student,
+        )
+        self.assertEqual(score.raw_score, Decimal('42.00'))
+        self.assertEqual(score.origin, StudentGradeItemScore.Origin.AUTOMATIC)
+        dashboard = self.client.get('/api/overview/dashboard/')
+        self.assertEqual(dashboard.data['metrics']['attention_count'], 0)

@@ -14,6 +14,7 @@ const AdminLessonEditorPage = lazy(() => import('../pages/admin/AdminLessonEdito
 const AdminModuleEditorPage = lazy(() => import('../pages/admin/AdminModuleEditorPage').then(module => ({ default: module.AdminModuleEditorPage })))
 const AdminModulesPage = lazy(() => import('../pages/admin/AdminModulesPage').then(module => ({ default: module.AdminModulesPage })))
 const AdminStudentsPage = lazy(() => import('../pages/admin/AdminStudentsPage').then(module => ({ default: module.AdminStudentsPage })))
+const AdminSubmissionReviewPage = lazy(() => import('../pages/admin/AdminSubmissionReviewPage').then(module => ({ default: module.AdminSubmissionReviewPage })))
 const AdminTopicEditorPage = lazy(() => import('../pages/admin/AdminTopicEditorPage').then(module => ({ default: module.AdminTopicEditorPage })))
 const LessonPresentationPage = lazy(() => import('../pages/admin/LessonPresentationPage').then(module => ({ default: module.LessonPresentationPage })))
 const ModuleProgressPage = lazy(() => import('../pages/admin/ModuleProgressPage').then(module => ({ default: module.ModuleProgressPage })))
@@ -21,9 +22,9 @@ const AdminClassesPage = lazy(() => import('../pages/admin/AdminClassesPage').th
 const nav: NavItem[] = [
   { to: '/admin', label: 'Overview', icon: 'dashboard' }, { to: '/admin/students', label: 'Students', icon: 'users' },
   { to: '/admin/classes', label: 'Classes', icon: 'calendar' }, { to: '/admin/modules', label: 'Modules', icon: 'module' },
-  { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' }, { to: '/admin/grades', label: 'Grades', icon: 'grade' },
+  { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]
-const mobile = nav.filter(item => ['/admin','/admin/students','/admin/classes','/admin/gradebook','/admin/grades'].includes(item.to)).map(item => item.to === '/admin' ? { ...item, label: 'Home' } : item)
+const mobile = nav.filter(item => ['/admin','/admin/students','/admin/classes','/admin/grades'].includes(item.to)).map(item => item.to === '/admin' ? { ...item, label: 'Home' } : item)
 
 const STUDENTS: WorkspaceResource[] = ['users','profiles','subjects','schedules','enrollments','modules','moduleAccess']
 const CLASSES: WorkspaceResource[] = ['users','profiles','subjects','schoolYears','terms','schedules','enrollments','modules','moduleAccess','attendanceSessions','attendanceRecords','gradeCategories','gradeItems','gradeItemScores','categoryGrades','periodGrades','finalGrades']
@@ -53,6 +54,7 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/modules/:moduleId/topics/:topicId/lessons/:lessonId/edit" element={scoped(LESSON_EDITOR, data => <AdminLessonEditorPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/modules/:moduleId/present" element={scoped(EDITOR, data => <LessonPresentationPage data={data} />)} />
         <Route path="/admin/modules/:moduleId/progress" element={scoped(['modules'], data => <ModuleProgressPage api={api} data={data} />)} />
+        <Route path="/admin/submissions/:submissionId" element={<AdminSubmissionReviewPage api={api} />} />
         <Route path="/admin/assessments/*" element={<Navigate replace to="/admin/gradebook" />} />
         <Route path="/admin/attendance" element={scoped(ATTENDANCE, data => <AdminAttendancePage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/grades" element={scoped(GRADES, data => <AdminGradesPage api={api} data={data} refresh={data.refresh} />)} />

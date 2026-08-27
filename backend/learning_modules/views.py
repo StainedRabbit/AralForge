@@ -8,7 +8,7 @@ from rest_framework import decorators, permissions, response, serializers, statu
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.serializers import UserSerializer
-from accounts.permissions import IsAdminTeacherOrReadOnly
+from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
 from grades.models import GradeCategory, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
@@ -52,6 +52,7 @@ from .serializers import (
     ModuleActivityQuestionChoiceSerializer,
     ModuleActivityQuestionSerializer,
     ModuleActivitySubmissionSerializer,
+    ModuleActivitySubmissionGradeSerializer,
     PaperActivityScoreBatchSerializer,
     PaperActivityScoreUpdateSerializer,
     ModuleLessonAssetSerializer,
@@ -1279,7 +1280,10 @@ class ModuleActivitySubmissionViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = ModuleActivitySubmission.objects.select_related('activity', 'student')
+        queryset = ModuleActivitySubmission.objects.select_related(
+            'activity__module',
+            'student',
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -1296,6 +1300,72 @@ class ModuleActivitySubmissionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
         serializer.save(student=student)
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[IsAdminTeacher],
+    )
+    def review(self, request, pk=None):
+        return response.Response(serialize_submission_review(self.get_object(), request))
+
+    @decorators.action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[IsAdminTeacher],
+    )
+    def grade(self, request, pk=None):
+        submission = self.get_object()
+        entry = ModuleActivitySubmissionGradeSerializer(
+            data=request.data,
+            context={'submission': submission},
+        )
+        entry.is_valid(raise_exception=True)
+        submission.score = entry.validated_data['score']
+        submission.feedback = entry.validated_data.get('feedback', '')
+        submission.graded_at = timezone.now()
+        submission.save(update_fields=('score', 'feedback', 'graded_at'))
+        return response.Response(serialize_submission_review(submission, request))
+
+
+def serialize_submission_review(submission, request):
+    activity = submission.activity
+    module = activity.module
+    linked_items = GradeItem.objects.filter(
+        module_activity=activity,
+        schedule__isnull=False,
+    ).select_related(
+        'grade_category',
+        'schedule__subject',
+    ).order_by('schedule__subject__code', 'schedule__section', 'id')
+    serialized = ModuleActivitySubmissionSerializer(
+        submission,
+        context={'request': request},
+    ).data
+    return {
+        **serialized,
+        'student_name': submission.student.get_full_name().strip() or submission.student.username,
+        'student_username': submission.student.username,
+        'activity_title': activity.title,
+        'activity_type': activity.activity_type,
+        'activity_points_possible': activity.points_possible,
+        'module_id': module.id,
+        'module_title': module.title,
+        'subject_id': module.subject_id,
+        'topic_id': activity.topic_id,
+        'lesson_id': activity.lesson_id,
+        'linked_grade_items': [
+            {
+                'id': item.id,
+                'schedule_id': item.schedule_id,
+                'subject_code': item.schedule.subject.code,
+                'section': item.schedule.section,
+                'grade_category_id': item.grade_category_id,
+                'grading_period': item.grade_category.grading_period,
+            }
+            for item in linked_items
+        ],
+    }
 
 
 class ModuleProgressViewSet(viewsets.ModelViewSet):

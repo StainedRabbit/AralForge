@@ -12,6 +12,7 @@ from learning_modules.models import (
     ModuleActivityAttempt,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
+    ModuleActivitySubmission,
     ModuleLesson,
     ModuleTopic,
 )
@@ -277,6 +278,22 @@ class Command(BaseCommand):
             text='Incorrect response',
             is_correct=False,
             order=2,
+        )
+        review_activity = ModuleActivity.objects.create(
+            module=workflow_module,
+            topic=workflow_topic,
+            title='Database Reflection',
+            instructions='Explain one design decision from the lesson.',
+            activity_type=ModuleActivity.ActivityType.TEXT,
+            accepts_text=True,
+            points_possible=10,
+            order=2,
+            is_published=True,
+        )
+        ModuleActivitySubmission.objects.create(
+            activity=review_activity,
+            student=students[0],
+            text_answer='I separated the records to reduce duplication and make updates safer.',
         )
 
         hydration_subject = Subject.objects.create(

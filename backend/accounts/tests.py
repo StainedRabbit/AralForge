@@ -320,3 +320,64 @@ class TemporaryPasswordSetupTests(APITestCase):
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ChangePasswordTests(APITestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.student = user_model.objects.create_user(
+            username='password-change-student',
+            password='CurrentSecurePass!482',
+            role=user_model.Role.STUDENT,
+        )
+        StudentProfile.objects.create(user=self.student, student_number='ST-PASSWORD-1')
+        self.url = reverse('accounts:user-change-password')
+
+    def test_student_can_change_own_password(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            self.url,
+            {
+                'current_password': 'CurrentSecurePass!482',
+                'new_password': 'NewSecurePass!739',
+                'confirm_password': 'NewSecurePass!739',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.check_password('NewSecurePass!739'))
+        self.assertFalse(self.student.check_password('CurrentSecurePass!482'))
+
+    def test_change_password_rejects_an_incorrect_current_password(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            self.url,
+            {
+                'current_password': 'NotTheCurrentPassword!482',
+                'new_password': 'NewSecurePass!739',
+                'confirm_password': 'NewSecurePass!739',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.check_password('CurrentSecurePass!482'))
+
+    def test_change_password_requires_authentication(self):
+        response = self.client.post(
+            self.url,
+            {
+                'current_password': 'CurrentSecurePass!482',
+                'new_password': 'NewSecurePass!739',
+                'confirm_password': 'NewSecurePass!739',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

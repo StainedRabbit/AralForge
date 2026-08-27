@@ -1,13 +1,19 @@
 from django.db.models import BooleanField, Exists, OuterRef, Q, Value
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from subjects.models import ScheduleStudent
 
 from .models import StudentProfile, User
 from .permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
-from .serializers import AvailableStudentSerializer, StudentProfileSerializer, UserSerializer
+from .serializers import (
+    AvailableStudentSerializer,
+    ChangePasswordSerializer,
+    StudentProfileSerializer,
+    UserSerializer,
+)
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -21,6 +27,9 @@ class UserViewSet(viewsets.ModelViewSet):
         return User.objects.filter(id=self.request.user.id)
 
     def get_permissions(self):
+        if self.action == 'change_password':
+            return [IsAuthenticated()]
+
         if self.action in ('create', 'destroy'):
             return [IsAdminTeacher()]
 
@@ -36,6 +45,18 @@ class UserViewSet(viewsets.ModelViewSet):
                 if profile else None
             ),
         })
+
+    @action(detail=False, methods=['post'], url_path='change-password')
+    def change_password(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data['new_password'])
+        request.user.must_change_password = False
+        request.user.save(update_fields=('password', 'must_change_password'))
+        return Response({'detail': 'Password changed successfully.'})
 
     @action(detail=False, methods=['get'], permission_classes=[IsAdminTeacher])
     def available_students(self, request):
