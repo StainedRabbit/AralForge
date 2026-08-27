@@ -6,7 +6,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 }
 
 test('bulk links a Main Activity and records score-only paper submissions', async ({ page }, testInfo) => {
@@ -151,7 +151,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await page.getByLabel('Submission summary').getByRole('button', { name: /Paper/ }).click()
   const editButtons = page.getByRole('button', { name: 'Edit paper score' })
   await expect(editButtons).toHaveCount(3)
-  await editButtons.first().click()
+  await page.locator('.gradebook-score-table tbody tr').filter({ hasText: 'Alex Rivera' }).getByRole('button', { name: 'Edit paper score' }).click()
   dialog = page.getByRole('dialog', { name: 'Correct paper score' })
   await expect(dialog.getByRole('spinbutton', { name: 'Paper score' })).toHaveValue('9.50')
   await dialog.getByRole('spinbutton', { name: 'Paper score' }).fill('9')

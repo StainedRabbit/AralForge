@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, FormEvent, SetStateAction } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
@@ -7,11 +8,12 @@ import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
   GradeItem,
   GradeItemSourceType,
+  ApiPage,
   ModuleActivityAttempt,
   PaperActivityScoreBatchRequest,
   PaperActivityScoreBatchResult,
 } from '../../types'
-import { displayScore, formatDate, numeric, toErrorMessage } from '../../utils/format'
+import { displayScore, numeric, toErrorMessage } from '../../utils/format'
 
 const periods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
 const sourceTypes: { label: string; value: GradeItemSourceType }[] = [
@@ -23,6 +25,19 @@ const sourceTypes: { label: string; value: GradeItemSourceType }[] = [
 type ScoreDraft = Record<string, { rawScore: string; remarks: string }>
 type GradebookViewMode = 'ITEM' | 'MATRIX'
 type RosterFilter = 'ALL' | 'PENDING' | 'ONLINE' | 'PAPER' | 'EXCUSED' | 'OVERRIDDEN'
+type RosterStatus = Exclude<RosterFilter, 'ALL'>
+export type GradebookPaginationState = {
+  count: number
+  totalCount: number
+  loaded: number
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  isFetchNextPageError: boolean
+  isRefreshing: boolean
+  statusCounts?: Record<RosterStatus, number>
+  loadMore: () => Promise<void>
+  retry: () => Promise<void>
+}
 type PaperScoreTarget = {
   attemptId: number | null
   item: GradeItem
@@ -34,10 +49,12 @@ type PaperScoreTarget = {
 export function AdminGradebookPage({
   api,
   data,
+  pagination,
   refresh,
 }: {
   api: AuthedRequest
   data: RouteData
+  pagination?: GradebookPaginationState
   refresh: () => Promise<void>
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -74,7 +91,7 @@ export function AdminGradebookPage({
   const focusedStudent = focusedStudentId
     ? roster.find((enrollment) => enrollment.student === Number(focusedStudentId)) ?? null
     : null
-  const [studentQuery, setStudentQuery] = useState('')
+  const [studentQuery, setStudentQuery] = useState(() => searchParams.get('q') ?? '')
   const [rosterFilter, setRosterFilter] = useState<RosterFilter>(() => {
     const requested = searchParams.get('filter')?.toUpperCase()
     return ['ALL', 'PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN'].includes(requested ?? '')
@@ -97,6 +114,8 @@ export function AdminGradebookPage({
     sourceType: 'MANUAL' as GradeItemSourceType,
     title: '',
   })
+  const [sourceQuery, setSourceQuery] = useState('')
+  const debouncedSourceQuery = useDebouncedValue(sourceQuery, 300)
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({})
   const [paperScoreTarget, setPaperScoreTarget] = useState<PaperScoreTarget | null>(null)
   const [paperScoreMode, setPaperScoreMode] = useState(false)
@@ -112,16 +131,29 @@ export function AdminGradebookPage({
       setUrlValue(next, 'item', selectedItem?.id)
       setUrlValue(next, 'student', focusedStudent?.student)
       setUrlValue(next, 'filter', rosterFilter === 'ALL' ? null : rosterFilter)
+      setUrlValue(next, 'q', studentQuery.trim() || null)
       return next
     }, { replace: true })
-  }, [focusedStudent?.student, period, rosterFilter, selectedCategory?.id, selectedItem?.id, selectedSchedule?.id, setSearchParams])
+  }, [focusedStudent?.student, period, rosterFilter, selectedCategory?.id, selectedItem?.id, selectedSchedule?.id, setSearchParams, studentQuery])
 
-  const sourceOptions = getSourceOptions(
-    data,
-    selectedSchedule?.subject ?? null,
-    selectedSchedule?.id ?? null,
-    itemDraft.sourceType,
-  )
+  const sourceOptionQuery = useQuery({
+    enabled: Boolean(selectedSchedule && itemDraft.sourceType !== 'MANUAL'),
+    queryKey: ['grade-source-options', selectedSchedule?.id, itemDraft.sourceType, debouncedSourceQuery],
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        schedule: String(selectedSchedule?.id ?? ''),
+        type: itemDraft.sourceType,
+        limit: '20',
+      })
+      if (debouncedSourceQuery.trim()) params.set('search', debouncedSourceQuery.trim())
+      return api<ApiPage<{ value: number; label: string; points: string | number }>>(`/grades/source-options/?${params.toString()}`, { signal })
+    },
+    staleTime: 60_000,
+  })
+  const sourceOptions = (sourceOptionQuery.data?.results ?? []).map((option) => ({
+    ...option,
+    value: String(option.value),
+  }))
   const visibleRoster = filterScoreRoster({
     data,
     filter: rosterFilter,
@@ -130,7 +162,7 @@ export function AdminGradebookPage({
     roster,
     studentId: focusedStudent?.student ?? null,
   })
-  const statusCounts = getRosterStatusCounts(data, selectedItem, roster)
+  const statusCounts = pagination?.statusCounts ?? getRosterStatusCounts(data, selectedItem, roster)
   const selectedActivity = data.activities.find(
     (activity) => activity.id === selectedItem?.module_activity,
   ) ?? null
@@ -140,13 +172,27 @@ export function AdminGradebookPage({
   const hasPaperScoreDrafts = selectedItem
     ? Object.keys(paperScoreDrafts).some((key) => key.startsWith(`paper:${selectedItem.id}:`))
     : false
+  const scoreDraftCount = Object.keys(scoreDraft).length
+  const hasUnsavedScores = scoreDraftCount > 0 || hasPaperScoreDrafts
 
   useEffect(() => {
-    if (!hasPaperScoreDrafts) return
+    if (!hasUnsavedScores) return
     const warnAboutUnsavedScores = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', warnAboutUnsavedScores)
     return () => window.removeEventListener('beforeunload', warnAboutUnsavedScores)
-  }, [hasPaperScoreDrafts])
+  }, [hasUnsavedScores])
+
+  function changeScoreContext(change: () => void) {
+    if (hasUnsavedScores && !window.confirm('Discard unsaved score changes and continue?')) return
+    setScoreDraft({})
+    if (selectedItem) {
+      setPaperScoreDrafts((current) => Object.fromEntries(
+        Object.entries(current).filter(([key]) => !key.startsWith(`paper:${selectedItem.id}:`)),
+      ))
+    }
+    setPaperScoreMode(false)
+    change()
+  }
 
   function togglePaperScoreMode() {
     if (!paperScoreMode) {
@@ -217,7 +263,7 @@ export function AdminGradebookPage({
       return
     }
 
-    await saveScoreCells([selectedItem], visibleRoster)
+    await saveScoreCells([selectedItem], roster)
   }
 
   async function savePaperScoreBatch() {
@@ -322,7 +368,7 @@ export function AdminGradebookPage({
   }
 
   async function saveMatrixScores() {
-    await saveScoreCells(items, visibleRoster)
+    await saveScoreCells(items, roster)
   }
 
   async function saveScoreCells(
@@ -333,17 +379,32 @@ export function AdminGradebookPage({
       return
     }
 
+    const itemIds = new Set(scoreItems.map((item) => item.id))
+    const studentIds = new Set(rows.map((row) => row.student))
+    const dirtyKeys = Object.keys(scoreDraft).filter((key) => {
+      const [item, student] = key.split(':').map(Number)
+      return itemIds.has(item) && studentIds.has(student)
+    })
+    if (!dirtyKeys.length) {
+      setMessage('No score changes to save.')
+      return
+    }
+
     setSaving(true)
     setMessage('')
 
     try {
-      await Promise.all(
-        rows.flatMap((enrollment) =>
-          scoreItems.map((item) => saveScoreCell(item, enrollment)),
-        ),
-      )
+      await Promise.all(dirtyKeys.map((key) => {
+        const [dirtyItemId, dirtyStudentId] = key.split(':').map(Number)
+        const item = scoreItems.find((candidate) => candidate.id === dirtyItemId)
+        const enrollment = rows.find((candidate) => candidate.student === dirtyStudentId)
+        return item && enrollment ? saveScoreCell(item, enrollment) : Promise.resolve()
+      }))
 
-      setMessage('Scores saved.')
+      setScoreDraft((current) => Object.fromEntries(
+        Object.entries(current).filter(([key]) => !dirtyKeys.includes(key)),
+      ))
+      setMessage(`${dirtyKeys.length} score change${dirtyKeys.length === 1 ? '' : 's'} saved.`)
       await refresh()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -470,8 +531,10 @@ export function AdminGradebookPage({
             <span>Class</span>
             <select
               onChange={(event) => {
-                setFocusedStudentId('')
-                setScheduleId(event.target.value)
+                changeScoreContext(() => {
+                  setFocusedStudentId('')
+                  setScheduleId(event.target.value)
+                })
               }}
               value={selectedSchedule?.id ?? ''}
             >
@@ -484,7 +547,7 @@ export function AdminGradebookPage({
           </label>
           <label className="admin-field">
             <span>Period</span>
-            <select onChange={(event) => setPeriod(event.target.value as typeof period)} value={period}>
+            <select onChange={(event) => changeScoreContext(() => setPeriod(event.target.value as typeof period))} value={period}>
               {periods.map((item) => (
                 <option key={item} value={item}>{periodLabel(item)}</option>
               ))}
@@ -492,7 +555,7 @@ export function AdminGradebookPage({
           </label>
           <label className="admin-field">
             <span>Category</span>
-            <select onChange={(event) => setCategoryId(event.target.value)} value={selectedCategory?.id ?? ''}>
+            <select onChange={(event) => changeScoreContext(() => setCategoryId(event.target.value))} value={selectedCategory?.id ?? ''}>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name} ({numeric(category.weight).toFixed(2)}%)
@@ -503,7 +566,7 @@ export function AdminGradebookPage({
           <label className="admin-field">
             <span>Student</span>
             <select
-              onChange={(event) => setFocusedStudentId(event.target.value)}
+              onChange={(event) => changeScoreContext(() => setFocusedStudentId(event.target.value))}
               value={focusedStudent?.student ?? ''}
             >
               <option value="">Full roster</option>
@@ -524,7 +587,7 @@ export function AdminGradebookPage({
             </div>
             <button
               className="button button--secondary button--compact"
-              onClick={() => setFocusedStudentId('')}
+              onClick={() => changeScoreContext(() => setFocusedStudentId(''))}
               type="button"
             >
               <Icon name="users" />
@@ -581,21 +644,28 @@ export function AdminGradebookPage({
                     />
                   </label>
                 ) : (
-                  <label className="admin-field">
-                    <span>Source item</span>
-                    <select
-                      onChange={(event) => setItemDraft((current) => ({ ...current, sourceId: event.target.value }))}
-                      required
-                      value={itemDraft.sourceId}
-                    >
-                      <option value="">Select</option>
-                      {sourceOptions.map((source) => (
-                        <option key={source.value} value={source.value}>
-                          {source.label} ({numeric(source.points).toFixed(2)} pts)
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <label className="admin-field">
+                      <span>Find source</span>
+                      <input onChange={(event) => setSourceQuery(event.target.value)} placeholder="Search available sources" type="search" value={sourceQuery} />
+                    </label>
+                    <label className="admin-field">
+                      <span>Source item</span>
+                      <select
+                        disabled={sourceOptionQuery.isPending}
+                        onChange={(event) => setItemDraft((current) => ({ ...current, sourceId: event.target.value }))}
+                        required
+                        value={itemDraft.sourceId}
+                      >
+                        <option value="">{sourceOptionQuery.isPending ? 'Loading sources…' : 'Select'}</option>
+                        {sourceOptions.map((source) => (
+                          <option key={source.value} value={source.value}>
+                            {source.label} ({numeric(source.points).toFixed(2)} pts)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
                 )}
                 <label className="admin-field">
                   <span>Points</span>
@@ -629,7 +699,7 @@ export function AdminGradebookPage({
                   >
                     <button
                       className="gradebook-item__select"
-                      onClick={() => setItemId(String(item.id))}
+                      onClick={() => changeScoreContext(() => setItemId(String(item.id)))}
                       type="button"
                     >
                       <span>
@@ -747,16 +817,23 @@ export function AdminGradebookPage({
                   onClick={() => setViewMode('ITEM')}
                   type="button"
                 >
-                  Item
+                  Single item
                 </button>
                 <button
                   className={viewMode === 'MATRIX' ? 'active' : ''}
                   onClick={() => setViewMode('MATRIX')}
                   type="button"
                 >
-                  Matrix
+                  Category grid
                 </button>
               </div>
+
+              {scoreDraftCount ? (
+                <div className="gradebook-unsaved-banner" role="status">
+                  <Icon name="warning" />
+                  <span><strong>{scoreDraftCount} unsaved score edit{scoreDraftCount === 1 ? '' : 's'}</strong>Save before switching class, period, category, or item.</span>
+                </div>
+              ) : null}
 
               {viewMode === 'ITEM' && selectedItem ? (
                 <>
@@ -1010,11 +1087,12 @@ export function AdminGradebookPage({
                         ) : null}
                       </tbody>
                     </table>
+                    {pagination ? <ProgressiveRosterFooter pagination={pagination} /> : null}
                   </div>
                   {paperScoreMode ? (
                     <button
                       className="button button--primary gradebook-save-button"
-                      disabled={saving || !visibleRoster.length}
+                      disabled={saving || !hasPaperScoreDrafts}
                       onClick={() => void savePaperScoreBatch()}
                       type="button"
                     >
@@ -1029,7 +1107,7 @@ export function AdminGradebookPage({
                       type="button"
                     >
                       <Icon name="save" />
-                      <span>{saving ? 'Saving...' : 'Save scores'}</span>
+                      <span>{saving ? 'Saving...' : `Save ${scoreDraftCount || ''} score change${scoreDraftCount === 1 ? '' : 's'}`}</span>
                     </button>
                   ) : null}
                 </>
@@ -1040,6 +1118,7 @@ export function AdminGradebookPage({
               {viewMode === 'MATRIX' ? (
                 <MatrixScorePanel
                   data={data}
+                  dirtyCount={scoreDraftCount}
                   filter={rosterFilter}
                   items={items}
                   roster={roster}
@@ -1052,6 +1131,7 @@ export function AdminGradebookPage({
                   setStudentQuery={setStudentQuery}
                   studentQuery={studentQuery}
                   visibleRoster={visibleRoster}
+                  pagination={pagination}
                   onSave={() => void saveMatrixScores()}
                 />
               ) : null}
@@ -1278,9 +1358,11 @@ function PaperActivityScoreDialog({
 
 function MatrixScorePanel({
   data,
+  dirtyCount,
   filter,
   items,
   onSave,
+  pagination,
   roster,
   saving,
   scoreDraft,
@@ -1293,9 +1375,11 @@ function MatrixScorePanel({
   visibleRoster,
 }: {
   data: RouteData
+  dirtyCount: number
   filter: RosterFilter
   items: GradeItem[]
   onSave: () => void
+  pagination?: GradebookPaginationState
   roster: {
     id: number
     student: number
@@ -1434,17 +1518,48 @@ function MatrixScorePanel({
             ) : null}
           </tbody>
         </table>
+        {pagination ? <ProgressiveRosterFooter pagination={pagination} /> : null}
       </div>
       <button
         className="button button--primary gradebook-save-button"
-        disabled={saving || !items.length || !visibleRoster.length}
+        disabled={saving || !items.length || !dirtyCount}
         onClick={onSave}
         type="button"
       >
         <Icon name="save" />
-        <span>{saving ? 'Saving...' : 'Save matrix scores'}</span>
+        <span>{saving ? 'Saving...' : `Save ${dirtyCount || ''} score change${dirtyCount === 1 ? '' : 's'}`}</span>
       </button>
     </>
+  )
+}
+
+function ProgressiveRosterFooter({ pagination }: { pagination: GradebookPaginationState }) {
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const target = sentinelRef.current
+    if (!target || !pagination.hasNextPage || pagination.isFetchNextPageError) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && !pagination.isFetchingNextPage) {
+        void pagination.loadMore()
+      }
+    }, { rootMargin: '0px 0px 180px' })
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [pagination])
+  return (
+    <div className="gradebook-progressive-footer" ref={sentinelRef}>
+      <span aria-live="polite">
+        Showing {pagination.loaded} of {pagination.count}
+        {pagination.count !== pagination.totalCount ? ` matching (${pagination.totalCount} total)` : ''}
+      </span>
+      {pagination.isRefreshing ? <span className="progressive-resource__refreshing">Updating…</span> : null}
+      {pagination.hasNextPage && !pagination.isFetchNextPageError ? (
+        <button className="button button--secondary button--compact" disabled={pagination.isFetchingNextPage} onClick={() => void pagination.loadMore()} type="button">
+          {pagination.isFetchingNextPage ? 'Loading more…' : 'Load more'}
+        </button>
+      ) : null}
+      {pagination.isFetchNextPageError ? <button className="button button--secondary button--compact" onClick={() => void pagination.loadMore()} type="button">Retry loading more</button> : null}
+    </div>
   )
 }
 
@@ -1626,47 +1741,17 @@ function formatNumber(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function getSourceOptions(
-  data: RouteData,
-  subjectId: number | null,
-  scheduleId: number | null,
-  sourceType: GradeItemSourceType,
-) {
-  if (!subjectId) {
-    return []
-  }
-
-  if (sourceType === 'MODULE_ACTIVITY') {
-    const moduleIds = new Set(
-      data.modules
-        .filter((module) => module.subject === subjectId || module.subjects.includes(subjectId))
-        .map((module) => module.id),
-    )
-
-    return data.activities
-      .filter((activity) => moduleIds.has(activity.module))
-      .map((activity) => ({
-        label: activity.title,
-        points: activity.points_possible,
-        value: String(activity.id),
-      }))
-  }
-
-  if (sourceType === 'ATTENDANCE') {
-    return data.attendanceSessions
-      .filter((session) => session.subject === subjectId && session.schedule === scheduleId)
-      .map((session) => ({
-        label: session.title || formatDate(session.date),
-        points: session.points_possible,
-        value: String(session.id),
-      }))
-  }
-
-  return []
-}
-
 function sourceTypeLabel(sourceType: GradeItemSourceType) {
   return sourceTypes.find((source) => source.value === sourceType)?.label ?? sourceType
+}
+
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay)
+    return () => window.clearTimeout(timeout)
+  }, [delay, value])
+  return debounced
 }
 
 function periodLabel(period: (typeof periods)[number]) {

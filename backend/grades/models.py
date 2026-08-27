@@ -273,6 +273,9 @@ class StudentCategoryGrade(models.Model):
             ),
         ]
         ordering = ['subject__code', 'grade_category__grading_period', 'student__username']
+        indexes = [
+            models.Index(fields=['schedule', 'completion_status'], name='catgrade_sched_status_idx'),
+        ]
 
     def calculate_transmuted_grade(self):
         if self.completion_status != GradeCompletionStatus.COMPLETE:
@@ -518,6 +521,12 @@ class PeriodGrade(models.Model):
             ),
         ]
         ordering = ['subject__code', 'grading_period', 'student__username']
+        indexes = [
+            models.Index(
+                fields=['schedule', 'grading_period', 'completion_status'],
+                name='period_sched_state_idx',
+            ),
+        ]
 
     def calculate_raw_score(self):
         result = self.student.category_grades.filter(
@@ -574,6 +583,9 @@ class FinalGrade(models.Model):
             ),
         ]
         ordering = ['subject__code', 'student__username']
+        indexes = [
+            models.Index(fields=['schedule', 'completion_status'], name='final_sched_status_idx'),
+        ]
 
     def calculate_final_grade(self):
         grades = [

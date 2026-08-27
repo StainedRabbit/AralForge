@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -10,11 +10,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from accounts.models import User
+from accounts.serializers import UserSerializer
+from attendance.models import AttendanceSession
 from gamification.models import LevelRule, PointLedger
 from gamification.serializers import LevelRuleSerializer, PointLedgerSerializer
-from learning_modules.models import ModuleActivity
-from subjects.models import ScheduleStudent, Subject, SubjectSchedule
-from subjects.serializers import ScheduleStudentSerializer, SubjectScheduleSerializer
+from learning_modules.models import Module, ModuleActivity, ModuleActivityAttempt
+from learning_modules.serializers import (
+    ModuleActivityAttemptSerializer,
+    ModuleActivitySerializer,
+)
+from subjects.models import SchoolYearSemester, ScheduleStudent, Subject, SubjectSchedule
+from subjects.serializers import (
+    ScheduleStudentSerializer,
+    SchoolYearSemesterSerializer,
+    SubjectScheduleSerializer,
+)
 
 from .models import (
     FinalGrade,
@@ -72,6 +83,127 @@ class StudentGradeOverviewView(APIView):
         })
 
 
+class TeacherGradesOverviewView(APIView):
+    permission_classes = [IsAdminTeacher]
+
+    def get(self, request):
+        limit = bounded_query_int(request.query_params.get('limit'), 12, 50)
+        offset = bounded_query_int(request.query_params.get('offset'), 0)
+        term = request.query_params.get('term', '').strip()
+        search = request.query_params.get('search', '').strip()
+
+        schedules = SubjectSchedule.objects.select_related(
+            'subject', 'school_year_semester__school_year',
+        ).filter(is_active=True)
+        if term.isdigit():
+            schedules = schedules.filter(school_year_semester_id=int(term))
+        if search:
+            schedules = schedules.filter(
+                Q(subject__code__icontains=search)
+                | Q(subject__name__icontains=search)
+                | Q(section__icontains=search)
+                | Q(room__icontains=search)
+            )
+        schedules = schedules.order_by(
+            '-school_year_semester__school_year__start_year',
+            'school_year_semester__semester',
+            'subject__code',
+            'section',
+            'id',
+        )
+        count = schedules.count()
+        page = list(schedules[offset:offset + limit])
+        schedule_ids = [schedule.id for schedule in page]
+        subject_ids = {schedule.subject_id for schedule in page}
+
+        enrollment_counts = grouped_counts(
+            ScheduleStudent.objects.filter(schedule_id__in=schedule_ids, is_active=True),
+            'schedule_id',
+        )
+        item_counts = grouped_counts(
+            GradeItem.objects.filter(schedule_id__in=schedule_ids),
+            'schedule_id',
+        )
+        pending_counts = {
+            row['schedule_id']: row['total'] or 0
+            for row in StudentCategoryGrade.objects.filter(schedule_id__in=schedule_ids)
+            .values('schedule_id')
+            .annotate(total=Sum('pending_item_count'))
+        }
+        completed_period_counts = grouped_counts(
+            PeriodGrade.objects.filter(
+                schedule_id__in=schedule_ids,
+                completion_status='COMPLETE',
+            ),
+            'schedule_id',
+        )
+        category_rows = list(
+            GradeCategory.objects.filter(subject_id__in=subject_ids)
+            .values('subject_id', 'grading_period', 'weight')
+        )
+
+        results = []
+        periods = ('PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL')
+        for schedule in page:
+            subject_categories = [
+                row for row in category_rows if row['subject_id'] == schedule.subject_id
+            ]
+            configured_periods = sum(
+                any(row['grading_period'] == period for row in subject_categories)
+                for period in periods
+            )
+            weights_ready = all(
+                abs(sum(
+                    (row['weight'] for row in subject_categories if row['grading_period'] == period),
+                    Decimal('0'),
+                ) - Decimal('100')) < Decimal('0.01')
+                and any(row['grading_period'] == period for row in subject_categories)
+                for period in periods
+            )
+            student_count = enrollment_counts.get(schedule.id, 0)
+            expected_periods = student_count * len(periods)
+            completed_periods = completed_period_counts.get(schedule.id, 0)
+            results.append({
+                'schedule': SubjectScheduleSerializer(schedule).data,
+                'active_student_count': student_count,
+                'grade_item_count': item_counts.get(schedule.id, 0),
+                'pending_item_count': pending_counts.get(schedule.id, 0),
+                'configured_period_count': configured_periods,
+                'weights_ready': weights_ready,
+                'completed_period_count': completed_periods,
+                'expected_period_count': expected_periods,
+                'completion_percent': round(
+                    min(100, (completed_periods / expected_periods) * 100)
+                ) if expected_periods else 0,
+            })
+
+        active_schedules = SubjectSchedule.objects.filter(is_active=True)
+        summary = {
+            'active_classes': active_schedules.count(),
+            'active_enrollments': ScheduleStudent.objects.filter(
+                schedule__is_active=True, is_active=True,
+            ).count(),
+            'grade_items': GradeItem.objects.filter(schedule__is_active=True).count(),
+            'pending_records': (
+                StudentCategoryGrade.objects.filter(completion_status='PENDING').count()
+                + PeriodGrade.objects.filter(completion_status='PENDING').count()
+                + FinalGrade.objects.filter(completion_status='PENDING').count()
+            ),
+            'completed_finals': FinalGrade.objects.filter(completion_status='COMPLETE').count(),
+        }
+        terms = SchoolYearSemester.objects.select_related('school_year').order_by(
+            '-school_year__start_year', 'semester', 'id',
+        )
+        return Response({
+            'summary': summary,
+            'terms': SchoolYearSemesterSerializer(terms, many=True).data,
+            'count': count,
+            'next': offset + limit if offset + limit < count else None,
+            'previous': max(0, offset - limit) if offset > 0 else None,
+            'results': results,
+        })
+
+
 class TeacherGradebookView(APIView):
     permission_classes = [IsAdminTeacher]
 
@@ -79,34 +211,219 @@ class TeacherGradebookView(APIView):
         schedule_id = request.query_params.get('schedule')
         if not schedule_id or not schedule_id.isdigit():
             return Response({'detail': 'A valid schedule is required.'}, status=400)
-        schedule = get_object_or_404(SubjectSchedule.objects.select_related('subject'), pk=schedule_id)
-        period = request.query_params.get('period', '').strip()
+        schedule = get_object_or_404(
+            SubjectSchedule.objects.select_related('subject', 'school_year_semester__school_year'),
+            pk=schedule_id,
+        )
+        period = request.query_params.get('period', 'PRELIM').strip().upper()
         categories = GradeCategory.objects.filter(subject=schedule.subject)
         if period:
             categories = categories.filter(grading_period=period)
-        items = GradeItem.objects.filter(schedule=schedule, grade_category__in=categories).select_related('grade_category')
-        scores = StudentGradeItemScore.objects.filter(grade_item__in=items).select_related('grade_item', 'student')
-        enrollments = ScheduleStudent.objects.filter(schedule=schedule, is_active=True).select_related('student__student_profile')
+        categories = categories.order_by('category', 'name', 'id')
+        requested_category = request.query_params.get('category', '').strip()
+        selected_category = next(
+            (category for category in categories if requested_category.isdigit() and category.id == int(requested_category)),
+            categories.first(),
+        )
+        items = list(
+            GradeItem.objects.filter(schedule=schedule, grade_category=selected_category)
+            .select_related('grade_category')
+            .order_by('grade_category_id', 'order', 'id')
+        ) if selected_category else []
+        requested_item = request.query_params.get('item', '').strip()
+        selected_item = next(
+            (item for item in items if requested_item.isdigit() and item.id == int(requested_item)),
+            items[0] if items else None,
+        )
+        limit = bounded_query_int(request.query_params.get('limit'), 50, 100)
+        offset = bounded_query_int(request.query_params.get('offset'), 0)
+        search = request.query_params.get('search', '').strip()
+        roster_filter = request.query_params.get('filter', 'ALL').strip().upper()
+        enrollment_queryset = ScheduleStudent.objects.filter(schedule=schedule, is_active=True)
+        total_count = enrollment_queryset.count()
+        requested_student = request.query_params.get('student', '').strip()
+        if requested_student.isdigit():
+            enrollment_queryset = enrollment_queryset.filter(student_id=int(requested_student))
+        if search:
+            enrollment_queryset = enrollment_queryset.filter(
+                Q(student__first_name__icontains=search)
+                | Q(student__last_name__icontains=search)
+                | Q(student__username__icontains=search)
+                | Q(student__student_profile__student_number__icontains=search)
+            )
+        enrollments = list(
+            enrollment_queryset
+            .select_related('student__student_profile')
+            .order_by('student__last_name', 'student__first_name', 'student__username', 'id')
+        )
+        selected_scores = {}
+        selected_attempts = {}
+        if selected_item:
+            selected_scores = {
+                score.student_id: score
+                for score in StudentGradeItemScore.objects.filter(grade_item=selected_item)
+            }
+            if selected_item.module_activity_id:
+                selected_attempts = {
+                    (attempt.student_id, attempt.submission_method): attempt
+                    for attempt in ModuleActivityAttempt.objects.filter(
+                        activity_id=selected_item.module_activity_id,
+                        student_id__in=[row.student_id for row in enrollments],
+                        is_submitted=True,
+                    ).order_by('id')
+                }
+
+        status_by_student = {
+            row.student_id: gradebook_roster_status(
+                selected_item,
+                selected_scores.get(row.student_id),
+                selected_attempts.get((row.student_id, 'PAPER')),
+                selected_attempts.get((row.student_id, 'ONLINE')),
+            )
+            for row in enrollments
+        }
+        status_counts = {
+            key: sum(status == key for status in status_by_student.values())
+            for key in ('PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN')
+        }
+        filtered = enrollments
+        if roster_filter != 'ALL':
+            filtered = [
+                row for row in filtered if status_by_student.get(row.student_id) == roster_filter
+            ]
+        count = len(filtered)
+        page_enrollments = filtered[offset:offset + limit]
+        page_student_ids = [row.student_id for row in page_enrollments]
+        item_ids = [item.id for item in items]
+        scores = StudentGradeItemScore.objects.filter(
+            grade_item_id__in=item_ids,
+            student_id__in=page_student_ids,
+        ).select_related('grade_item', 'student')
+        category_grades = StudentCategoryGrade.objects.filter(
+            schedule=schedule,
+            grade_category__in=categories,
+            student_id__in=page_student_ids,
+        ).select_related('schedule', 'subject', 'student', 'grade_category')
+        activity_ids = {item.module_activity_id for item in items if item.module_activity_id}
+        attempts = ModuleActivityAttempt.objects.filter(
+            activity_id__in=activity_ids,
+            student_id__in=page_student_ids,
+        ).select_related('student')
+        activities = ModuleActivity.objects.filter(id__in=activity_ids).select_related('module', 'lesson')
+        recorded_by_ids = attempts.exclude(recorded_by_id=None).values_list('recorded_by_id', flat=True)
+        users = User.objects.filter(id__in=recorded_by_ids)
         context = {'request': request}
         return Response({
             'schedule': SubjectScheduleSerializer(schedule, context=context).data,
-            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+            'enrollments': ScheduleStudentSerializer(page_enrollments, many=True, context=context).data,
             'categories': GradeCategorySerializer(categories, many=True, context=context).data,
             'items': GradeItemSerializer(items, many=True, context=context).data,
             'scores': StudentGradeItemScoreSerializer(scores, many=True, context=context).data,
+            'category_grades': StudentCategoryGradeSerializer(category_grades, many=True, context=context).data,
+            'modules': [],
+            'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
+            'activity_attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'attendance_sessions': [],
+            'users': UserSerializer(users, many=True, context=context).data,
+            'status_counts': status_counts,
+            'count': count,
+            'total_count': total_count,
+            'next': offset + limit if offset + limit < count else None,
+            'previous': max(0, offset - limit) if offset > 0 else None,
         })
+
+
+class TeacherGradeSourceOptionsView(APIView):
+    permission_classes = [IsAdminTeacher]
+
+    def get(self, request):
+        schedule = get_object_or_404(
+            SubjectSchedule.objects.select_related('subject'),
+            pk=request.query_params.get('schedule'),
+        )
+        source_type = request.query_params.get('type', 'MODULE_ACTIVITY').strip().upper()
+        search = request.query_params.get('search', '').strip()
+        limit = bounded_query_int(request.query_params.get('limit'), 20, 50)
+        offset = bounded_query_int(request.query_params.get('offset'), 0)
+        if source_type == 'MODULE_ACTIVITY':
+            modules = Module.objects.filter(
+                Q(subject=schedule.subject) | Q(subjects=schedule.subject),
+            ).distinct()
+            queryset = ModuleActivity.objects.filter(module__in=modules).order_by('title', 'id')
+            if search:
+                queryset = queryset.filter(title__icontains=search)
+            count = queryset.count()
+            rows = queryset[offset:offset + limit]
+            results = [
+                {'value': row.id, 'label': row.title, 'points': row.points_possible}
+                for row in rows
+            ]
+        elif source_type == 'ATTENDANCE':
+            queryset = AttendanceSession.objects.filter(schedule=schedule).order_by('-date', '-id')
+            if search:
+                queryset = queryset.filter(title__icontains=search)
+            count = queryset.count()
+            rows = queryset[offset:offset + limit]
+            results = [
+                {
+                    'value': row.id,
+                    'label': row.title or str(row.date),
+                    'points': row.points_possible,
+                }
+                for row in rows
+            ]
+        else:
+            return Response({'detail': 'Type must be MODULE_ACTIVITY or ATTENDANCE.'}, status=400)
+        return Response({
+            'count': count,
+            'next': offset + limit if offset + limit < count else None,
+            'previous': max(0, offset - limit) if offset > 0 else None,
+            'results': results,
+        })
+
+
+def bounded_query_int(value, default, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    parsed = max(0, parsed)
+    return min(parsed, maximum) if maximum is not None else parsed
+
+
+def grouped_counts(queryset, field):
+    return {
+        row[field]: row['total']
+        for row in queryset.values(field).annotate(total=Count('id'))
+    }
+
+
+def gradebook_roster_status(item, score, paper_attempt, online_attempt):
+    if not item:
+        return 'PENDING'
+    if score and score.status == StudentGradeItemScore.Status.EXCUSED:
+        return 'EXCUSED'
+    if score and score.origin == StudentGradeItemScore.Origin.OVERRIDE:
+        return 'OVERRIDDEN'
+    if paper_attempt:
+        return 'PAPER'
+    if online_attempt or score:
+        return 'ONLINE'
+    return 'PENDING'
 
 
 class SubjectGradingPolicyViewSet(viewsets.ModelViewSet):
     queryset = SubjectGradingPolicy.objects.select_related('subject', 'source_template')
     serializer_class = SubjectGradingPolicySerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('subject__code', 'subject__name', 'source_template__name')
 
 
 class GradingTemplateViewSet(viewsets.ModelViewSet):
     queryset = GradingTemplate.objects.prefetch_related('items')
     serializer_class = GradingTemplateSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('name', 'description')
 
     @action(detail=True, methods=['post'], url_path='apply-to-subject')
     def apply_to_subject(self, request, pk=None):
@@ -121,12 +438,14 @@ class GradingTemplateItemViewSet(viewsets.ModelViewSet):
     queryset = GradingTemplateItem.objects.select_related('template')
     serializer_class = GradingTemplateItemSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('name', 'category', 'grading_period', 'template__name')
 
 
 class GradeCategoryViewSet(viewsets.ModelViewSet):
     queryset = GradeCategory.objects.select_related('subject', 'template_item')
     serializer_class = GradeCategorySerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    search_fields = ('name', 'category', 'grading_period', 'subject__code', 'subject__name')
 
 
 class StudentCategoryGradeViewSet(viewsets.ModelViewSet):

@@ -527,7 +527,9 @@ export type GradingTemplate = {
 export type SubjectGradingPolicy = {
   id: number
   subject: number
+  subject_label?: string
   source_template: number | null
+  source_template_label?: string
   transmutation_base: string
   transmutation_scale: string
   prelim_weight: string
@@ -540,6 +542,7 @@ export type SubjectGradingPolicy = {
 export type GradingTemplateItem = {
   id: number
   template: number
+  template_label?: string
   grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
   category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
@@ -549,7 +552,9 @@ export type GradingTemplateItem = {
 export type GradeCategory = {
   id: number
   subject: number
+  subject_label?: string
   template_item: number | null
+  template_item_label?: string
   grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
   category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
@@ -696,4 +701,50 @@ export type LevelRule = {
   level: number
   name: string
   points_required: number
+}
+
+export type TeacherGradeSummary = {
+  active_classes: number
+  active_enrollments: number
+  grade_items: number
+  pending_records: number
+  completed_finals: number
+}
+
+export type TeacherClassGradeSummary = {
+  schedule: SubjectSchedule
+  active_student_count: number
+  grade_item_count: number
+  pending_item_count: number
+  configured_period_count: number
+  weights_ready: boolean
+  completed_period_count: number
+  expected_period_count: number
+  completion_percent: number
+}
+
+export type TeacherGradesOverviewPage = Omit<ApiPage<TeacherClassGradeSummary>, 'next' | 'previous'> & {
+  next: number | string | null
+  previous: number | string | null
+  summary: TeacherGradeSummary
+  terms: SchoolYearSemester[]
+}
+
+export type TeacherGradebookPage = {
+  schedule: SubjectSchedule
+  enrollments: ScheduleStudent[]
+  categories: GradeCategory[]
+  items: GradeItem[]
+  scores: StudentGradeItemScore[]
+  category_grades: StudentCategoryGrade[]
+  modules: Module[]
+  activities: ModuleActivity[]
+  activity_attempts: ModuleActivityAttempt[]
+  attendance_sessions: AttendanceSession[]
+  users: User[]
+  status_counts: Record<'PENDING' | 'ONLINE' | 'PAPER' | 'EXCUSED' | 'OVERRIDDEN', number>
+  count: number
+  total_count: number
+  next: number | string | null
+  previous: number | string | null
 }

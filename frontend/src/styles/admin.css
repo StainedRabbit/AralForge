@@ -1338,6 +1338,514 @@ a.teacher-recent-item:focus-visible {
   font-weight: 850;
 }
 
+.grade-hub-tabs {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary-soft));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 6px;
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+}
+
+.grade-hub-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 12px;
+}
+
+.grade-hub-tabs button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.grade-hub-tabs button.active {
+  background: var(--primary);
+  box-shadow: 0 7px 18px rgba(var(--primary-rgb), 0.2);
+  color: white;
+}
+
+.grade-hub-tabs svg {
+  height: 18px;
+  width: 18px;
+}
+
+.grade-dataset-tabs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.grade-dataset-tabs button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  min-height: 36px;
+  padding: 6px 13px;
+}
+
+.grade-dataset-tabs button:hover,
+.grade-dataset-tabs button.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.grade-overview-pagination,
+.progressive-resource__footer {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary-soft));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 8px 10px;
+  position: sticky;
+  z-index: 3;
+}
+
+.grade-overview-pagination span,
+.progressive-resource__footer span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progressive-feedback {
+  align-items: center;
+  background: var(--warning-soft, #fff3d8);
+  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 30%, var(--border));
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.progressive-resource {
+  display: grid;
+  gap: 16px;
+}
+
+.progressive-resource__search {
+  width: min(520px, 100%);
+}
+
+.progressive-resource__table {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-height: min(62vh, 620px);
+  overflow: auto;
+}
+
+.progressive-resource__table .admin-table {
+  border: 0;
+  min-width: 760px;
+}
+
+.progressive-resource__table .admin-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.progressive-resource__table .admin-table thead th {
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.gradebook-panel .table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-height: min(62vh, 620px);
+  overflow: auto;
+}
+
+.gradebook-panel .table-wrap .admin-table {
+  border: 0;
+}
+
+.gradebook-panel .table-wrap .admin-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.gradebook-panel .table-wrap .admin-table thead th {
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.gradebook-progressive-footer {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary-soft));
+  border-top: 1px solid var(--border);
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 8px 10px;
+  position: sticky;
+  z-index: 4;
+}
+
+.gradebook-progressive-footer > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progressive-resource__skeleton span {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  background: var(--surface-muted);
+  border-radius: 6px;
+  display: block;
+  height: 14px;
+  width: min(100%, 130px);
+}
+
+.resource-drawer {
+  inset: 0;
+  position: fixed;
+  z-index: 80;
+}
+
+.resource-drawer__backdrop {
+  background: rgba(15, 23, 42, 0.48);
+  border: 0;
+  cursor: default;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.resource-drawer__panel {
+  background: var(--surface);
+  box-shadow: -18px 0 50px rgba(15, 23, 42, 0.22);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  margin-left: auto;
+  max-width: 100%;
+  position: relative;
+  width: min(480px, 92vw);
+  z-index: 1;
+}
+
+.resource-drawer__header,
+.resource-drawer__actions {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.resource-drawer__header span,
+.resource-drawer__header strong {
+  display: block;
+}
+
+.resource-drawer__header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.resource-drawer__header strong {
+  font-size: 18px;
+}
+
+.resource-drawer__body {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.resource-drawer__actions {
+  border-bottom: 0;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.remote-select {
+  display: grid;
+  gap: 10px;
+}
+
+.grade-hub-stats {
+  margin: 0;
+}
+
+.grade-class-overview {
+  display: grid;
+  gap: 20px;
+}
+
+.grade-class-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 0.32fr);
+}
+
+.grade-class-term-filter {
+  margin: 0;
+}
+
+.grade-class-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+}
+
+.grade-class-card {
+  background:
+    radial-gradient(circle at 100% 0, rgba(var(--primary-rgb), 0.09), transparent 38%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding: 18px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.grade-class-card:hover {
+  border-color: rgba(var(--primary-rgb), 0.32);
+  box-shadow: 0 14px 34px rgba(31, 41, 55, 0.08);
+  transform: translateY(-2px);
+}
+
+.grade-class-card__header {
+  align-items: center;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.grade-class-card__header > div,
+.grade-class-card__header strong,
+.grade-class-card__header span {
+  min-width: 0;
+}
+
+.grade-class-card__header strong,
+.grade-class-card__header > div > span {
+  display: block;
+}
+
+.grade-class-card__header strong {
+  font-size: 16px;
+}
+
+.grade-class-card__header > div > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grade-class-card__icon {
+  align-items: center;
+  background: var(--primary-soft);
+  border-radius: 12px;
+  color: var(--primary-dark);
+  display: inline-flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.grade-class-card__icon svg {
+  height: 21px;
+  width: 21px;
+}
+
+.grade-setup-badge {
+  background: var(--warning-soft, #fff3d8);
+  border-radius: 999px;
+  color: var(--warning-dark, #805200);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.grade-setup-badge--ready {
+  background: var(--success-soft, #e8f7ee);
+  color: var(--success-dark, #19603a);
+}
+
+.grade-class-card__meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.grade-class-card__meta div {
+  background: color-mix(in srgb, var(--surface) 82%, var(--surface-muted, #f8fafc));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+}
+
+.grade-class-card__meta dt {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.grade-class-card__meta dd {
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.grade-class-card__progress {
+  display: grid;
+  gap: 7px;
+}
+
+.grade-class-card__progress > div:first-child,
+.grade-class-card__footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.grade-class-card__progress span,
+.grade-class-card__progress small,
+.grade-class-card__footer > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.grade-class-card__footer {
+  border-top: 1px solid var(--border);
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.grade-class-card__footer > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.grade-class-card__footer > span svg {
+  height: 14px;
+  width: 14px;
+}
+
+.grade-hub-shortcuts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grade-hub-shortcut {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 16px;
+  text-align: left;
+}
+
+.grade-hub-shortcut:hover {
+  border-color: rgba(var(--primary-rgb), 0.36);
+  background: var(--primary-soft);
+}
+
+.grade-hub-shortcut > svg:first-child {
+  color: var(--primary-dark);
+  height: 22px;
+  width: 22px;
+}
+
+.grade-hub-shortcut > svg:last-child {
+  color: var(--text-muted);
+  height: 17px;
+  width: 17px;
+}
+
+.grade-hub-shortcut strong,
+.grade-hub-shortcut small {
+  display: block;
+}
+
+.grade-hub-shortcut small {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.grade-view-intro {
+  align-items: start;
+  background: linear-gradient(135deg, var(--primary-soft), color-mix(in srgb, var(--surface) 92%, var(--primary-soft)));
+  border: 1px solid rgba(var(--primary-rgb), 0.2);
+  border-radius: 16px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 16px 18px;
+}
+
+.grade-view-intro > svg {
+  color: var(--primary-dark);
+  height: 22px;
+  width: 22px;
+}
+
+.grade-view-intro strong,
+.grade-view-intro span {
+  display: block;
+}
+
+.grade-view-intro span {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: 3px;
+}
+
 .gradebook-workspace,
 .gradebook-panel,
 .gradebook-item-form,
@@ -1376,6 +1884,37 @@ a.teacher-recent-item:focus-visible {
 
 .gradebook-view-toggle {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gradebook-unsaved-banner {
+  align-items: center;
+  background: var(--warning-soft, #fff3d8);
+  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 28%, var(--border));
+  border-radius: 12px;
+  color: var(--warning-dark, #805200);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.gradebook-unsaved-banner svg {
+  height: 19px;
+  width: 19px;
+}
+
+.gradebook-unsaved-banner strong,
+.gradebook-unsaved-banner span {
+  display: block;
+}
+
+.gradebook-unsaved-banner span {
+  font-size: 12px;
+}
+
+.gradebook-unsaved-banner strong {
+  font-size: 13px;
+  margin-bottom: 2px;
 }
 
 .gradebook-grid {
@@ -5252,6 +5791,10 @@ a.teacher-recent-item:focus-visible {
 }
 
 @media (max-width: 1160px) {
+  .grade-hub-shortcuts {
+    grid-template-columns: 1fr;
+  }
+
   .admin-quick-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5303,6 +5846,57 @@ a.teacher-recent-item:focus-visible {
 }
 
 @media (max-width: 640px) {
+  .grade-hub-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+
+  .grade-hub-tabs button {
+    justify-content: flex-start;
+  }
+
+  .grade-class-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .grade-class-card__header {
+    align-items: start;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .grade-setup-badge {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .grade-class-card__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .grade-class-card__footer .button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .resource-drawer__panel {
+    width: 100%;
+  }
+
+  .resource-drawer__actions {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-drawer__actions .button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .gradebook-progressive-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .admin-quick-grid,
   .admin-form__fields,
   .admin-inline-form,

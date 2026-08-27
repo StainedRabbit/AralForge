@@ -8,8 +8,8 @@ import type { WorkspaceResource } from '../queries/useScopedWorkspace'
 import { SkeletonList } from '../components/ui'
 const AdminAttendancePage = lazy(() => import('../pages/admin/AdminAttendancePage').then(module => ({ default: module.AdminAttendancePage })))
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage').then(module => ({ default: module.AdminDashboardPage })))
-const AdminGradebookPage = lazy(() => import('../pages/admin/AdminGradebookPage').then(module => ({ default: module.AdminGradebookPage })))
-const AdminGradesPage = lazy(() => import('../pages/admin/AdminGradesPage').then(module => ({ default: module.AdminGradesPage })))
+const AdminGradebookRoute = lazy(() => import('../pages/admin/AdminGradebookRoute').then(module => ({ default: module.AdminGradebookRoute })))
+const AdminGradesPage = lazy(() => import('../pages/admin/AdminGradesScalablePage').then(module => ({ default: module.AdminGradesScalablePage })))
 const AdminLessonEditorPage = lazy(() => import('../pages/admin/AdminLessonEditorPage').then(module => ({ default: module.AdminLessonEditorPage })))
 const AdminModuleEditorPage = lazy(() => import('../pages/admin/AdminModuleEditorPage').then(module => ({ default: module.AdminModuleEditorPage })))
 const AdminModulesPage = lazy(() => import('../pages/admin/AdminModulesPage').then(module => ({ default: module.AdminModulesPage })))
@@ -32,8 +32,6 @@ const MODULES: WorkspaceResource[] = ['subjects','modules']
 const EDITOR: WorkspaceResource[] = ['users','profiles','schedules','enrollments','gradeCategories','gradeItems',...MODULES,'moduleTopics','moduleLessons','lessonExamples','lessonAssets','activities','activityQuestions','activityChoices','activityMatchingPairs']
 const LESSON_EDITOR: WorkspaceResource[] = []
 const ATTENDANCE: WorkspaceResource[] = ['users','subjects','terms','schedules','enrollments','attendanceSessions','attendanceRecords']
-const GRADES: WorkspaceResource[] = ['users','subjects','schedules','gradingTemplates','gradingTemplateItems','subjectGradingPolicies','gradeCategories','gradeItems','categoryGrades','periodGrades','finalGrades','points','badges','studentBadges','levels']
-const GRADEBOOK: WorkspaceResource[] = ['users','schedules','enrollments','modules','activities','activityAttempts','attendanceSessions','gradeCategories','gradeItems','gradeItemScores','categoryGrades']
 
 export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: { api: AuthedRequest; currentUser: User; profile: StudentProfile | null; pendingCount: number; onLogout: () => void }) {
   const scoped = (resources: readonly WorkspaceResource[], render: Parameters<typeof RouteWorkspace>[0]['children']) => <RouteWorkspace api={api} currentUser={currentUser} profile={profile} resources={resources}>{render}</RouteWorkspace>
@@ -57,8 +55,8 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/submissions/:submissionId" element={<AdminSubmissionReviewPage api={api} />} />
         <Route path="/admin/assessments/*" element={<Navigate replace to="/admin/gradebook" />} />
         <Route path="/admin/attendance" element={scoped(ATTENDANCE, data => <AdminAttendancePage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/grades" element={scoped(GRADES, data => <AdminGradesPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/gradebook" element={scoped(GRADEBOOK, data => <AdminGradebookPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/grades" element={<AdminGradesPage api={api} />} />
+        <Route path="/admin/gradebook" element={<AdminGradebookRoute api={api} currentUser={currentUser} profile={profile} />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes></Suspense>
     </main><MobileTabbar badgePath="/admin/grades" items={mobile} pendingCount={pendingCount} />

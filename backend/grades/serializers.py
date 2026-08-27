@@ -16,9 +16,11 @@ from .models import (
 
 
 class GradingTemplateItemSerializer(serializers.ModelSerializer):
+    template_label = serializers.CharField(source='template.name', read_only=True)
+
     class Meta:
         model = GradingTemplateItem
-        fields = ('id', 'template', 'grading_period', 'category', 'name', 'weight')
+        fields = ('id', 'template', 'template_label', 'grading_period', 'category', 'name', 'weight')
         read_only_fields = ('id',)
 
     def validate(self, attrs):
@@ -70,13 +72,19 @@ class GradingTemplateSerializer(serializers.ModelSerializer):
 
 
 class SubjectGradingPolicySerializer(serializers.ModelSerializer):
+    subject_label = serializers.SerializerMethodField()
+    source_template_label = serializers.CharField(source='source_template.name', read_only=True)
+
     class Meta:
         model = SubjectGradingPolicy
         fields = (
-            'id', 'subject', 'source_template', 'transmutation_base', 'transmutation_scale',
+            'id', 'subject', 'subject_label', 'source_template', 'source_template_label', 'transmutation_base', 'transmutation_scale',
             'prelim_weight', 'midterm_weight', 'prefinal_weight', 'final_weight', 'updated_at',
         )
         read_only_fields = ('id', 'updated_at')
+
+    def get_subject_label(self, obj):
+        return f'{obj.subject.code} {obj.subject.name}'
 
     def validate(self, attrs):
         values = {
@@ -94,18 +102,26 @@ class SubjectGradingPolicySerializer(serializers.ModelSerializer):
 
 
 class GradeCategorySerializer(serializers.ModelSerializer):
+    subject_label = serializers.SerializerMethodField()
+    template_item_label = serializers.CharField(source='template_item.name', read_only=True)
+
     class Meta:
         model = GradeCategory
         fields = (
             'id',
             'subject',
+            'subject_label',
             'template_item',
+            'template_item_label',
             'grading_period',
             'category',
             'name',
             'weight',
         )
         read_only_fields = ('id',)
+
+    def get_subject_label(self, obj):
+        return f'{obj.subject.code} {obj.subject.name}'
 
     def validate(self, attrs):
         if self.instance:

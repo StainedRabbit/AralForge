@@ -2,7 +2,9 @@ from decimal import Decimal
 from io import StringIO
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
 
@@ -776,3 +778,115 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
         self.assertEqual(archived.status_code, 400)
         self.assertEqual(forbidden.status_code, 403)
         self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())
+
+
+class ScalableTeacherGradesApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='grades_teacher', password='testpass123', role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='overview_student', password='testpass123', role=User.Role.STUDENT,
+        )
+        school_year = SchoolYear.objects.create(start_year=2030, end_year=2031)
+        self.term = SchoolYearSemester.objects.create(
+            school_year=school_year, semester=Semester.FIRST,
+        )
+        self.schedules = []
+        for index in range(13):
+            subject = Subject.objects.create(
+                code=f'PAGE{index:02d}', name=f'Progressive subject {index:02d}',
+            )
+            self.schedules.append(SubjectSchedule.objects.create(
+                subject=subject,
+                school_year_semester=self.term,
+                days='MWF',
+                start_time='08:00',
+                end_time='09:00',
+                section=f'S{index:02d}',
+            ))
+        self.category = GradeCategory.objects.create(
+            subject=self.schedules[0].subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Progressive quizzes',
+            weight=Decimal('100.00'),
+        )
+        self.item = GradeItem.objects.create(
+            schedule=self.schedules[0],
+            grade_category=self.category,
+            title='Progressive quiz',
+            points_possible=Decimal('10.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+
+    def test_overview_has_stable_twelve_card_pages_and_accurate_aggregates(self):
+        ScheduleStudent.objects.create(schedule=self.schedules[0], student=self.student)
+
+        with CaptureQueriesContext(connection) as queries:
+            first = self.client.get('/api/grades/teacher-overview/?limit=12&offset=0')
+        second = self.client.get('/api/grades/teacher-overview/?limit=12&offset=12')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data['count'], 13)
+        self.assertEqual(len(first.data['results']), 12)
+        self.assertEqual(first.data['next'], 12)
+        self.assertEqual(len(second.data['results']), 1)
+        self.assertIsNone(second.data['next'])
+        self.assertEqual(first.data['summary']['active_classes'], 13)
+        self.assertEqual(first.data['summary']['active_enrollments'], 1)
+        self.assertEqual(first.data['summary']['grade_items'], 1)
+        self.assertLessEqual(len(queries), 25)
+
+    def test_overview_search_finds_a_class_outside_the_first_page(self):
+        response = self.client.get('/api/grades/teacher-overview/?search=PAGE12&limit=12')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['schedule']['id'], self.schedules[12].id)
+
+    def test_student_cannot_access_teacher_overview_or_gradebook(self):
+        self.client.force_authenticate(self.student)
+
+        overview = self.client.get('/api/grades/teacher-overview/')
+        gradebook = self.client.get(f'/api/grades/gradebook/?schedule={self.schedules[0].id}')
+
+        self.assertEqual(overview.status_code, 403)
+        self.assertEqual(gradebook.status_code, 403)
+
+    def test_gradebook_paginates_roster_and_searches_unloaded_students(self):
+        students = []
+        for index in range(55):
+            student = User.objects.create_user(
+                username=f'roster_{index:03d}',
+                password='testpass123',
+                role=User.Role.STUDENT,
+                first_name='Learner',
+                last_name=f'{index:03d}',
+            )
+            students.append(student)
+            ScheduleStudent.objects.create(schedule=self.schedules[0], student=student)
+
+        with CaptureQueriesContext(connection) as queries:
+            first = self.client.get(
+                f'/api/grades/gradebook/?schedule={self.schedules[0].id}&period=PRELIM&limit=50',
+            )
+        second = self.client.get(
+            f'/api/grades/gradebook/?schedule={self.schedules[0].id}&period=PRELIM&limit=50&offset=50',
+        )
+        searched = self.client.get(
+            f'/api/grades/gradebook/?schedule={self.schedules[0].id}&search=roster_054&limit=50',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data['count'], 55)
+        self.assertEqual(first.data['total_count'], 55)
+        self.assertEqual(len(first.data['enrollments']), 50)
+        self.assertEqual(first.data['next'], 50)
+        self.assertEqual(len(second.data['enrollments']), 5)
+        self.assertIsNone(second.data['next'])
+        loaded_students = [row['student'] for row in first.data['enrollments'] + second.data['enrollments']]
+        self.assertEqual(loaded_students, [student.id for student in students])
+        self.assertLessEqual(len(queries), 30)
+        self.assertEqual(searched.data['count'], 1)
+        self.assertEqual(searched.data['enrollments'][0]['student'], students[-1].id)

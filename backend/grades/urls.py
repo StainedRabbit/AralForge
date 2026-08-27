@@ -13,6 +13,8 @@ from .views import (
     SubjectGradingPolicyViewSet,
     StudentGradeOverviewView,
     TeacherGradebookView,
+    TeacherGradesOverviewView,
+    TeacherGradeSourceOptionsView,
 )
 
 app_name = 'grades'
@@ -30,6 +32,8 @@ router.register('finals', FinalGradeViewSet, basename='final-grade')
 
 urlpatterns = [
     path('overview/', StudentGradeOverviewView.as_view(), name='student-grade-overview'),
+    path('teacher-overview/', TeacherGradesOverviewView.as_view(), name='teacher-grades-overview'),
     path('gradebook/', TeacherGradebookView.as_view(), name='teacher-gradebook'),
+    path('source-options/', TeacherGradeSourceOptionsView.as_view(), name='teacher-grade-source-options'),
     path('', include(router.urls)),
 ]
