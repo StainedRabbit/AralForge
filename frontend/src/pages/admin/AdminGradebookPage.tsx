@@ -18,7 +18,6 @@ const sourceTypes: { label: string; value: GradeItemSourceType }[] = [
   { label: 'Manual', value: 'MANUAL' },
   { label: 'Module activity', value: 'MODULE_ACTIVITY' },
   { label: 'Attendance', value: 'ATTENDANCE' },
-  { label: 'Coding', value: 'CODING' },
 ]
 
 type ScoreDraft = Record<string, { rawScore: string; remarks: string }>
@@ -707,7 +706,7 @@ export function AdminGradebookPage({
                   </label>
                   {items.find((item) => item.id === editingItemId)?.source_type !== 'MANUAL' ? (
                     <p className="admin-message">
-                      Points for source-linked items follow the original quiz, activity, attendance, or coding item.
+                      Points for source-linked items follow the original activity or attendance item.
                     </p>
                   ) : null}
                   <button className="button button--primary" disabled={saving} type="submit">
@@ -1456,9 +1455,6 @@ function getSourcePayload(sourceType: GradeItemSourceType, sourceId: string) {
   if (sourceType === 'ATTENDANCE') {
     return { attendance_session: Number(sourceId) }
   }
-  if (sourceType === 'CODING') {
-    return { coding_problem: Number(sourceId) }
-  }
   return {}
 }
 
@@ -1663,22 +1659,6 @@ function getSourceOptions(
         label: session.title || formatDate(session.date),
         points: session.points_possible,
         value: String(session.id),
-      }))
-  }
-
-  if (sourceType === 'CODING') {
-    const moduleIds = new Set(
-      data.modules
-        .filter((module) => module.subject === subjectId || module.subjects.includes(subjectId))
-        .map((module) => module.id),
-    )
-
-    return data.problems
-      .filter((problem) => problem.subject === subjectId || (problem.module ? moduleIds.has(problem.module) : false))
-      .map((problem) => ({
-        label: problem.title,
-        points: problem.points_possible,
-        value: String(problem.id),
       }))
   }
 

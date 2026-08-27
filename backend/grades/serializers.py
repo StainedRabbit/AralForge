@@ -189,7 +189,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
             'source_type',
             'module_activity',
             'attendance_session',
-            'coding_problem',
             'source_title',
             'source_points_possible',
             'created_at',
@@ -203,7 +202,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
         source_fields = {
             'MODULE_ACTIVITY': 'module_activity',
             'ATTENDANCE': 'attendance_session',
-            'CODING': 'coding_problem',
         }
         required_field = source_fields.get(source_type)
         schedule = attrs.get('schedule', getattr(self.instance, 'schedule', None))
@@ -329,15 +327,6 @@ def source_matches_subject(source_type, source, subject_id):
             source.module.subject_id == subject_id
             or source.module.subjects.filter(pk=subject_id).exists()
         )
-    if source_type == 'CODING':
-        if source.subject_id == subject_id:
-            return True
-        if source.module_id:
-            return (
-                source.module.subject_id == subject_id
-                or source.module.subjects.filter(pk=subject_id).exists()
-            )
-        return False
     return True
 
 

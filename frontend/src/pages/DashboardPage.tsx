@@ -13,7 +13,7 @@ type StudentDashboard = {
   role: 'student'
   metrics: {
     module_count: number; completed_modules: number; pending_activities: number
-    submitted_activities: number; problem_count: number; blank_count: number
+    submitted_activities: number
     total_points: number; earned_badges: number
   }
   recent_modules: Module[]
@@ -35,7 +35,7 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
     <section className="dashboard-hero">
       <img
         src={dashboardJourney}
-        alt="An open book connecting code, ideas, and a rising learning path."
+        alt="An open book connecting ideas and a rising learning path."
         decoding="async"
         fetchPriority="high"
         height="800"
@@ -43,7 +43,7 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
       />
       <div className="dashboard-hero__content">
         <p className="eyebrow">Today in AralForge</p><h1>{greeting(currentUser)}</h1>
-        <p>Keep your modules, Main Activities, coding work, and grades moving from one focused academic workspace.</p>
+        <p>Keep your modules, Main Activities, and grades moving from one focused academic workspace.</p>
         <div className="hero-actions">
           <Link className="button button--primary" to="/modules"><Icon name="book" /><span>Continue learning</span></Link>
           <button className="button button--ghost" onClick={() => dashboard.refetch()} type="button"><Icon name="spark" /><span>Refresh</span></button>
@@ -53,7 +53,6 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
     <section className="stat-grid" aria-label="Learning summary">
       <StatCard icon="module" label="Published modules" value={metrics.module_count} detail={`${metrics.completed_modules} completed`} />
       <StatCard icon="activity" label="Pending activities" value={metrics.pending_activities} detail={`${metrics.submitted_activities} submitted`} />
-      <StatCard icon="code" label="Coding problems" value={metrics.problem_count} detail={`${metrics.blank_count} fill blanks`} />
       <StatCard icon="award" label="Total points" value={metrics.total_points} detail={`${metrics.earned_badges} earned badges`} />
     </section>
     <section className="content-grid content-grid--dashboard">

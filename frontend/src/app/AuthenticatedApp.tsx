@@ -9,14 +9,12 @@ import { EndpointWorkspace } from '../components/EndpointWorkspace'
 import { Page, SkeletonList, StatusBanner } from '../components/ui'
 import { useAuthenticatedRequest } from '../hooks/useAuthenticatedRequest'
 import { queryKeys } from '../queries/queryKeys'
-import type { FinalGrade, GradeCategory, LevelRule, Module, ModuleActivity, ModuleActivityAttempt, ModuleActivitySubmission, ModuleLesson, ModuleLessonExample, ModuleLessonProgress, ModuleTopic, PeriodGrade, PointLedger, ProgrammingProblem, ScheduleStudent, StudentCategoryGrade, Subject, SubjectSchedule } from '../types'
+import type { FinalGrade, GradeCategory, LevelRule, Module, ModuleActivity, ModuleActivityAttempt, ModuleActivitySubmission, ModuleLesson, ModuleLessonExample, ModuleLessonProgress, ModuleTopic, PeriodGrade, PointLedger, ScheduleStudent, StudentCategoryGrade, Subject, SubjectSchedule } from '../types'
 
 const AdminApp = lazy(() => import('./AdminApp').then(module => ({ default: module.AdminApp })))
 const ActivityDetailPage = lazy(() => import('../pages/ActivityDetailPage').then(module => ({ default: module.ActivityDetailPage })))
 const AttendancePage = lazy(() => import('../pages/AttendancePage').then(module => ({ default: module.AttendancePage })))
 const ClassesPage = lazy(() => import('../pages/ClassesPage').then(module => ({ default: module.ClassesPage })))
-const CodingPage = lazy(() => import('../pages/CodingPage').then(module => ({ default: module.CodingPage })))
-const CodingProblemPage = lazy(() => import('../pages/CodingProblemPage').then(module => ({ default: module.CodingProblemPage })))
 const DashboardPage = lazy(() => import('../pages/DashboardPage').then(module => ({ default: module.DashboardPage })))
 const GradesPage = lazy(() => import('../pages/GradesPage').then(module => ({ default: module.GradesPage })))
 const ModuleDetailPage = lazy(() => import('../pages/ModuleDetailPage').then(module => ({ default: module.ModuleDetailPage })))
@@ -53,8 +51,6 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
           <Route path="/modules" element={scoped(['modules','moduleTopics','moduleLessons','lessonProgress','subjects','enrollments'], data => <ModulesPage api={api} data={data} />)} />
           <Route path="/modules/:moduleId" element={<ModuleWorkspaceRoute api={api} currentUser={user} profile={profile} />} />
           <Route path="/activities/:activityId" element={<ActivityWorkspaceRoute api={api} currentUser={user} profile={profile} />} />
-          <Route path="/coding" element={scoped(['problems'], data => <CodingPage data={data} />)} />
-          <Route path="/coding/:problemId" element={<CodingWorkspaceRoute api={api} currentUser={user} profile={profile} />} />
           <Route path="/assessments/*" element={<Navigate to="/modules" replace />} />
           <Route path="/attendance" element={scoped(['attendanceSessions','attendanceRecords','schedules','enrollments'], data => <AttendancePage data={data} />)} />
           <Route path="/grades" element={<GradeOverviewRoute api={api} currentUser={user} profile={profile} />} />
@@ -68,25 +64,18 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
 }
 
 type WorkspaceRouteProps = { api: ReturnType<typeof useAuthenticatedRequest>; currentUser: User; profile: StudentProfile | null }
-type ModuleWorkspace = { module: Module; topics: ModuleTopic[]; lessons: ModuleLesson[]; lesson_examples: ModuleLessonExample[]; lesson_progress: ModuleLessonProgress[]; activities: ModuleActivity[]; activity_attempts: ModuleActivityAttempt[]; problems: ProgrammingProblem[]; subjects: Subject[] }
+type ModuleWorkspace = { module: Module; topics: ModuleTopic[]; lessons: ModuleLesson[]; lesson_examples: ModuleLessonExample[]; lesson_progress: ModuleLessonProgress[]; activities: ModuleActivity[]; activity_attempts: ModuleActivityAttempt[]; subjects: Subject[] }
 function ModuleWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
   const { moduleId } = useParams()
   const path = `/modules/modules/${Number(moduleId)}/workspace/`
-  return <EndpointWorkspace<ModuleWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ modules: [payload.module], moduleTopics: payload.topics, moduleLessons: payload.lessons, lessonExamples: payload.lesson_examples, lessonProgress: payload.lesson_progress, activities: payload.activities, activityAttempts: payload.activity_attempts, problems: payload.problems, subjects: payload.subjects })}>{data => <ModuleDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
+  return <EndpointWorkspace<ModuleWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ modules: [payload.module], moduleTopics: payload.topics, moduleLessons: payload.lessons, lessonExamples: payload.lesson_examples, lessonProgress: payload.lesson_progress, activities: payload.activities, activityAttempts: payload.activity_attempts, subjects: payload.subjects })}>{data => <ModuleDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
 }
 
-type ActivityWorkspace = { activity: ModuleActivity; module: Module; problem: ProgrammingProblem | null; attempts: ModuleActivityAttempt[]; submissions: ModuleActivitySubmission[] }
+type ActivityWorkspace = { activity: ModuleActivity; module: Module; attempts: ModuleActivityAttempt[]; submissions: ModuleActivitySubmission[] }
 function ActivityWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
   const { activityId } = useParams()
   const path = `/modules/activities/${Number(activityId)}/workspace/`
-  return <EndpointWorkspace<ActivityWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ activities: [payload.activity], modules: [payload.module], problems: payload.problem ? [payload.problem] : [], activityAttempts: payload.attempts, submissions: payload.submissions })}>{data => <ActivityDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
-}
-
-type CodingWorkspace = { problem: ProgrammingProblem }
-function CodingWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
-  const { problemId } = useParams()
-  const path = `/coding/problems/${Number(problemId)}/workspace/`
-  return <EndpointWorkspace<CodingWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ problems: [payload.problem] })}>{data => <CodingProblemPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
+  return <EndpointWorkspace<ActivityWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ activities: [payload.activity], modules: [payload.module], activityAttempts: payload.attempts, submissions: payload.submissions })}>{data => <ActivityDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
 }
 
 type GradeOverview = { enrollments: ScheduleStudent[]; schedules: SubjectSchedule[]; categories: GradeCategory[]; category_grades: StudentCategoryGrade[]; period_grades: PeriodGrade[]; final_grades: FinalGrade[]; points: PointLedger[]; levels: LevelRule[] }

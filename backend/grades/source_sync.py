@@ -46,25 +46,10 @@ def _attendance_result(item, student):
     ) if record else None
 
 
-def _coding_result(item, student):
-    problem = item.coding_problem
-    if not problem:
-        return None
-    candidates = [
-        _normalized_score(submission.score, problem.points_possible, item.points_possible)
-        for submission in problem.submissions.filter(student=student, score__isnull=False).exclude(
-            status__in=['PENDING', 'RUNNING']
-        )
-    ]
-    resolved = [score for score in candidates if score is not None]
-    return max(resolved) if resolved else None
-
-
 def source_score(item, student):
     return {
         GradeItemSourceType.MODULE_ACTIVITY: _module_activity_result,
         GradeItemSourceType.ATTENDANCE: _attendance_result,
-        GradeItemSourceType.CODING: _coding_result,
     }.get(item.source_type, lambda *_: None)(item, student)
 
 
@@ -106,7 +91,7 @@ def sync_grade_item(item):
 
 def sync_items(queryset):
     return sum(sync_grade_item(item) for item in queryset.select_related(
-        'schedule', 'module_activity', 'attendance_session', 'coding_problem'
+        'schedule', 'module_activity', 'attendance_session'
     ))
 
 

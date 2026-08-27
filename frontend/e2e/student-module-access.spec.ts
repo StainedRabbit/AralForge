@@ -11,6 +11,16 @@ async function signIn(page: Page) {
 }
 
 
+test('retired student coding route returns to the dashboard', async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
+  await page.goto('/coding')
+
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.locator('.dashboard-hero')).toBeVisible()
+})
+
+
 test('student classes include active and past enrollments', async ({ page }) => {
   await signIn(page)
   await page.goto('/classes')

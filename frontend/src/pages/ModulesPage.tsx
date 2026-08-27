@@ -341,7 +341,7 @@ function LockedModuleSummary({
         <h3>Topics available for download</h3>
         <p>
           Download each published topic for offline study. Ask your teacher to activate
-          the module when it is time to open web lessons, coding exercises, progress,
+          the module when it is time to open web lessons, progress,
           and Main Activities online.
         </p>
       </div>

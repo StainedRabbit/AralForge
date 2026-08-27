@@ -12,6 +12,7 @@ class RetireDigitalAssessmentsMigrationTests(TransactionTestCase):
     migrate_from = {
         'assessments': '0004_production_query_indexes',
         'coding': '0003_programmingproblem_topic_lesson',
+        'gamification': '0002_remove_assessment_point_source',
         'grades': '0008_rebrand_standard_grading_template',
         'learning_modules': '0020_remove_module_payments',
     }
@@ -44,8 +45,6 @@ class RetireDigitalAssessmentsMigrationTests(TransactionTestCase):
         Question = self.old_apps.get_model('assessments', 'Question')
         Attempt = self.old_apps.get_model('assessments', 'AssessmentAttempt')
         Answer = self.old_apps.get_model('assessments', 'Answer')
-        Problem = self.old_apps.get_model('coding', 'ProgrammingProblem')
-        Submission = self.old_apps.get_model('coding', 'CodeSubmission')
         Category = self.old_apps.get_model('grades', 'GradeCategory')
         GradeItem = self.old_apps.get_model('grades', 'GradeItem')
         Score = self.old_apps.get_model('grades', 'StudentGradeItemScore')
@@ -85,21 +84,6 @@ class RetireDigitalAssessmentsMigrationTests(TransactionTestCase):
         attempt = Attempt.objects.create(assessment=assessment, student=student)
         Answer.objects.create(attempt=attempt, question=question, text_answer='old answer')
 
-        problem = Problem.objects.create(
-            title='Surviving problem',
-            slug='surviving-problem',
-            description='Keep this problem.',
-            subject=subject,
-            module=module,
-            assessment_question=question,
-        )
-        submission = Submission.objects.create(
-            problem=problem,
-            student=student,
-            assessment_attempt=attempt,
-            language='python',
-            source_code='print(1)',
-        )
         category = Category.objects.create(
             subject=subject,
             grading_period='PRELIM',
@@ -140,14 +124,11 @@ class RetireDigitalAssessmentsMigrationTests(TransactionTestCase):
             tables = set(connection.introspection.table_names(cursor))
         self.assertFalse(any(table.startswith('assessments_') for table in tables))
 
-        from coding.models import CodeSubmission, ProgrammingProblem
         from grades.models import FinalGrade, GradeItem as CurrentGradeItem, PeriodGrade, StudentCategoryGrade
         from learning_modules.models import Module as CurrentModule, ModuleActivity
 
         self.assertTrue(CurrentModule.objects.filter(pk=module.pk).exists())
         self.assertTrue(ModuleActivity.objects.filter(pk=activity.pk).exists())
-        self.assertTrue(ProgrammingProblem.objects.filter(pk=problem.pk).exists())
-        self.assertTrue(CodeSubmission.objects.filter(pk=submission.pk).exists())
         self.assertEqual(
             set(CurrentGradeItem.objects.values_list('title', flat=True)),
             {'Paper quiz', 'Surviving Main Activity'},

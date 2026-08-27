@@ -1,4 +1,4 @@
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,7 +6,6 @@ from rest_framework.views import APIView
 from accounts.models import StudentProfile, User
 from attendance.models import AttendanceSession
 from attendance.serializers import AttendanceSessionSerializer
-from coding.models import CodeBlank, CodeSubmission, ProgrammingProblem
 from gamification.models import PointLedger, StudentBadge
 from learning_modules.models import (
     Module,
@@ -34,7 +33,6 @@ class NavigationView(APIView):
         if request.user.is_admin_teacher:
             pending = (
                 ModuleActivitySubmission.objects.filter(score__isnull=True).count()
-                + CodeSubmission.objects.filter(score__isnull=True).count()
             )
             return Response({'role': 'teacher', 'pending_count': pending})
 
@@ -81,11 +79,6 @@ def student_dashboard(request):
         'due_at', 'order', 'id',
     )[:5]
     recent_modules = modules.order_by('-updated_at')[:4]
-    problems = ProgrammingProblem.objects.filter(
-        is_published=True,
-    ).filter(
-        Q(module__in=modules) | Q(module__isnull=True),
-    ).distinct()
     points = PointLedger.objects.filter(student=user).aggregate(total=Sum('points'))['total'] or 0
 
     return {
@@ -99,8 +92,6 @@ def student_dashboard(request):
             ).count(),
             'pending_activities': activities.exclude(id__in=submitted_activity_ids).count(),
             'submitted_activities': submissions.filter(activity__in=activities).count(),
-            'problem_count': problems.count(),
-            'blank_count': CodeBlank.objects.filter(problem__in=problems).count(),
             'total_points': points,
             'earned_badges': StudentBadge.objects.filter(student=user).count(),
         },
@@ -141,7 +132,6 @@ def teacher_dashboard(request):
                 expires_at__gt=timezone.now(),
             ).count(),
             'schedule_count': SubjectSchedule.objects.count(),
-            'problem_count': ProgrammingProblem.objects.count(),
             'attendance_today': AttendanceSession.objects.filter(date=today).count(),
         },
         'ungraded_submissions': ModuleActivitySubmissionSerializer(

@@ -15,7 +15,6 @@ def result_rows(response):
     return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
 
 from accounts.models import User
-from coding.models import ProgrammingProblem
 from grades.models import (
     GradeCategory,
     GradeCategoryChoices,
@@ -309,15 +308,6 @@ class ModuleAccessApiTests(APITestCase):
             instructions='Complete this after activation.',
             is_published=True,
         )
-        problem = ProgrammingProblem.objects.create(
-            module=self.paid_module,
-            topic=topic,
-            lesson=lesson,
-            title='Locked Problem',
-            slug='locked-problem',
-            description='Solve after activation.',
-            is_published=True,
-        )
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
@@ -328,7 +318,6 @@ class ModuleAccessApiTests(APITestCase):
         topic_response = self.client.get('/api/modules/topics/')
         lesson_response = self.client.get('/api/modules/lessons/')
         activity_response = self.client.get('/api/modules/activities/')
-        coding_response = self.client.get('/api/coding/problems/')
         progress_response = self.client.get('/api/modules/lesson-progress/')
         workspace_response = self.client.get(
             f'/api/modules/modules/{self.paid_module.id}/workspace/',
@@ -337,14 +326,13 @@ class ModuleAccessApiTests(APITestCase):
         self.assertNotIn(topic.id, {item['id'] for item in result_rows(topic_response)})
         self.assertNotIn(lesson.id, {item['id'] for item in result_rows(lesson_response)})
         self.assertNotIn(activity.id, {item['id'] for item in result_rows(activity_response)})
-        self.assertNotIn(problem.id, {item['id'] for item in result_rows(coding_response)})
         self.assertNotIn(progress.id, {item['id'] for item in result_rows(progress_response)})
         self.assertEqual(workspace_response.status_code, 200)
         self.assertEqual(workspace_response.data['topics'], [])
         self.assertEqual(workspace_response.data['lessons'], [])
         self.assertEqual(workspace_response.data['activities'], [])
         self.assertEqual(workspace_response.data['activity_attempts'], [])
-        self.assertEqual(workspace_response.data['problems'], [])
+        self.assertNotIn('problems', workspace_response.data)
         downloadable = workspace_response.data['module']['downloadable_topics']
         self.assertEqual([item['id'] for item in downloadable], [topic.id])
         self.assertNotIn('overview', downloadable[0])
@@ -367,15 +355,6 @@ class ModuleAccessApiTests(APITestCase):
             instructions='Complete the activity.',
             is_published=True,
         )
-        problem = ProgrammingProblem.objects.create(
-            module=self.paid_module,
-            topic=topic,
-            lesson=lesson,
-            title='Paid Problem',
-            slug='paid-problem',
-            description='Solve it.',
-            is_published=True,
-        )
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
@@ -393,7 +372,6 @@ class ModuleAccessApiTests(APITestCase):
             ('/api/modules/topics/', topic.id),
             ('/api/modules/lessons/', lesson.id),
             ('/api/modules/activities/', activity.id),
-            ('/api/coding/problems/', problem.id),
             ('/api/modules/lesson-progress/', progress.id),
         ):
             response = self.client.get(path)
@@ -475,15 +453,6 @@ class ModuleAccessApiTests(APITestCase):
             instructions='Complete the activity.',
             is_published=True,
         )
-        problem = ProgrammingProblem.objects.create(
-            module=self.advance_module,
-            topic=topic,
-            lesson=lesson,
-            title='Advanced Problem',
-            slug='advanced-problem',
-            description='Solve it.',
-            is_published=True,
-        )
         grant = ModuleAccess.objects.create(
             access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
             activated_by=self.teacher,
@@ -501,7 +470,6 @@ class ModuleAccessApiTests(APITestCase):
             ('/api/modules/topics/', topic.id),
             ('/api/modules/lessons/', lesson.id),
             ('/api/modules/activities/', activity.id),
-            ('/api/coding/problems/', problem.id),
             ('/api/modules/lesson-progress/', progress.id),
         ):
             response = self.client.get(path)

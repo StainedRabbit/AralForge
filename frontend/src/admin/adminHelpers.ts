@@ -7,7 +7,6 @@ import type {
   GradingTemplateItem,
   Module,
   ModuleActivity,
-  ProgrammingProblem,
   Subject,
   SubjectSchedule,
   User,
@@ -19,28 +18,6 @@ export const roleOptions: AdminOption[] = [
   { label: 'Student', value: 'STUDENT' },
   { label: 'Teacher', value: 'TEACHER' },
   { label: 'Admin', value: 'ADMIN' },
-]
-
-export const activityTypeOptions: AdminOption[] = [
-  { label: 'Text', value: 'TEXT' },
-  { label: 'File upload', value: 'FILE_UPLOAD' },
-  { label: 'Complete coding', value: 'CODE_COMPLETE' },
-  { label: 'Fill blanks', value: 'CODE_FILL_BLANK' },
-]
-
-export const difficultyOptions: AdminOption[] = [
-  { label: 'Easy', value: 'EASY' },
-  { label: 'Medium', value: 'MEDIUM' },
-  { label: 'Hard', value: 'HARD' },
-]
-
-export const codeStatusOptions: AdminOption[] = [
-  { label: 'Pending', value: 'PENDING' },
-  { label: 'Running', value: 'RUNNING' },
-  { label: 'Accepted', value: 'ACCEPTED' },
-  { label: 'Wrong answer', value: 'WRONG_ANSWER' },
-  { label: 'Runtime error', value: 'RUNTIME_ERROR' },
-  { label: 'Time limit', value: 'TIME_LIMIT' },
 ]
 
 export const attendanceStatusOptions: AdminOption[] = [
@@ -62,14 +39,12 @@ export const gradeCategoryOptions: AdminOption[] = [
   { label: 'Exam', value: 'EXAM' },
   { label: 'Activity', value: 'ACTIVITY' },
   { label: 'Attendance', value: 'ATTENDANCE' },
-  { label: 'Coding', value: 'CODING' },
   { label: 'Other', value: 'OTHER' },
 ]
 
 export const pointSourceOptions: AdminOption[] = [
   { label: 'Attendance', value: 'ATTENDANCE' },
   { label: 'Module activity', value: 'MODULE_ACTIVITY' },
-  { label: 'Coding', value: 'CODING' },
   { label: 'Manual', value: 'MANUAL' },
 ]
 
@@ -107,13 +82,6 @@ export function activityName(
   id: number | null | undefined,
 ) {
   return activities.find((item) => item.id === id)?.title ?? 'No activity'
-}
-
-export function problemName(
-  problems: ProgrammingProblem[],
-  id: number | null | undefined,
-) {
-  return problems.find((item) => item.id === id)?.title ?? 'No problem'
 }
 
 export function scheduleName(

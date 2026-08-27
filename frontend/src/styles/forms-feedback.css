@@ -59,11 +59,6 @@ code {
   height: auto;
 }
 
-.blank-field small {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
 .code-input,
 .code-block {
   color: var(--code-text);

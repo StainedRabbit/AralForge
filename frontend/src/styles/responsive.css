@@ -1,7 +1,6 @@
 @media (max-width: 1160px) {
   .stat-grid,
   .module-grid,
-  .problem-grid,
   .class-grid,
   .period-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -137,7 +136,6 @@
 
   .stat-grid,
   .module-grid,
-  .problem-grid,
   .class-grid,
   .period-grid {
     grid-template-columns: 1fr;
@@ -148,7 +146,6 @@
   }
 
   .module-card,
-  .problem-card,
   .class-card,
   .period-card {
     min-height: auto;

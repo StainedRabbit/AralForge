@@ -37,6 +37,8 @@ class OverviewApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['role'], 'student')
         self.assertEqual(response.data['metrics']['module_count'], 0)
+        self.assertNotIn('problem_count', response.data['metrics'])
+        self.assertNotIn('blank_count', response.data['metrics'])
         self.assertLessEqual(len(queries), 25)
 
     def test_teacher_navigation_reports_teacher_role(self):
@@ -44,6 +46,11 @@ class OverviewApiTests(APITestCase):
         response = self.client.get(reverse('overview:navigation'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['role'], 'teacher')
+
+    def test_coding_api_is_removed(self):
+        self.client.force_authenticate(self.student)
+        response = self.client.get('/api/coding/problems/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class PaginationTests(APITestCase):
@@ -77,4 +84,5 @@ class ProductionScaleOverviewTests(APITestCase):
             response = self.client.get(reverse('overview:dashboard'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['metrics']['student_count'], 1000)
+        self.assertNotIn('problem_count', response.data['metrics'])
         self.assertLessEqual(len(queries), 20)

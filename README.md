@@ -1,6 +1,6 @@
 # AralForge
 
-AralForge is an academic coding platform that brings lessons, Main Activities, coding practice, attendance, grading, and student progress into one focused workspace.
+AralForge is an academic learning platform that brings lessons, Main Activities, attendance, grading, and student progress into one focused workspace.
 
 **Forge Knowledge, Build Future.**
 

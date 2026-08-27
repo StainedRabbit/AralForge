@@ -2,7 +2,6 @@ from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
 
 from attendance.models import AttendanceRecord, AttendanceSession
-from coding.models import CodeSubmission, ProgrammingProblem
 from learning_modules.models import (
     ModuleActivity, ModuleActivityAttempt, ModuleActivitySubmission,
 )
@@ -77,22 +76,14 @@ def sync_attendance_scores(sender, instance, **kwargs):
     sync_items(_items_for_source(GradeItemSourceType.ATTENDANCE, 'attendance_session_id', instance.session_id))
 
 
-@receiver(post_save, sender=CodeSubmission)
-@receiver(post_delete, sender=CodeSubmission)
-def sync_coding_scores(sender, instance, **kwargs):
-    sync_items(_items_for_source(GradeItemSourceType.CODING, 'coding_problem_id', instance.problem_id))
-
-
 SOURCE_MODELS = {
     ModuleActivity: (GradeItemSourceType.MODULE_ACTIVITY, 'module_activity_id'),
     AttendanceSession: (GradeItemSourceType.ATTENDANCE, 'attendance_session_id'),
-    ProgrammingProblem: (GradeItemSourceType.CODING, 'coding_problem_id'),
 }
 
 
 @receiver(post_save, sender=ModuleActivity)
 @receiver(post_save, sender=AttendanceSession)
-@receiver(post_save, sender=ProgrammingProblem)
 def sync_source_metadata(sender, instance, **kwargs):
     source_type, field = SOURCE_MODELS[sender]
     items = _items_for_source(source_type, field, instance.pk)
@@ -113,7 +104,6 @@ def sync_source_metadata(sender, instance, **kwargs):
 
 @receiver(pre_delete, sender=ModuleActivity)
 @receiver(pre_delete, sender=AttendanceSession)
-@receiver(pre_delete, sender=ProgrammingProblem)
 def clear_deleted_source_scores(sender, instance, **kwargs):
     source_type, field = SOURCE_MODELS[sender]
     clear_automatic_scores(list(_items_for_source(source_type, field, instance.pk)))

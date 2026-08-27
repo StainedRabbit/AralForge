@@ -522,7 +522,6 @@ class ClassScopedGradeTests(APITestCase):
         for category_type in (
             GradeCategoryChoices.EXAM,
             GradeCategoryChoices.ACTIVITY,
-            GradeCategoryChoices.CODING,
             GradeCategoryChoices.OTHER,
         ):
             categories.append(GradeCategory.objects.create(

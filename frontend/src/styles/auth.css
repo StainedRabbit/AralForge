@@ -106,7 +106,6 @@
 .dashboard-hero h1,
 .section-heading h2,
 .module-card h2,
-.problem-card h2,
 .profile-panel h2 {
   margin: 0;
   color: var(--text);
@@ -122,7 +121,6 @@
 .page-header p,
 .section-heading p,
 .module-card p,
-.problem-card p,
 .empty-state p {
   color: var(--text-muted);
 }

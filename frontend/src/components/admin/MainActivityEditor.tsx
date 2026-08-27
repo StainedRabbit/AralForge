@@ -320,7 +320,6 @@ export function MainActivityEditor({
             allow_late_submissions: allowLateSubmissions,
             accepts_text: false,
             accepts_file: false,
-            accepts_code: false,
             is_published: isPublished,
             questions: activeDrafts.map(toAtomicQuestion),
           }),

@@ -6,7 +6,6 @@ class PointLedger(models.Model):
     class Source(models.TextChoices):
         ATTENDANCE = 'ATTENDANCE', 'Attendance'
         MODULE_ACTIVITY = 'MODULE_ACTIVITY', 'Module Activity'
-        CODING = 'CODING', 'Coding'
         MANUAL = 'MANUAL', 'Manual'
 
     student = models.ForeignKey(

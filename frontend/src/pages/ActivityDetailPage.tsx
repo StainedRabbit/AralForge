@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../app/types'
-import { CodingBlankPanel, ModuleSubmissionForm } from '../components/activityForms'
+import { ModuleSubmissionForm } from '../components/activityForms'
 import { Icon } from '../components/Icon'
 import { MetaStrip, NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
 import { activityTypeLabel, hasActiveModuleAccess } from '../utils/student'
@@ -42,9 +42,6 @@ export function ActivityDetailPage({
     )
   }
 
-  const problem = data.problems.find(
-    (item) => item.id === activity.programming_problem,
-  )
   const existingSubmission = data.submissions.find(
     (submission) => submission.activity === activity.id,
   )
@@ -81,28 +78,18 @@ export function ActivityDetailPage({
               ['Due', activity.due_at ? formatDateTime(activity.due_at) : 'No due date'],
               ['Text', activity.accepts_text ? 'Accepted' : 'Off'],
               ['File', activity.accepts_file ? 'Accepted' : 'Off'],
-              ['Code', activity.accepts_code ? 'Accepted' : 'Off'],
             ]}
           />
         </article>
 
         <aside className="section-block">
-          {activity.activity_type === 'CODE_FILL_BLANK' && problem ? (
-            <CodingBlankPanel
-              api={api}
-              currentUser={data.currentUser}
-              onSubmitted={refresh}
-              problem={problem}
-            />
-          ) : (
-            <ModuleSubmissionForm
-              activity={activity}
-              api={api}
-              currentUser={data.currentUser}
-              existingSubmission={existingSubmission}
-              onSubmitted={refresh}
-            />
-          )}
+          <ModuleSubmissionForm
+            activity={activity}
+            api={api}
+            currentUser={data.currentUser}
+            existingSubmission={existingSubmission}
+            onSubmitted={refresh}
+          />
         </aside>
       </section>
     </Page>

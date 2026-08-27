@@ -1,10 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { RouteData } from '../app/types'
-import type {
-  Module,
-  ModuleActivity,
-  ProgrammingProblem,
-} from '../types'
+import type { Module, ModuleActivity } from '../types'
 import {
   activityTypeLabel,
   getModuleActivities,
@@ -14,7 +10,6 @@ import {
 } from '../utils/student'
 import { dueLabel, percent } from '../utils/format'
 import { Icon } from './Icon'
-import { MetaStrip } from './ui'
 
 export function ModuleCard({ data, module }: { data: RouteData; module: Module }) {
   const activities = getModuleActivities(data, module.id)
@@ -98,7 +93,7 @@ export function ActivityCard({
   return (
     <Link className="activity-card" to={`/activities/${activity.id}`}>
       <span className="activity-card__icon">
-        <Icon name={activity.activity_type.includes('CODE') ? 'code' : 'activity'} />
+        <Icon name="activity" />
       </span>
       <div>
         <strong>{activity.title}</strong>
@@ -122,7 +117,7 @@ export function ActivityTimelineItem({
   return (
     <Link className="timeline-item" to={`/activities/${activity.id}`}>
       <div className="timeline-dot">
-        <Icon name={activity.activity_type.includes('CODE') ? 'code' : 'calendar'} />
+        <Icon name="calendar" />
       </div>
       <div>
         <strong>{activity.title}</strong>
@@ -130,45 +125,5 @@ export function ActivityTimelineItem({
         <small>{dueLabel(activity.due_at)}</small>
       </div>
     </Link>
-  )
-}
-
-export function ProblemCard({
-  data,
-  problem,
-}: {
-  data: RouteData
-  problem: ProgrammingProblem
-}) {
-  const subject = data.subjects.find((item) => item.id === problem.subject)
-  const submissions = data.codeSubmissions.filter(
-    (submission) => submission.problem === problem.id,
-  )
-
-  return (
-    <article className="problem-card">
-      <div className="module-card__top">
-        <span className={`difficulty difficulty--${problem.difficulty.toLowerCase()}`}>
-          {problem.difficulty}
-        </span>
-        <span className="status-pill">
-          <Icon name="code" />
-          {problem.blanks.length} blanks
-        </span>
-      </div>
-      <h2>{problem.title}</h2>
-      <p>{problem.description || 'Open the problem to submit a solution.'}</p>
-      <MetaStrip
-        items={[
-          ['Subject', subject ? subject.code : 'General'],
-          ['Language', problem.expected_language || 'Any'],
-          ['Attempts', submissions.length.toString()],
-        ]}
-      />
-      <Link className="button button--secondary" to={`/coding/${problem.id}`}>
-        <Icon name="code" />
-        <span>Open problem</span>
-      </Link>
-    </article>
   )
 }

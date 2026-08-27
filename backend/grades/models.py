@@ -29,7 +29,6 @@ class GradeCategoryChoices(models.TextChoices):
     EXAM = 'EXAM', 'Exam'
     ACTIVITY = 'ACTIVITY', 'Activity'
     ATTENDANCE = 'ATTENDANCE', 'Attendance'
-    CODING = 'CODING', 'Coding'
     OTHER = 'OTHER', 'Other'
 
 
@@ -37,7 +36,6 @@ class GradeItemSourceType(models.TextChoices):
     MANUAL = 'MANUAL', 'Manual'
     MODULE_ACTIVITY = 'MODULE_ACTIVITY', 'Module activity'
     ATTENDANCE = 'ATTENDANCE', 'Attendance'
-    CODING = 'CODING', 'Coding'
 
 
 class GradingTemplate(models.Model):
@@ -340,13 +338,6 @@ class GradeItem(models.Model):
         null=True,
         blank=True,
     )
-    coding_problem = models.ForeignKey(
-        'coding.ProgrammingProblem',
-        on_delete=models.SET_NULL,
-        related_name='grade_items',
-        null=True,
-        blank=True,
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -364,8 +355,6 @@ class GradeItem(models.Model):
             return self.module_activity.title
         if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:
             return self.attendance_session.title or str(self.attendance_session.date)
-        if self.source_type == GradeItemSourceType.CODING and self.coding_problem_id:
-            return self.coding_problem.title
         return self.title
 
     @property
@@ -374,8 +363,6 @@ class GradeItem(models.Model):
             return self.module_activity.points_possible
         if self.source_type == GradeItemSourceType.ATTENDANCE and self.attendance_session_id:
             return self.attendance_session.points_possible
-        if self.source_type == GradeItemSourceType.CODING and self.coding_problem_id:
-            return self.coding_problem.points_possible
         return self.points_possible
 
     def save(self, *args, **kwargs):

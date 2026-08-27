@@ -94,7 +94,12 @@ class RemoveModulePaymentsMigrationTests(TransactionTestCase):
 class TopicPdfOnlyMigrationTests(TransactionTestCase):
     reset_sequences = True
 
-    migrate_from = ('learning_modules', '0022_moduletopic_printable_pdf')
+    migrate_from = {
+        'coding': '0004_remove_assessment_links',
+        'gamification': '0002_remove_assessment_point_source',
+        'grades': '0009_remove_assessment_sources',
+        'learning_modules': '0022_moduletopic_printable_pdf',
+    }
 
     def setUp(self):
         super().setUp()
@@ -105,8 +110,8 @@ class TopicPdfOnlyMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         self.latest_targets = executor.loader.graph.leaf_nodes()
         old_targets = [
-            self.migrate_from if target[0] == 'learning_modules' else target
-            for target in self.latest_targets
+            (app_label, self.migrate_from.get(app_label, migration_name))
+            for app_label, migration_name in self.latest_targets
         ]
         executor.migrate(old_targets)
         self.old_apps = executor.loader.project_state(old_targets).apps

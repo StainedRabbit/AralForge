@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { ActivityCard } from '../components/cards'
 import { Icon } from '../components/Icon'
@@ -305,7 +305,6 @@ export function ModuleDetailPage({
     </Page>
   )
 }
-
 function LockedModuleDetail({
   api,
   module,
@@ -323,7 +322,7 @@ function LockedModuleDetail({
         <h2>Download a topic</h2>
         <p>
           Published topics are ready for offline study. Your teacher can activate the
-          full module when it is time to use web lessons, coding exercises, progress,
+          full module when it is time to use web lessons, progress,
           and Main Activities online.
         </p>
       </div>
@@ -1019,7 +1018,6 @@ function StudentLessonReader({
         {mainActivityInsertionIndex === displayedLessonSections.length
           ? mainActivityLessonBlock
           : null}
-        <LessonCodingPractice data={data} lessonId={lesson.id} />
         <section className="student-lesson-completion">
           <div>
             <p className="eyebrow">Lesson progress</p>
@@ -1142,28 +1140,4 @@ function scrollToStudentSection(sectionId: string) {
       : 'smooth',
     block: 'start',
   })
-}
-
-function LessonCodingPractice({ data, lessonId }: { data: RouteData; lessonId: number }) {
-  const problems = data.problems.filter(
-    (problem) => problem.lesson === lessonId && problem.is_published,
-  )
-  if (!problems.length) return null
-
-  return (
-    <section>
-      <h2>Coding Practice</h2>
-      <div className="card-list">
-        {problems.map((problem) => (
-          <Link className="resource-row" key={problem.id} to={`/coding/${problem.id}`}>
-            <span className="resource-row__icon"><Icon name="code" /></span>
-            <div>
-              <strong>{problem.title}</strong>
-              <span>{problem.difficulty} | {problem.blanks.length} blank{problem.blanks.length === 1 ? '' : 's'}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
-  )
 }

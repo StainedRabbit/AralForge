@@ -238,8 +238,6 @@ export type ModuleAccess = {
 export type ModuleActivityType =
   | 'TEXT'
   | 'FILE_UPLOAD'
-  | 'CODE_COMPLETE'
-  | 'CODE_FILL_BLANK'
   | 'INTERACTIVE'
 
 export type ModuleActivity = {
@@ -247,7 +245,6 @@ export type ModuleActivity = {
   module: number
   topic: number | null
   lesson: number | null
-  programming_problem: number | null
   title: string
   instructions: string
   activity_type: ModuleActivityType
@@ -259,7 +256,6 @@ export type ModuleActivity = {
   allow_late_submissions: boolean
   accepts_text: boolean
   accepts_file: boolean
-  accepts_code: boolean
   max_attempts: number
   passing_score: string | null
   is_published: boolean
@@ -436,7 +432,6 @@ export type ModuleActivitySubmission = {
   student: number
   text_answer: string
   file: string
-  code: string
   score: string | null
   feedback: string
   submitted_at: string
@@ -488,68 +483,6 @@ export type ModuleTeacherSummary = {
   completed_count: number
   ungraded_submission_count: number
   students: ModuleTeacherSummaryStudent[]
-}
-
-export type CodeBlank = {
-  id: number
-  problem: number
-  key: string
-  prompt: string
-  expected_answer?: string
-  hint: string
-  order: number
-  points: string
-}
-
-export type TestCase = {
-  id: number
-  problem: number
-  input_data: string
-  expected_output: string
-  is_hidden: boolean
-  order: number
-}
-
-export type ProgrammingProblem = {
-  id: number
-  title: string
-  slug: string
-  description: string
-  starter_code: string
-  expected_language: string
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD'
-  subject: number | null
-  module: number | null
-  topic: number | null
-  lesson: number | null
-  points_possible: string
-  is_published: boolean
-  created_at: string
-  test_cases: TestCase[]
-  blanks: CodeBlank[]
-}
-
-export type CodeSubmission = {
-  id: number
-  problem: number
-  student: number
-  language: string
-  source_code: string
-  status: string
-  score: string | null
-  output: string
-  error: string
-  submitted_at: string
-}
-
-export type CodeBlankAnswer = {
-  id: number
-  submission: number
-  blank: number
-  answer: string
-  is_correct: boolean | null
-  points_earned: string | null
-  feedback: string
 }
 
 export type AttendanceSession = {
@@ -608,7 +541,7 @@ export type GradingTemplateItem = {
   id: number
   template: number
   grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
-  category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'CODING' | 'OTHER'
+  category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
   weight: string
 }
@@ -618,7 +551,7 @@ export type GradeCategory = {
   subject: number
   template_item: number | null
   grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
-  category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'CODING' | 'OTHER'
+  category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
   weight: string
 }
@@ -627,7 +560,6 @@ export type GradeItemSourceType =
   | 'MANUAL'
   | 'MODULE_ACTIVITY'
   | 'ATTENDANCE'
-  | 'CODING'
 
 export type GradeItem = {
   id: number
@@ -642,7 +574,6 @@ export type GradeItem = {
   source_type: GradeItemSourceType
   module_activity: number | null
   attendance_session: number | null
-  coding_problem: number | null
   source_title: string
   source_points_possible: string
   created_at: string

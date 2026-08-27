@@ -31,7 +31,6 @@
 }
 
 .module-grid,
-.problem-grid,
 .class-grid,
 .period-grid {
   display: grid;
@@ -40,7 +39,6 @@
 }
 
 .module-card,
-.problem-card,
 .class-card,
 .period-card {
   display: flex;
@@ -121,14 +119,12 @@
 }
 
 .module-card h2,
-.problem-card h2,
 .class-card h2,
 .period-card h2 {
   font-size: 21px;
 }
 
-.module-card p,
-.problem-card p {
+.module-card p {
   display: -webkit-box;
   min-height: 72px;
   margin: 0;
@@ -246,8 +242,7 @@
 }
 
 .subject-chip,
-.status-pill,
-.difficulty {
+.status-pill {
   min-height: 28px;
   display: inline-flex;
   align-items: center;
@@ -278,21 +273,6 @@
 .status-pill--success {
   color: #166534;
   background: var(--success-soft);
-}
-
-.difficulty {
-  color: var(--primary-dark);
-  background: var(--primary-soft);
-}
-
-.difficulty--medium {
-  color: #8a5800;
-  background: var(--warning-soft);
-}
-
-.difficulty--hard {
-  color: #991b1b;
-  background: var(--danger-soft);
 }
 
 .progress-line {
@@ -2224,11 +2204,6 @@
   min-height: 100%;
   margin: 0 auto;
   padding: clamp(28px, 5vw, 72px);
-}
-
-.presentation-stage--coding {
-  border-color: rgba(var(--accent-rgb), 0.34);
-  background: #f0fdfa;
 }
 
 .presentation-kicker {

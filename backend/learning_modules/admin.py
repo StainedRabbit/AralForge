@@ -147,8 +147,8 @@ class ModuleAccessAdmin(admin.ModelAdmin):
 @admin.register(ModuleActivity)
 class ModuleActivityAdmin(admin.ModelAdmin):
     list_display = ('title', 'module', 'topic', 'lesson', 'activity_type', 'order', 'points_possible', 'due_at', 'is_published')
-    list_filter = ('activity_type', 'is_published', 'accepts_text', 'accepts_file', 'accepts_code', 'topic')
-    search_fields = ('title', 'module__title', 'topic__title', 'lesson__title', 'programming_problem__title')
+    list_filter = ('activity_type', 'is_published', 'accepts_text', 'accepts_file', 'topic')
+    search_fields = ('title', 'module__title', 'topic__title', 'lesson__title')
 
 
 class ModuleActivityQuestionChoiceInline(admin.TabularInline):

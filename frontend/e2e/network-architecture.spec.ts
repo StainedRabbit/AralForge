@@ -14,6 +14,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
 
   expect([...new Set(apiRequests.filter(path => path !== '/api/auth/token/'))]).toEqual([
     '/api/accounts/users/me/',
@@ -24,6 +25,18 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   expect(pageModules).toContain('/src/pages/admin/AdminDashboardPage.tsx')
   expect(pageModules).not.toContain('/src/pages/admin/AdminClassesPage.tsx')
   expect(pageModules).not.toContain('/src/pages/admin/AdminGradesPage.tsx')
+})
+
+test('retired teacher coding route returns to the teacher dashboard', async ({ page }) => {
+  await page.goto('/admin')
+  await page.getByLabel('Student number').fill('e2e-teacher')
+  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await page.goto('/admin/coding')
+
+  await expect(page).toHaveURL(/\/admin$/)
+  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
 })
 
 test('feature navigation loads only that route resources', async ({ page }) => {

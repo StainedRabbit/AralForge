@@ -715,17 +715,15 @@ summary {
   transition: width 420ms ease;
 }
 
-/* Courses, modules, lessons, and coding */
+/* Courses, modules, and lessons */
 
 .module-grid,
-.problem-grid,
 .class-grid,
 .period-grid {
   gap: 18px;
 }
 
 .module-card,
-.problem-card,
 .class-card,
 .period-card {
   position: relative;
@@ -741,7 +739,6 @@ summary {
 }
 
 .module-card::before,
-.problem-card::before,
 .class-card::before,
 .period-card::before {
   content: "";
@@ -762,7 +759,6 @@ summary {
 }
 
 .module-card:hover,
-.problem-card:hover,
 .class-card:hover,
 .period-card:hover {
   border-color: rgba(var(--ember-orange-rgb), 0.3);
@@ -771,8 +767,7 @@ summary {
 }
 
 .subject-chip,
-.status-pill,
-.difficulty {
+.status-pill {
   min-height: 27px;
   border-radius: 7px;
 }

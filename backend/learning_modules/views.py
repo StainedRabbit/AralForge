@@ -9,8 +9,6 @@ from rest_framework.exceptions import PermissionDenied
 
 from accounts.serializers import UserSerializer
 from accounts.permissions import IsAdminTeacherOrReadOnly
-from coding.models import ProgrammingProblem
-from coding.serializers import ProgrammingProblemSerializer
 from grades.models import GradeCategory, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
@@ -239,7 +237,6 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 'lesson_progress': [],
                 'activities': [],
                 'activity_attempts': [],
-                'problems': [],
                 'subjects': SubjectSerializer(
                     subjects,
                     many=True,
@@ -278,10 +275,6 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 attempts,
                 many=True,
                 context=context,
-            ).data,
-            'problems': ProgrammingProblemSerializer(
-                ProgrammingProblem.objects.filter(module=module).prefetch_related('test_cases', 'blanks'),
-                many=True, context=context,
             ).data,
             'subjects': SubjectSerializer(
                 subjects,
@@ -752,7 +745,6 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             'lesson',
             'lesson__topic',
             'lesson__topic__module',
-            'programming_problem',
         )
 
         if self.request.user.is_admin_teacher:
@@ -805,10 +797,10 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         activity_data = {
             key: payload.get(key)
             for key in (
-                'module', 'topic', 'lesson', 'programming_problem', 'title', 'instructions',
+                'module', 'topic', 'lesson', 'title', 'instructions',
                 'activity_type', 'order', 'opens_at', 'due_at', 'allow_late_submissions',
                 'max_attempts', 'passing_score', 'accepts_text', 'accepts_file',
-                'accepts_code', 'is_published',
+                'is_published',
             )
             if key in payload
         }
@@ -967,10 +959,6 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         return response.Response({
             'activity': ModuleActivitySerializer(activity, context=context).data,
             'module': ModuleSerializer(activity.module, context=context).data,
-            'problem': (
-                ProgrammingProblemSerializer(activity.programming_problem, context=context).data
-                if activity.programming_problem_id else None
-            ),
             'questions': ModuleActivityQuestionSerializer(questions, many=True, context=context).data,
             'attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
             'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,

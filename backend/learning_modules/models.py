@@ -553,8 +553,6 @@ class ModuleActivity(models.Model):
     class ActivityType(models.TextChoices):
         TEXT = 'TEXT', 'Text'
         FILE_UPLOAD = 'FILE_UPLOAD', 'File Upload'
-        CODE_COMPLETE = 'CODE_COMPLETE', 'Complete Coding'
-        CODE_FILL_BLANK = 'CODE_FILL_BLANK', 'Fill in the Blank Coding'
         INTERACTIVE = 'INTERACTIVE', 'Interactive'
 
     module = models.ForeignKey(
@@ -576,13 +574,6 @@ class ModuleActivity(models.Model):
         null=True,
         blank=True,
     )
-    programming_problem = models.ForeignKey(
-        'coding.ProgrammingProblem',
-        on_delete=models.SET_NULL,
-        related_name='module_activities',
-        null=True,
-        blank=True,
-    )
     title = models.CharField(max_length=180)
     instructions = models.TextField()
     activity_type = models.CharField(
@@ -597,7 +588,6 @@ class ModuleActivity(models.Model):
     allow_late_submissions = models.BooleanField(default=False)
     accepts_text = models.BooleanField(default=True)
     accepts_file = models.BooleanField(default=False)
-    accepts_code = models.BooleanField(default=False)
     max_attempts = models.PositiveSmallIntegerField(default=3)
     passing_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     is_published = models.BooleanField(default=False)
@@ -618,7 +608,6 @@ class ModuleActivity(models.Model):
             self.activity_type = self.ActivityType.INTERACTIVE
             self.accepts_text = False
             self.accepts_file = False
-            self.accepts_code = False
         super().save(*args, **kwargs)
         if self.lesson_id:
             mark_lesson_topic_pdf_outdated(self.lesson)
@@ -1094,7 +1083,6 @@ class ModuleActivitySubmission(models.Model):
     )
     text_answer = models.TextField(blank=True)
     file = models.FileField(upload_to='activity_submissions/', blank=True)
-    code = models.TextField(blank=True)
     score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     feedback = models.TextField(blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)

@@ -5,7 +5,7 @@ import { Icon } from '../../components/Icon'
 import { LessonExampleCards } from '../../components/LessonExampleCards'
 import { RichLessonText } from '../../components/RichLessonText'
 import { EmptyState } from '../../components/ui'
-import type { ModuleLesson, ModuleTopic, ProgrammingProblem } from '../../types'
+import type { ModuleLesson, ModuleTopic } from '../../types'
 import {
   lessonSectionId,
   lessonsForTopic,
@@ -17,7 +17,7 @@ type PresentationSection = {
   content: string
   lessonId?: number
   id: string
-  kind: 'coding' | 'lesson'
+  kind: 'lesson'
   title: string
 }
 
@@ -45,13 +45,8 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
   const selectedLesson = requestedLessonId
     ? topicLessons.find((lesson) => lesson.id === requestedLessonId) ?? null
     : null
-  const linkedProblems = selectedLesson
-    ? data.problems.filter(
-        (problem) => problem.lesson === selectedLesson.id && problem.is_published,
-      )
-    : []
   const sections = selectedLesson
-    ? buildPresentationSections(selectedLesson, linkedProblems, data.lessonExamples.filter((example) => example.lesson === selectedLesson.id))
+    ? buildPresentationSections(selectedLesson, data.lessonExamples.filter((example) => example.lesson === selectedLesson.id))
     : selectedTopic
       ? buildTopicIntroductionSections(selectedTopic)
       : []
@@ -144,7 +139,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
       direction,
       sectionIndex,
       sections,
-      problems: data.problems,
       lessonExamples: data.lessonExamples,
       selectedLesson,
       selectedTopic,
@@ -263,9 +257,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
     const keyboardSections = selectedLesson
       ? buildPresentationSections(
           selectedLesson,
-          data.problems.filter(
-            (problem) => problem.lesson === selectedLesson.id && problem.is_published,
-          ),
           data.lessonExamples.filter((example) => example.lesson === selectedLesson.id),
         )
       : selectedTopic
@@ -334,7 +325,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
           direction: 1,
           sectionIndex,
           sections: keyboardSections,
-          problems: data.problems,
           lessonExamples: data.lessonExamples,
           selectedLesson,
           selectedTopic,
@@ -349,7 +339,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
           direction: -1,
           sectionIndex,
           sections: keyboardSections,
-          problems: data.problems,
           lessonExamples: data.lessonExamples,
           selectedLesson,
           selectedTopic,
@@ -384,7 +373,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
   }, [
     blankScreen,
     controlsPinned,
-    data.problems,
     data.lessonExamples,
     lessonMenuOpen,
     sectionDrawerOpen,
@@ -497,8 +485,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
           <span className="presentation-kicker">
             {!selectedLesson
               ? 'Topic Introduction'
-              : currentSection.kind === 'coding'
-              ? 'Coding Activity'
               : `Section ${sectionIndex + 1} of ${sections.length}`}
           </span>
           <h1>{currentSection.title}</h1>
@@ -650,7 +636,6 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
 
 function buildPresentationSections(
   lesson: ModuleLesson,
-  problems: ProgrammingProblem[],
   examples = [] as { lesson: number }[],
 ): PresentationSection[] {
   const lessonSections = [
@@ -673,19 +658,7 @@ function buildPresentationSections(
       lessonId: lesson.id,
       title,
     }))
-  const codingSections = problems.map((problem) => ({
-    content: [
-      problem.description,
-      `Difficulty: ${problem.difficulty}`,
-      `Points: ${problem.points_possible}`,
-      problem.starter_code ? `\`\`\`java\n${problem.starter_code}\n\`\`\`` : '',
-    ].filter(Boolean).join('\n\n'),
-    id: `coding-${problem.id}`,
-    kind: 'coding' as const,
-    title: problem.title,
-  }))
-
-  return [...lessonSections, ...codingSections]
+  return lessonSections
 }
 
 function buildTopicIntroductionSections(topic: ModuleTopic): PresentationSection[] {
@@ -798,7 +771,6 @@ function updatePresentationStep({
   direction,
   sectionIndex,
   sections,
-  problems,
   lessonExamples,
   selectedLesson,
   selectedTopic,
@@ -808,7 +780,6 @@ function updatePresentationStep({
   direction: -1 | 1
   sectionIndex: number
   sections: PresentationSection[]
-  problems: ProgrammingProblem[]
   lessonExamples: { lesson: number }[]
   selectedLesson: ModuleLesson | null
   selectedTopic: ModuleTopic | null
@@ -871,13 +842,8 @@ function updatePresentationStep({
   if (!adjacentLesson) {
     return
   }
-  const adjacentProblems = problems.filter(
-    (problem) =>
-      problem.lesson === adjacentLesson.id && problem.is_published,
-  )
   const adjacentSections = buildPresentationSections(
     adjacentLesson,
-    adjacentProblems,
     lessonExamples.filter((example) => example.lesson === adjacentLesson.id),
   )
   const targetSection =

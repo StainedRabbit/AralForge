@@ -499,7 +499,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'module',
             'topic',
             'lesson',
-            'programming_problem',
             'title',
             'instructions',
             'activity_type',
@@ -511,7 +510,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'allow_late_submissions',
             'accepts_text',
             'accepts_file',
-            'accepts_code',
             'max_attempts',
             'passing_score',
             'is_published',
@@ -533,7 +531,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             attrs['activity_type'] = ModuleActivity.ActivityType.INTERACTIVE
             attrs['accepts_text'] = False
             attrs['accepts_file'] = False
-            attrs['accepts_code'] = False
         points_possible = attrs.get(
             'points_possible',
             getattr(self.instance, 'points_possible', None),
@@ -568,7 +565,6 @@ class ModuleActivitySubmissionSerializer(serializers.ModelSerializer):
             'student',
             'text_answer',
             'file',
-            'code',
             'score',
             'feedback',
             'submitted_at',

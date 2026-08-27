@@ -14,7 +14,6 @@ const studentNavItems: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: 'dashboard' },
   { to: '/classes', label: 'Classes', icon: 'users' },
   { to: '/modules', label: 'Modules', icon: 'module' },
-  { to: '/coding', label: 'Coding', icon: 'code' },
   { to: '/attendance', label: 'Attendance', icon: 'check' },
   { to: '/grades', label: 'Grades', icon: 'grade' },
   { to: '/profile', label: 'Profile', icon: 'profile' },

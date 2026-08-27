@@ -3,8 +3,6 @@ import type {
   AttendanceRecord,
   AttendanceSession,
   Badge,
-  CodeBlankAnswer,
-  CodeSubmission,
   FinalGrade,
   GradeCategory,
   GradeItem,
@@ -29,7 +27,6 @@ import type {
   ModuleTopicProgress,
   PeriodGrade,
   PointLedger,
-  ProgrammingProblem,
   ScheduleStudent,
   SchoolYear,
   SchoolYearSemester,
@@ -40,7 +37,6 @@ import type {
   Subject,
   SubjectGradingPolicy,
   SubjectSchedule,
-  TestCase,
   User,
 } from '../types'
 
@@ -75,10 +71,6 @@ export type RouteData = {
   submissions: ModuleActivitySubmission[]
   progress: ModuleProgress[]
   topicProgress: ModuleTopicProgress[]
-  problems: ProgrammingProblem[]
-  testCases: TestCase[]
-  codeSubmissions: CodeSubmission[]
-  codeBlankAnswers: CodeBlankAnswer[]
   attendanceSessions: AttendanceSession[]
   attendanceRecords: AttendanceRecord[]
   gradingTemplates: GradingTemplate[]

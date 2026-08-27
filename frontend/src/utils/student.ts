@@ -10,27 +10,6 @@ import type {
 } from '../types'
 import { formatTime, numeric, percent } from './format'
 
-export function buildDashboardMetrics(data: RouteData) {
-  const completedModules = data.progress.filter((item) => item.completed_at).length
-  const submittedActivities = data.submissions.length
-  const pendingActivities = countPendingActivities(data)
-  const blankCount = data.problems.reduce(
-    (sum, problem) => sum + problem.blanks.length,
-    0,
-  )
-  const totalPoints = data.points.reduce((sum, point) => sum + point.points, 0)
-
-  return {
-    blankCount,
-    completedModules,
-    moduleCount: data.modules.length,
-    pendingActivities,
-    problemCount: data.problems.length,
-    submittedActivities,
-    totalPoints,
-  }
-}
-
 export function getStudentEnrollments(data: RouteData) {
   if (!data.currentUser) {
     return data.enrollments
@@ -185,8 +164,6 @@ export function activityTypeLabel(type: ModuleActivity['activity_type']) {
   const labels: Record<ModuleActivity['activity_type'], string> = {
     TEXT: 'Text activity',
     FILE_UPLOAD: 'File upload',
-    CODE_COMPLETE: 'Complete coding',
-    CODE_FILL_BLANK: 'Fill in the blank coding',
     INTERACTIVE: 'Interactive activity',
   }
 

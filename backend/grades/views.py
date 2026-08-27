@@ -160,7 +160,6 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'schedule',
             'module_activity',
             'attendance_session',
-            'coding_problem',
         )
 
         if not self.request.user.is_admin_teacher:
