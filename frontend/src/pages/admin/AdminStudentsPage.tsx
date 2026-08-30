@@ -193,15 +193,20 @@ function StudentModuleAccessPanel({
         title="Student Module Access"
       />
       <div className="student-module-access-launcher">
-        <label className="admin-field">
+        <label className="admin-field" htmlFor="student-access-search">
           <span>Search student</span>
           <input
+            id="student-access-search"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Name or student number"
             type="search"
             value={query}
           />
+        </label>
+        <label className="admin-field" htmlFor="student-access-result">
+          <span>Student</span>
           <select
+            id="student-access-result"
             onChange={(event) => setStudentId(event.target.value)}
             value={studentId}
           >

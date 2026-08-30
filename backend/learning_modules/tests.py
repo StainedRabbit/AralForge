@@ -820,6 +820,45 @@ class ModuleTeacherSummaryApiTests(APITestCase):
         self.assertEqual(response.data['next'], 30)
         self.assertLessEqual(len(queries), 20)
 
+    def test_teacher_summary_cursor_pages_are_stable(self):
+        from urllib.parse import urlsplit
+
+        extra_students = [
+            User(
+                username=f'cursor_summary_{index:03d}',
+                role=User.Role.STUDENT,
+                first_name='Cursor',
+                last_name=f'{index:03d}',
+            )
+            for index in range(8)
+        ]
+        User.objects.bulk_create(extra_students)
+        ModuleAccess.objects.bulk_create([
+            ModuleAccess(
+                activated_by=self.teacher,
+                expires_at=timezone.now() + timezone.timedelta(days=30),
+                module=self.module,
+                student=student,
+            )
+            for student in extra_students
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        first = self.client.get(
+            f'/api/modules/modules/{self.module.id}/teacher-summary/',
+            {'access_status': 'AVAILED', 'limit': 3, 'pagination': 'cursor'},
+        )
+        next_url = urlsplit(first.data['next'])
+        second = self.client.get(f'{next_url.path}?{next_url.query}')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        first_ids = {row['student_id'] for row in first.data['students']}
+        second_ids = {row['student_id'] for row in second.data['students']}
+        self.assertEqual(len(first_ids), 3)
+        self.assertEqual(len(second_ids), 3)
+        self.assertFalse(first_ids & second_ids)
+
     def test_compact_module_list_does_not_query_per_module(self):
         modules = [
             Module(
@@ -2100,14 +2139,16 @@ class PrintablePdfApiTests(APITestCase):
             with override_settings(MEDIA_ROOT=media_root):
                 self.client.force_authenticate(self.teacher)
                 with patch(
-                    'learning_modules.views.generate_topic_pdf',
+                    'learning_modules.services.pdf_generation.generate_topic_pdf',
                     side_effect=self.fake_topic_pdf,
                 ):
-                    response = self.client.post(
-                        f'/api/modules/topics/{self.topic.id}/regenerate_pdf/',
-                    )
+                    with self.captureOnCommitCallbacks(execute=True):
+                        response = self.client.post(
+                            f'/api/modules/topics/{self.topic.id}/regenerate_pdf/',
+                        )
 
-                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.status_code, 202)
+                self.assertIn('job', response.data)
                 self.topic.refresh_from_db()
                 self.assertTrue(self.topic.pdf_file)
                 self.assertFalse(self.topic.pdf_is_outdated)

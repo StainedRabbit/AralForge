@@ -144,6 +144,7 @@ export type BackgroundJob = {
   job_type: 'GRADE_RECALCULATION' | 'MODULE_PROGRESS' | 'PDF_GENERATION' | 'IMPORT' | 'EXPORT'
   owner: number | null
   status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  attempts: number
   progress: number
   total: number
   result: Record<string, unknown>
@@ -160,6 +161,13 @@ export type BatchScoreChange = {
   raw_score?: string
   status?: 'GRADED' | 'EXCUSED'
   remarks?: string
+}
+
+export type BatchScoreResult = {
+  updated: StudentGradeItemScore[]
+  deleted: Array<{ grade_item: number; student: number }>
+  updated_count: number
+  deleted_count: number
 }
 
 export type DownloadableModuleTopic = {
@@ -558,8 +566,8 @@ export type ModuleTeacherSummary = {
   completed_count: number
   ungraded_submission_count: number
   count: number
-  next: number | null
-  previous: number | null
+  next: number | string | null
+  previous: number | string | null
   students: ModuleTeacherSummaryStudent[]
 }
 

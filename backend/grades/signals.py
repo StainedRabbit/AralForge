@@ -28,16 +28,22 @@ RECOMPUTE_INLINE_LIMIT = 250
 
 
 def recompute_subject_students_now(subject, job=None):
-    from .services import recompute_all_for_student
+    from .services import recompute_student_categories_bulk
 
     processed = 0
-    schedules = subject.schedules.all().prefetch_related('grade_items__grade_category')
+    categories = list(GradeCategory.objects.filter(subject=subject).only('id'))
+    schedules = subject.schedules.filter(is_active=True)
     for schedule in schedules:
-        enrollments = schedule.students.filter(is_active=True).select_related('student').iterator(chunk_size=200)
-        for enrollment in enrollments:
-            recompute_all_for_student(enrollment.student, schedule)
-            processed += 1
-            if job and processed % 100 == 0:
+        student_ids = list(schedule.students.filter(is_active=True).values_list('student_id', flat=True))
+        for start in range(0, len(student_ids), 250):
+            batch = student_ids[start:start + 250]
+            recompute_student_categories_bulk({
+                (student_id, category.id, schedule.id)
+                for student_id in batch
+                for category in categories
+            })
+            processed += len(batch)
+            if job:
                 job.progress = processed
                 job.save(update_fields=('progress',))
     return processed

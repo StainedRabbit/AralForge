@@ -4,6 +4,7 @@ import json
 from django.http import FileResponse
 from django.db import transaction
 from django.db.models import Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
@@ -11,6 +12,7 @@ from rest_framework.exceptions import PermissionDenied
 from accounts.models import User
 from accounts.serializers import UserSerializer
 from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from config.pagination import AralForgeCursorPagination
 from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
@@ -563,16 +565,23 @@ class ModuleViewSet(viewsets.ModelViewSet):
 
         students = students.order_by(
             F('_latest_activation').desc(nulls_last=True),
-            'last_name',
-            'first_name',
-            'username',
-            'id',
+            'last_name', 'first_name', 'username', 'id',
         )
         count = students.count()
-        limit_param = request.query_params.get('limit')
-        limit = bounded_int(limit_param, default=count, maximum=100) if limit_param is not None else count
-        offset = bounded_int(request.query_params.get('offset'), default=0)
-        page_students = list(students[offset:offset + limit])
+        cursor_paginator = None
+        if request.query_params.get('pagination') == 'cursor':
+            cursor_paginator = AralForgeCursorPagination()
+            cursor_paginator.ordering = ('last_name', 'first_name', 'id')
+            page_students = list(cursor_paginator.paginate_queryset(students, request, view=self))
+            next_page = cursor_paginator.get_next_link()
+            previous_page = cursor_paginator.get_previous_link()
+        else:
+            limit_param = request.query_params.get('limit')
+            limit = bounded_int(limit_param, default=count, maximum=100) if limit_param is not None else count
+            offset = bounded_int(request.query_params.get('offset'), default=0)
+            page_students = list(students[offset:offset + limit])
+            next_page = offset + limit if offset + limit < count else None
+            previous_page = max(offset - limit, 0) if offset > 0 else None
         page_student_ids = [student.id for student in page_students]
 
         active_enrollments = enrollment_scope.filter(
@@ -693,8 +702,8 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 score__isnull=True,
             ).count(),
             'count': count,
-            'next': offset + limit if offset + limit < count else None,
-            'previous': max(offset - limit, 0) if offset > 0 else None,
+            'next': next_page,
+            'previous': previous_page,
             'students': rows,
         }
         return response.Response(summary)
@@ -782,6 +791,7 @@ def active_access_expiry(grants):
 class ModuleAccessViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleAccessSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    cursor_ordering = ('id',)
 
     def get_queryset(self):
         queryset = ModuleAccess.objects.select_related(
@@ -1641,6 +1651,7 @@ class ModuleActivityMatchingPairViewSet(viewsets.ModelViewSet):
 class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivityAttemptSerializer
     permission_classes = [permissions.IsAuthenticated]
+    cursor_ordering = ('-id',)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -1984,6 +1995,7 @@ class ModuleActivityAnswerViewSet(viewsets.ModelViewSet):
 class ModuleActivitySubmissionViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivitySubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    cursor_ordering = ('-id',)
 
     def get_queryset(self):
         queryset = ModuleActivitySubmission.objects.select_related(
@@ -2077,6 +2089,7 @@ def serialize_submission_review(submission, request):
 class ModuleProgressViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    cursor_ordering = ('-id',)
 
     def get_queryset(self):
         queryset = ModuleProgress.objects.select_related('module', 'student')
@@ -2099,6 +2112,7 @@ class ModuleProgressViewSet(viewsets.ModelViewSet):
 class ModuleTopicProgressViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleTopicProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    cursor_ordering = ('-id',)
 
     def get_queryset(self):
         queryset = ModuleTopicProgress.objects.select_related(
@@ -2128,6 +2142,7 @@ class ModuleTopicProgressViewSet(viewsets.ModelViewSet):
 class ModuleLessonProgressViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleLessonProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    cursor_ordering = ('-id',)
 
     def get_queryset(self):
         queryset = ModuleLessonProgress.objects.select_related(

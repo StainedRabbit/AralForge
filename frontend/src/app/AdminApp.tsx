@@ -37,9 +37,11 @@ const mobileMore: NavItem[] = [
 ]
 
 const STUDENTS: WorkspaceResource[] = ['subjects','modules']
-const CLASSES: WorkspaceResource[] = ['users','profiles','subjects','schoolYears','terms','schedules','enrollments','modules','moduleAccess','attendanceSessions','attendanceRecords','gradeCategories','gradeItems','gradeItemScores','categoryGrades','periodGrades','finalGrades']
+const CLASSES: WorkspaceResource[] = ['subjects','schoolYears','terms','modules']
 const MODULES: WorkspaceResource[] = ['subjects','modules']
-const EDITOR: WorkspaceResource[] = ['users','profiles','schedules','enrollments','gradeCategories','gradeItems',...MODULES,'moduleTopics','moduleLessons','lessonExamples','lessonAssets','activities','activityQuestions','activityChoices','activityMatchingPairs']
+const MODULE_EDITOR: WorkspaceResource[] = MODULES
+const TOPIC_EDITOR: WorkspaceResource[] = [...MODULES,'moduleTopics']
+const PRESENTATION: WorkspaceResource[] = ['modules','moduleTopics','moduleLessons','lessonExamples']
 const LESSON_EDITOR: WorkspaceResource[] = []
 const ATTENDANCE: WorkspaceResource[] = ['users','subjects','terms','schedules','enrollments','attendanceSessions','attendanceRecords']
 
@@ -54,13 +56,13 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/classes" element={scoped(CLASSES, data => <AdminClassesPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/academic-setup" element={<Navigate replace to="/admin/classes" />} />
         <Route path="/admin/modules" element={scoped(MODULES, data => <AdminModulesPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/new" element={scoped(EDITOR, data => <AdminModuleEditorPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/:moduleId/edit" element={scoped(EDITOR, data => <AdminModuleEditorPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/:moduleId/topics/new" element={scoped(EDITOR, data => <AdminTopicEditorPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/:moduleId/topics/:topicId/edit" element={scoped(EDITOR, data => <AdminTopicEditorPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/modules/new" element={scoped(MODULE_EDITOR, data => <AdminModuleEditorPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/modules/:moduleId/edit" element={scoped(MODULE_EDITOR, data => <AdminModuleEditorPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/modules/:moduleId/topics/new" element={scoped(TOPIC_EDITOR, data => <AdminTopicEditorPage api={api} data={data} refresh={data.refresh} />)} />
+        <Route path="/admin/modules/:moduleId/topics/:topicId/edit" element={scoped(TOPIC_EDITOR, data => <AdminTopicEditorPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/modules/:moduleId/topics/:topicId/lessons/new" element={scoped(LESSON_EDITOR, data => <AdminLessonEditorPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/modules/:moduleId/topics/:topicId/lessons/:lessonId/edit" element={scoped(LESSON_EDITOR, data => <AdminLessonEditorPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/:moduleId/present" element={scoped(EDITOR, data => <LessonPresentationPage data={data} />)} />
+        <Route path="/admin/modules/:moduleId/present" element={scoped(PRESENTATION, data => <LessonPresentationPage data={data} />)} />
         <Route path="/admin/modules/:moduleId/progress" element={scoped(['modules'], data => <ModuleProgressPage api={api} data={data} />)} />
         <Route path="/admin/submissions/:submissionId" element={<AdminSubmissionReviewPage api={api} />} />
         <Route path="/admin/assessments/*" element={<Navigate replace to="/admin/gradebook" />} />

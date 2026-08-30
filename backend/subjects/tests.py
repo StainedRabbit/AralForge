@@ -1,7 +1,10 @@
 from datetime import time
+from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
@@ -12,7 +15,42 @@ def result_rows(response):
     return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
 
 from accounts.models import StudentProfile
+from attendance.models import AttendanceRecord
+from grades.models import StudentGradeItemScore
+from learning_modules.models import (
+    ModuleActivityAttempt,
+    ModuleActivitySubmission,
+    ModuleLessonProgress,
+    ModuleProgress,
+)
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
+
+
+class PerformanceSeedCommandTests(TestCase):
+    @patch.dict('os.environ', {'ALLOW_PERFORMANCE_SEED': 'true'})
+    def test_small_fixture_covers_every_high_growth_table(self):
+        output = StringIO()
+
+        call_command(
+            'seed_performance',
+            students=4,
+            schedules=2,
+            classes_per_student=2,
+            grade_items_per_class=1,
+            attendance_sessions_per_class=1,
+            lessons_per_module=2,
+            confirm=True,
+            stdout=output,
+        )
+
+        self.assertEqual(ScheduleStudent.objects.count(), 8)
+        self.assertEqual(StudentGradeItemScore.objects.count(), 8)
+        self.assertEqual(AttendanceRecord.objects.count(), 8)
+        self.assertEqual(ModuleProgress.objects.count(), 8)
+        self.assertEqual(ModuleLessonProgress.objects.count(), 16)
+        self.assertEqual(ModuleActivityAttempt.objects.count(), 8)
+        self.assertEqual(ModuleActivitySubmission.objects.count(), 8)
+        self.assertIn('8 attendance records', output.getvalue())
 
 
 class SubjectScheduleTests(TestCase):
@@ -345,6 +383,52 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['student'], self.student.id)
+
+    def test_class_workspace_loads_only_the_requested_section(self):
+        from attendance.models import AttendanceRecord, AttendanceSession
+        from grades.models import GradeCategory, GradeCategoryChoices, GradeItem, StudentGradeItemScore
+
+        schedule = self.create_schedule()
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        session = AttendanceSession.objects.create(
+            schedule=schedule,
+            subject=self.subject,
+            school_year_semester=self.term,
+            title='Class attendance',
+            date='2027-08-30',
+        )
+        AttendanceRecord.objects.create(session=session, student=self.student, status='PRESENT')
+        category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period='PRELIM',
+            category=GradeCategoryChoices.QUIZ,
+            name='Quizzes',
+            weight=100,
+        )
+        item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=category,
+            title='Quiz 1',
+            points_possible=10,
+        )
+        StudentGradeItemScore.objects.create(grade_item=item, student=self.student, raw_score=9)
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-workspace', args=[schedule.id])
+
+        attendance = self.client.get(url, {'section': 'attendance'})
+        scores = self.client.get(url, {'section': 'scores'})
+        grades = self.client.get(url, {'section': 'grades'})
+        invalid = self.client.get(url)
+
+        self.assertEqual(attendance.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(attendance.data['attendance_sessions']), 1)
+        self.assertEqual(attendance.data['grade_items'], [])
+        self.assertEqual(scores.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(scores.data['grade_items']), 1)
+        self.assertEqual(scores.data['grade_item_scores'], [])
+        self.assertEqual(grades.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(grades.data['grade_item_scores']), 1)
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_enroll_students_action_adds_and_reactivates_atomically(self):
         schedule = self.create_schedule()

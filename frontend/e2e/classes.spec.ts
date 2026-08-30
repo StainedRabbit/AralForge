@@ -433,6 +433,34 @@ test('loads the roster ten students at a time and exports the complete filtered 
 test('loads the Select Class list ten classes at a time inside its panel', async ({ page }) => {
   const classRequests: Array<{ limit: number; offset: number; search: string; term: string }> = []
   let failNextClassPage = false
+  const classes = Array.from({ length: 12 }, (_, index) => ({
+    archived_at: null,
+    archived_by: null,
+    created_at: '2026-08-04T00:00:00Z',
+    created_by: null,
+    days: 'MO,WE,FR',
+    end_time: '10:00:00',
+    id: 9001 + index,
+    is_active: true,
+    room: `Lab ${index + 1}`,
+    school_year_semester: 1,
+    section: `Batch ${String(index + 1).padStart(2, '0')}`,
+    start_time: '09:00:00',
+    subject: 1,
+    subject_code: `PCLS${String(index + 1).padStart(2, '0')}`,
+    subject_name: `Paged Class ${String(index + 1).padStart(2, '0')}`,
+    term_name: '1st Semester 2027-2028',
+    updated_at: '2026-08-04T00:00:00Z',
+    updated_by: null,
+  }))
+
+  await page.route(/\/subjects\/subject-schedules\/9012\/$/, async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(classes[11]),
+      contentType: 'application/json',
+      status: 200,
+    })
+  })
 
   await page.route(/\/subjects\/subject-schedules\/\?.*/, async (route) => {
     const url = new URL(route.request().url())
@@ -441,28 +469,12 @@ test('loads the Select Class list ten classes at a time inside its panel', async
     const search = url.searchParams.get('search') ?? ''
     const term = url.searchParams.get('term') ?? ''
     const termId = Number(term || 1)
-    const classes = Array.from({ length: 12 }, (_, index) => ({
-      archived_at: null,
-      archived_by: null,
-      created_at: '2026-08-04T00:00:00Z',
-      created_by: null,
-      days: 'MO,WE,FR',
-      end_time: '10:00:00',
-      id: 9001 + index,
-      is_active: true,
-      room: `Lab ${index + 1}`,
+    const matchingTermClasses = classes.map((schedule) => ({
+      ...schedule,
       school_year_semester: termId,
-      section: `Batch ${String(index + 1).padStart(2, '0')}`,
-      start_time: '09:00:00',
-      subject: 1,
-      subject_code: `PCLS${String(index + 1).padStart(2, '0')}`,
-      subject_name: `Paged Class ${String(index + 1).padStart(2, '0')}`,
-      term_name: '1st Semester 2027-2028',
-      updated_at: '2026-08-04T00:00:00Z',
-      updated_by: null,
     }))
     const normalizedSearch = search.toLowerCase()
-    const filteredClasses = classes.filter((schedule) =>
+    const filteredClasses = matchingTermClasses.filter((schedule) =>
       `${schedule.subject_code} ${schedule.subject_name} ${schedule.section} ${schedule.days} ${schedule.room}`
         .toLowerCase()
         .includes(normalizedSearch),

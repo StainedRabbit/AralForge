@@ -31,7 +31,7 @@ export function ModuleProgressPage({
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [students, setStudents] = useState<ModuleTeacherSummaryStudent[]>([])
-  const [nextOffset, setNextOffset] = useState<number | null>(null)
+  const [nextPage, setNextPage] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
 
@@ -50,7 +50,7 @@ export function ModuleProgressPage({
     const params = new URLSearchParams({
       access_status: 'AVAILED',
       limit: String(PAGE_SIZE),
-      offset: '0',
+      pagination: 'cursor',
     })
     if (scheduleId) params.set('schedule', String(scheduleId))
     if (debouncedQuery) params.set('search', debouncedQuery)
@@ -59,7 +59,7 @@ export function ModuleProgressPage({
         if (!ignore) {
           setSummary(payload)
           setStudents(payload.students)
-          setNextOffset(payload.next)
+          setNextPage(typeof payload.next === 'string' ? payload.next : null)
         }
       })
       .catch((caughtError) => {
@@ -78,25 +78,16 @@ export function ModuleProgressPage({
     return () => window.clearTimeout(timer)
   }, [query])
 
-  const hasMore = nextOffset !== null
+  const hasMore = nextPage !== null
 
   async function loadMore() {
-    if (!module || nextOffset === null || loading) return
+    if (!module || nextPage === null || loading) return
     setLoading(true)
     setMessage('')
     try {
-      const params = new URLSearchParams({
-        access_status: 'AVAILED',
-        limit: String(PAGE_SIZE),
-        offset: String(nextOffset),
-      })
-      if (scheduleId) params.set('schedule', String(scheduleId))
-      if (debouncedQuery) params.set('search', debouncedQuery)
-      const payload = await api<ModuleTeacherSummary>(
-        `/modules/modules/${module.id}/teacher-summary/?${params.toString()}`,
-      )
+      const payload = await api<ModuleTeacherSummary>(apiPathFromPageLink(nextPage))
       setStudents((current) => [...current, ...payload.students])
-      setNextOffset(payload.next)
+      setNextPage(typeof payload.next === 'string' ? payload.next : null)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -273,4 +264,10 @@ function safeReturnPath(value: string | null) {
     return '/admin/modules'
   }
   return value
+}
+
+function apiPathFromPageLink(value: string) {
+  const url = new URL(value, window.location.origin)
+  const path = url.pathname.startsWith('/api/') ? url.pathname.slice(4) : url.pathname
+  return `${path}${url.search}`
 }

@@ -1,9 +1,8 @@
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Case, CharField, Count, Exists, Max, OuterRef, Q, Subquery, Sum, Value, When
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -469,6 +468,9 @@ class GradingTemplateViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
                 job_type=BackgroundJob.Type.GRADE_RECALCULATION,
                 idempotency_key=f'grade-recalculation:subject:{subject.id}',
             ).order_by('-created_at').first()
+            if job and job.owner_id is None:
+                job.owner = request.user
+                job.save(update_fields=('owner',))
             return Response({
                 'synced_categories': len(categories),
                 'job': str(job.id) if job else None,
@@ -1007,173 +1009,17 @@ class PeriodGradeViewSet(viewsets.ModelViewSet):
             ),
         ).distinct()
 
-    @transaction.atomic
     def _apply_score_batch(self, request):
-        if not request.user.is_admin_teacher:
-            raise PermissionDenied('Only teachers can record gradebook scores.')
+        from .batch_scores import apply_score_batch
 
-        changes = request.data.get('changes')
-        if not isinstance(changes, list) or not changes:
-            raise serializers.ValidationError({'changes': 'Provide at least one score change.'})
-        if len(changes) > 500:
-            raise serializers.ValidationError({'changes': 'A batch is limited to 500 score changes.'})
-
-        normalized = []
-        errors = {}
-        seen = set()
-        item_ids = set()
-        student_ids = set()
-        for index, change in enumerate(changes):
-            if not isinstance(change, dict):
-                errors[str(index)] = {'detail': 'Each change must be an object.'}
-                continue
-            try:
-                item_id = int(change.get('grade_item'))
-                student_id = int(change.get('student'))
-            except (TypeError, ValueError):
-                errors[str(index)] = {'detail': 'grade_item and student must be integers.'}
-                continue
-            operation = str(change.get('operation') or 'upsert').strip().lower()
-            if operation not in {'upsert', 'delete'}:
-                errors[str(index)] = {'operation': 'Use upsert or delete.'}
-                continue
-            key = (item_id, student_id)
-            if key in seen:
-                errors[str(index)] = {'detail': 'This score appears more than once in the batch.'}
-                continue
-            seen.add(key)
-            item_ids.add(item_id)
-            student_ids.add(student_id)
-            normalized.append((index, operation, item_id, student_id, change))
-
-        items = {
-            item.id: item
-            for item in GradeItem.objects.filter(id__in=item_ids).select_related(
-                'schedule', 'grade_category', 'grade_category__subject',
-            )
-        }
-        students = {student.id: student for student in User.objects.filter(id__in=student_ids)}
-        enrolled = set(ScheduleStudent.objects.filter(
-            schedule_id__in={item.schedule_id for item in items.values() if item.schedule_id},
-            student_id__in=student_ids,
-        ).values_list('schedule_id', 'student_id'))
-        existing = {
-            (score.grade_item_id, score.student_id): score
-            for score in StudentGradeItemScore.objects.select_for_update().filter(
-                grade_item_id__in=item_ids,
-                student_id__in=student_ids,
-            ).select_related('grade_item__grade_category')
-        }
-
-        prepared = []
-        for index, operation, item_id, student_id, change in normalized:
-            item = items.get(item_id)
-            student = students.get(student_id)
-            row_errors = {}
-            if not item:
-                row_errors['grade_item'] = 'Unknown grade item.'
-            elif not item.schedule_id:
-                row_errors['grade_item'] = 'Assign this grade item to a class before recording scores.'
-            elif (item.schedule_id, student_id) not in enrolled:
-                row_errors['student'] = 'This student is not enrolled in the selected class.'
-            if not student:
-                row_errors['student'] = 'Unknown student.'
-
-            score = existing.get((item_id, student_id))
-            if operation == 'upsert' and score and score.origin == StudentGradeItemScore.Origin.AUTOMATIC:
-                row_errors['detail'] = 'Use the override action to change an automatically synchronized score.'
-
-            status_value = str(change.get('status') or StudentGradeItemScore.Status.GRADED).upper()
-            raw_score = None
-            remarks = str(change.get('remarks') or '')
-            if operation == 'upsert':
-                if status_value not in StudentGradeItemScore.Status.values:
-                    row_errors['status'] = 'Use GRADED or EXCUSED.'
-                if len(remarks) > 160:
-                    row_errors['remarks'] = 'Ensure this field has no more than 160 characters.'
-                if status_value != StudentGradeItemScore.Status.EXCUSED:
-                    try:
-                        raw_score = Decimal(str(change.get('raw_score')))
-                    except (InvalidOperation, TypeError, ValueError):
-                        row_errors['raw_score'] = 'A graded score requires a valid number.'
-                    if item and raw_score is not None and (raw_score < 0 or raw_score > item.points_possible):
-                        row_errors['raw_score'] = 'Score must be between zero and points possible.'
-
-            if row_errors:
-                errors[str(index)] = row_errors
-            else:
-                prepared.append((operation, item, student, score, raw_score, status_value, remarks))
-
-        if errors:
-            raise serializers.ValidationError({'changes': errors})
-
-        now = timezone.now()
-        creates = []
-        updates = []
-        delete_ids = []
-        deleted_keys = []
-        affected = set()
-        for operation, item, student, score, raw_score, status_value, remarks in prepared:
-            affected.add((student.id, item.grade_category_id, item.schedule_id))
-            if operation == 'delete':
-                if score:
-                    delete_ids.append(score.id)
-                    deleted_keys.append({'grade_item': item.id, 'student': student.id})
-                continue
-            if score:
-                score.raw_score = raw_score
-                score.status = status_value
-                score.remarks = remarks
-                score.computed_at = now
-                updates.append(score)
-            else:
-                creates.append(StudentGradeItemScore(
-                    grade_item=item,
-                    student=student,
-                    raw_score=raw_score,
-                    status=status_value,
-                    remarks=remarks,
-                    origin=StudentGradeItemScore.Origin.MANUAL,
-                ))
-
-        if delete_ids:
-            StudentGradeItemScore.objects.filter(id__in=delete_ids).delete()
-        if creates:
-            StudentGradeItemScore.objects.bulk_create(creates)
-        if updates:
-            StudentGradeItemScore.objects.bulk_update(
-                updates, ('raw_score', 'status', 'remarks', 'computed_at'),
-            )
-
-        from .services import recompute_student_category_from_items
-
-        students_by_id = students
-        categories = GradeCategory.objects.in_bulk(category_id for _, category_id, _ in affected)
-        schedules = SubjectSchedule.objects.in_bulk(schedule_id for _, _, schedule_id in affected)
-        for student_id, category_id, schedule_id in sorted(affected):
-            recompute_student_category_from_items(
-                students_by_id[student_id], categories[category_id], schedules[schedule_id],
-            )
-
-        changed_keys = [(item.id, student.id) for operation, item, student, *_ in prepared if operation == 'upsert']
-        changed_scores = StudentGradeItemScore.objects.filter(
-            grade_item_id__in={key[0] for key in changed_keys},
-            student_id__in={key[1] for key in changed_keys},
-        ).select_related(
-            'grade_item', 'grade_item__grade_category', 'grade_item__grade_category__subject',
-            'grade_item__schedule', 'student',
-        )
-        changed_key_set = set(changed_keys)
-        changed_scores = [
-            score for score in changed_scores
-            if (score.grade_item_id, score.student_id) in changed_key_set
-        ]
+        result = apply_score_batch(request.user, request.data.get('changes'))
         return Response({
-            'updated': self.get_serializer(changed_scores, many=True).data,
-            'deleted': deleted_keys,
-            'updated_count': len(changed_scores),
-            'deleted_count': len(deleted_keys),
+            'updated': self.get_serializer(result['updated'], many=True).data,
+            'deleted': result['deleted'],
+            'updated_count': len(result['updated']),
+            'deleted_count': len(result['deleted']),
         })
+
 
 
 class FinalGradeViewSet(viewsets.ModelViewSet):

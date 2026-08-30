@@ -1318,19 +1318,42 @@ def sync_progress_for_topic_students(topic, student_ids=None):
             sync_learning_progress(student, topic, context_type, schedule_id)
 
 
-def sync_module_progress_for_students(module, student_ids=None):
+def sync_module_progress_for_students(
+    module,
+    student_ids=None,
+    *,
+    force_inline=False,
+    job=None,
+):
     contexts = progress_contexts_for_module(module)
     if student_ids is not None:
         student_ids = set(student_ids)
         contexts = {context for context in contexts if context[0] in student_ids}
+    if len(contexts) > 250 and not force_inline:
+        from jobs.models import BackgroundJob
+        from jobs.tasks import enqueue, sync_module_progress_job
+
+        return enqueue(
+            sync_module_progress_job,
+            job_type=BackgroundJob.Type.MODULE_PROGRESS,
+            payload={'module_id': module.id},
+            total=len(contexts),
+            idempotency_key=f'module-progress:{module.id}',
+        )
     student_model = ModuleLessonProgress._meta.get_field(
         'student',
     ).remote_field.model
     students = student_model.objects.in_bulk(context[0] for context in contexts)
+    processed = 0
     for student_id, context_type, schedule_id in contexts:
         student = students.get(student_id)
         if student:
             sync_module_progress(student, module, context_type, schedule_id)
+            processed += 1
+            if job and (processed % 100 == 0 or processed == len(contexts)):
+                job.progress = processed
+                job.save(update_fields=('progress',))
+    return processed
 
 
 class ModuleActivitySubmission(models.Model):

@@ -134,6 +134,24 @@ type ClassWorkspace = {
   final_grades: FinalGrade[]
 }
 
+function mergeClassWorkspace(data: RouteData, workspace?: ClassWorkspace): RouteData {
+  if (!workspace) return data
+  return {
+    ...data,
+    users: workspace.users,
+    profiles: workspace.profiles,
+    enrollments: workspace.enrollments,
+    attendanceSessions: workspace.attendance_sessions,
+    attendanceRecords: workspace.attendance_records,
+    gradeCategories: workspace.grade_categories,
+    gradeItems: workspace.grade_items,
+    gradeItemScores: workspace.grade_item_scores,
+    categoryGrades: workspace.category_grades,
+    periodGrades: workspace.period_grades,
+    finalGrades: workspace.final_grades,
+  }
+}
+
 export function AdminClassesPage({
   api,
   data,
@@ -262,6 +280,7 @@ export function AdminClassesPage({
       }
       return
     }
+    if (requestedScheduleId && requestedScheduleQuery.isPending) return
     if (requestedScheduleId && pendingScheduleIdRef.current === requestedScheduleId) return
     if (searchParams.has('schedule') && !selectedSchedule) {
       setSearchParams((current) => {
@@ -270,7 +289,14 @@ export function AdminClassesPage({
         return next
       }, { replace: true })
     }
-  }, [data.loading, requestedScheduleId, searchParams, selectedSchedule, setSearchParams])
+  }, [
+    data.loading,
+    requestedScheduleId,
+    requestedScheduleQuery.isPending,
+    searchParams,
+    selectedSchedule,
+    setSearchParams,
+  ])
 
   return (
     <Page>
@@ -335,7 +361,6 @@ export function AdminClassesPage({
         api={api}
         data={data}
         key={selectedSchedule?.id ?? 'no-class'}
-        refresh={refreshClasses}
         selectedSchedule={selectedSchedule}
       />
     </Page>
@@ -860,12 +885,10 @@ function ScheduleForm({
 function ClassRoster({
   api,
   data,
-  refresh,
   selectedSchedule,
 }: {
   api: AuthedRequest
   data: RouteData
-  refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
 }) {
   const location = useLocation()
@@ -884,36 +907,36 @@ function ClassRoster({
   const [exportingRoster, setExportingRoster] = useState(false)
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
-  const classWorkspaceQuery = useQuery({
-    queryKey: ['class-workspace', selectedSchedule?.id],
+  const attendanceWorkspaceQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
     queryFn: ({ signal }) => api<ClassWorkspace>(
-      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/`, { signal },
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=attendance`, { signal },
     ),
-    enabled: Boolean(selectedSchedule),
+    enabled: Boolean(selectedSchedule && isAttendanceOpen),
     staleTime: 30_000,
   })
-  const classWorkspace = classWorkspaceQuery.data
-  const classData: RouteData = classWorkspace ? {
-    ...data,
-    users: classWorkspace.users,
-    profiles: classWorkspace.profiles,
-    enrollments: classWorkspace.enrollments,
-    attendanceSessions: classWorkspace.attendance_sessions,
-    attendanceRecords: classWorkspace.attendance_records,
-    gradeCategories: classWorkspace.grade_categories,
-    gradeItems: classWorkspace.grade_items,
-    gradeItemScores: classWorkspace.grade_item_scores,
-    categoryGrades: classWorkspace.category_grades,
-    periodGrades: classWorkspace.period_grades,
-    finalGrades: classWorkspace.final_grades,
-  } : data
-  const localRoster = selectedSchedule
-    ? classData.enrollments.filter(
-        (enrollment) => enrollment.schedule === selectedSchedule.id,
-      )
-    : []
+  const scoreWorkspaceQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id, 'scores'],
+    queryFn: ({ signal }) => api<ClassWorkspace>(
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=scores`, { signal },
+    ),
+    enabled: Boolean(selectedSchedule && isScoresOpen),
+    staleTime: 30_000,
+  })
+  const gradeWorkspaceQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id, 'grades'],
+    queryFn: ({ signal }) => api<ClassWorkspace>(
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=grades`, { signal },
+    ),
+    enabled: Boolean(selectedSchedule && gradeRow),
+    staleTime: 30_000,
+  })
+  const attendanceData = mergeClassWorkspace(data, attendanceWorkspaceQuery.data)
+  const scoreData = mergeClassWorkspace(data, scoreWorkspaceQuery.data)
+  const gradeData = mergeClassWorkspace(data, gradeWorkspaceQuery.data)
+  const localRoster: ScheduleStudent[] = []
   const normalizedRosterQuery = rosterQuery.trim()
-  const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, classData))
+  const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, data))
   const localFilteredRows = filterRosterRows(localRosterRows, normalizedRosterQuery, rosterStatus)
   const rosterPageQuery = useInfiniteQuery({
     enabled: Boolean(selectedSchedule),
@@ -1000,10 +1023,10 @@ function ClassRoster({
   }
 
   const classModules = selectedSchedule
-    ? modulesForSubject(classData.modules, selectedSchedule.subject)
+    ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
   const selectedClassModule = selectedSchedule
-    ? allModulesForSubject(classData.modules, selectedSchedule.subject)[0] ?? null
+    ? allModulesForSubject(data.modules, selectedSchedule.subject)[0] ?? null
     : null
   const classModuleUrl = selectedSchedule && selectedClassModule
     ? `/admin/modules?subject=${selectedSchedule.subject}`
@@ -1243,10 +1266,16 @@ function ClassRoster({
         />
       ) : null}
 
-      {selectedSchedule && isAttendanceOpen ? (
+      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.isPending ? (
+        <p aria-live="polite" className="admin-message">Loading attendance workspace...</p>
+      ) : null}
+      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.isError ? (
+        <p className="admin-message" role="alert">{toErrorMessage(attendanceWorkspaceQuery.error)}</p>
+      ) : null}
+      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.data ? (
         <ClassAttendanceDialog
           api={api}
-          data={classData}
+          data={attendanceData}
           initialTab="take"
           key={selectedSchedule.id}
           refresh={refreshClassRoster}
@@ -1255,10 +1284,16 @@ function ClassRoster({
         />
       ) : null}
 
-      {selectedSchedule && isScoresOpen ? (
+      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.isPending ? (
+        <p aria-live="polite" className="admin-message">Loading score workspace...</p>
+      ) : null}
+      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.isError ? (
+        <p className="admin-message" role="alert">{toErrorMessage(scoreWorkspaceQuery.error)}</p>
+      ) : null}
+      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.data ? (
         <ClassScoresDialog
           api={api}
-          data={classData}
+          data={scoreData}
           key={selectedSchedule.id}
           refresh={refreshClassRoster}
           schedule={selectedSchedule}
@@ -1269,9 +1304,15 @@ function ClassRoster({
         />
       ) : null}
 
-      {selectedSchedule && gradeRow ? (
+      {selectedSchedule && gradeRow && gradeWorkspaceQuery.isPending ? (
+        <p aria-live="polite" className="admin-message">Loading grade details...</p>
+      ) : null}
+      {selectedSchedule && gradeRow && gradeWorkspaceQuery.isError ? (
+        <p className="admin-message" role="alert">{toErrorMessage(gradeWorkspaceQuery.error)}</p>
+      ) : null}
+      {selectedSchedule && gradeRow && gradeWorkspaceQuery.data ? (
         <GradeDetailsModal
-          data={classData}
+          data={gradeData}
           row={gradeRow}
           schedule={selectedSchedule}
           onClose={() => setGradeRow(null)}
@@ -1281,7 +1322,7 @@ function ClassRoster({
       {moduleRow ? (
         <ManageStudentModulesDialog
           api={api}
-          data={classData}
+          data={data}
           defaultSubjectId={selectedSchedule?.subject}
           onClose={() => setModuleRow(null)}
           studentId={moduleRow.enrollment.student}

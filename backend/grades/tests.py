@@ -453,6 +453,79 @@ class ClassScopedGradeTests(APITestCase):
         self.assertEqual(deleted.data['deleted_count'], 1)
         self.assertFalse(StudentGradeItemScore.objects.filter(grade_item=item, student=self.student).exists())
 
+    def test_batch_cannot_delete_an_automatic_score(self):
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Automatic source score',
+            points_possible=Decimal('20.00'),
+        )
+        StudentGradeItemScore.objects.bulk_create([
+            StudentGradeItemScore(
+                grade_item=item,
+                student=self.student,
+                raw_score=Decimal('18.00'),
+                origin=StudentGradeItemScore.Origin.AUTOMATIC,
+            ),
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/grades/item-scores/batch/',
+            {'changes': [{
+                'operation': 'delete',
+                'grade_item': item.id,
+                'student': self.student.id,
+            }]},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(StudentGradeItemScore.objects.filter(
+            grade_item=item,
+            student=self.student,
+            origin=StudentGradeItemScore.Origin.AUTOMATIC,
+        ).exists())
+
+    def test_batch_query_count_is_bounded_as_rows_grow(self):
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Bounded batch quiz',
+            points_possible=Decimal('20.00'),
+        )
+        students = [
+            User.objects.create_user(
+                username=f'batch_student_{index:02d}',
+                role=User.Role.STUDENT,
+            )
+            for index in range(25)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in students
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(
+                '/api/grades/item-scores/batch/',
+                {'changes': [
+                    {
+                        'operation': 'upsert',
+                        'grade_item': item.id,
+                        'student': student.id,
+                        'raw_score': '17.00',
+                    }
+                    for student in students
+                ]},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['updated_count'], 25)
+        self.assertLessEqual(len(queries), 30)
+
     def test_score_sheet_creates_complete_roster_and_coerces_blank_to_zero(self):
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
         self.client.force_authenticate(self.teacher)

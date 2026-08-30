@@ -18,7 +18,7 @@ from .serializers import (
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
-    search_fields = ('username', 'first_name', 'last_name', 'email')
+    search_fields = ('username', 'first_name', 'last_name', 'email', 'student_profile__student_number')
     cursor_ordering = ('last_name', 'first_name', 'id')
 
     def get_queryset(self):
@@ -97,7 +97,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 | Q(student_profile__student_number__icontains=search),
             )
 
-        queryset = queryset.order_by('last_name', 'first_name', 'username', 'id')
+        queryset = queryset.order_by('last_name', 'first_name', 'id')
         count = queryset.count()
         limit = bounded_int(request.query_params.get('limit'), default=50, maximum=100)
         offset = bounded_int(request.query_params.get('offset'), default=0)

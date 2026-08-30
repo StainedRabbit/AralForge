@@ -211,6 +211,11 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='workspace')
     def workspace(self, request, pk=None):
         schedule = self.get_object()
+        section = request.query_params.get('section', '').strip().lower()
+        if section not in {'attendance', 'scores', 'grades'}:
+            raise serializers.ValidationError({
+                'section': 'Use attendance, scores, or grades.',
+            })
         enrollments = list(schedule.students.select_related(
             'student', 'student__student_profile', 'schedule__subject',
             'schedule__school_year_semester__school_year',
@@ -230,12 +235,6 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             StudentGradeItemScoreSerializer,
         )
 
-        sessions = AttendanceSession.objects.filter(schedule=schedule)
-        session_ids = sessions.values_list('id', flat=True)
-        categories = GradeCategory.objects.filter(subject=schedule.subject)
-        items = GradeItem.objects.filter(schedule=schedule).select_related(
-            'grade_category', 'module_activity', 'attendance_session',
-        )
         context = {'request': request}
         users = [enrollment.student for enrollment in enrollments]
         profiles = [
@@ -243,16 +242,46 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             for enrollment in enrollments
             if hasattr(enrollment.student, 'student_profile')
         ]
-        return Response({
+        payload = {
             'users': UserSerializer(users, many=True, context=context).data,
             'profiles': StudentProfileSerializer(profiles, many=True, context=context).data,
             'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
-            'attendance_sessions': AttendanceSessionSerializer(sessions, many=True, context=context).data,
-            'attendance_records': AttendanceRecordSerializer(
-                AttendanceRecord.objects.filter(session_id__in=session_ids), many=True, context=context,
-            ).data,
-            'grade_categories': GradeCategorySerializer(categories, many=True, context=context).data,
-            'grade_items': GradeItemSerializer(items, many=True, context=context).data,
+            'attendance_sessions': [],
+            'attendance_records': [],
+            'grade_categories': [],
+            'grade_items': [],
+            'grade_item_scores': [],
+            'category_grades': [],
+            'period_grades': [],
+            'final_grades': [],
+        }
+
+        if section == 'attendance':
+            sessions = AttendanceSession.objects.filter(schedule=schedule)
+            payload['attendance_sessions'] = AttendanceSessionSerializer(
+                sessions, many=True, context=context,
+            ).data
+            payload['attendance_records'] = AttendanceRecordSerializer(
+                AttendanceRecord.objects.filter(session__schedule=schedule),
+                many=True,
+                context=context,
+            ).data
+            return Response(payload)
+
+        categories = GradeCategory.objects.filter(subject=schedule.subject)
+        items = GradeItem.objects.filter(schedule=schedule).select_related(
+            'grade_category', 'module_activity', 'attendance_session',
+        )
+        payload['grade_categories'] = GradeCategorySerializer(
+            categories, many=True, context=context,
+        ).data
+        payload['grade_items'] = GradeItemSerializer(
+            items, many=True, context=context,
+        ).data
+        if section == 'scores':
+            return Response(payload)
+
+        payload.update({
             'grade_item_scores': StudentGradeItemScoreSerializer(
                 StudentGradeItemScore.objects.filter(
                     grade_item__schedule=schedule, student_id__in=student_ids,
@@ -275,6 +304,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 many=True, context=context,
             ).data,
         })
+        return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='enroll-students')
     def enroll_students(self, request, pk=None):
@@ -475,6 +505,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
 class ScheduleStudentViewSet(viewsets.ModelViewSet):
     serializer_class = ScheduleStudentSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
+    cursor_ordering = ('id',)
 
     def get_queryset(self):
         queryset = ScheduleStudent.objects.select_related(

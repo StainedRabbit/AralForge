@@ -48,7 +48,7 @@ services:
   - type: web
     name: aralforge-api-production
     runtime: docker
-    branch: production
+    branch: main
     region: singapore
     plan: starter
     numInstances: 2
@@ -129,7 +129,7 @@ services:
   - type: worker
     name: aralforge-worker-production
     runtime: docker
-    branch: production
+    branch: main
     region: singapore
     plan: starter
     dockerfilePath: ./Dockerfile

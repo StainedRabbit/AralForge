@@ -117,7 +117,10 @@ test('activates, revokes, and renews module access without payment fields', asyn
   const studentAccess = page.locator('.admin-resource').filter({
     has: page.getByRole('heading', { name: 'Student Module Access' }),
   })
-  await studentAccess.getByLabel('Student').selectOption({ label: 'Jamie Santos (E2E-002)' })
+  await studentAccess.getByLabel('Search student').fill('Jamie')
+  const studentResult = studentAccess.getByRole('combobox', { name: 'Student', exact: true })
+  await expect(studentResult.getByRole('option', { name: 'Jamie Santos (E2E-002)' })).toHaveCount(1)
+  await studentResult.selectOption({ label: 'Jamie Santos (E2E-002)' })
   await studentAccess.getByRole('button', { name: 'Manage Modules' }).click()
 
   const dialog = page.getByRole('dialog', { name: 'Module Access' })
