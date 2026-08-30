@@ -143,7 +143,7 @@ function StudentClassCard({
       />
       {!past ? (
         <div className="class-card__actions">
-          <Link className="button button--secondary" to={`/modules?subject=${enrollment.subject}`}>
+          <Link className="button button--secondary" to={`/modules?subject=${enrollment.subject}&schedule=${schedule.id}`}>
             <Icon name="book" />
             <span>Open lessons</span>
           </Link>

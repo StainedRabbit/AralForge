@@ -535,15 +535,15 @@ function ClassAttendanceHistory({ api, data, refresh, schedule }: {
 
   return <div className="class-attendance-history">
     <div className="table-wrap">
-      <table className="admin-table">
+      <table className="admin-table mobile-card-table">
         <thead><tr><th>Date</th><th>Session</th><th>Present</th><th>Late</th><th>Absent</th><th>Rate</th><th>Details</th></tr></thead>
         <tbody>
           {sessions.map((session) => {
             const records = data.attendanceRecords.filter((record) => record.session === session.id)
             const summary = summarizeAttendance(records)
             return <tr key={session.id}>
-              <td>{formatDate(session.date)}</td><td>{session.title || 'Class meeting'}</td><td>{summary.present}</td><td>{summary.late}</td><td>{summary.absent}</td><td>{percent(summary.attended, records.length)}%</td>
-              <td><button className="button button--secondary button--compact" onClick={() => setSelectedSessionId(session.id)} type="button"><Icon name="search" /><span>View</span></button></td>
+              <td data-label="Date">{formatDate(session.date)}</td><td data-label="Session">{session.title || 'Class meeting'}</td><td data-label="Present">{summary.present}</td><td data-label="Late">{summary.late}</td><td data-label="Absent">{summary.absent}</td><td data-label="Rate">{percent(summary.attended, records.length)}%</td>
+              <td data-label="Details"><button className="button button--secondary button--compact" onClick={() => setSelectedSessionId(session.id)} type="button"><Icon name="search" /><span>View</span></button></td>
             </tr>
           })}
           {!sessions.length ? <tr><td colSpan={7}>No attendance history for this class yet.</td></tr> : null}

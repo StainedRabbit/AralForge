@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type {
   GradeCategory,
+  GradingPeriod,
   MainActivityEditorWorkspace,
   MainActivityGradingWorkspace,
   MainActivityBulkAssignmentRequest,
@@ -18,6 +19,11 @@ import { Icon } from '../Icon'
 import { SectionHeading } from '../ui'
 import { queryKeys } from '../../queries/queryKeys'
 import { isJsonObject, migrateStorageValue } from '../../utils/storageMigration'
+import { ApiError } from '../../api'
+import {
+  ActivityQuestionInput,
+  type ActivityDraft,
+} from '../LessonMainActivityPanel'
 
 type QuestionDraft = {
   id: string
@@ -38,15 +44,22 @@ type QuestionDraft = {
 }
 
 type RecoveredEditorDraft = {
+  baseRevision?: number
   title: string
   instructions: string
   maxAttempts: string
   passingScore: string
-  opensAt: string
-  dueAt: string
-  allowLateSubmissions: boolean
   isPublished: boolean
+  gradingPeriod?: GradingPeriod | ''
+  periodReassignments?: MainActivityBulkAssignmentRequest['assignments']
   questionDrafts: QuestionDraft[]
+}
+
+type PeriodChangeDialogState = {
+  targetPeriod: GradingPeriod
+  workspace: MainActivityGradingWorkspace
+  linkedScheduleIds: number[]
+  selections: Record<number, string>
 }
 
 type PreviewMode = 'not_started' | 'score_only' | 'review'
@@ -124,18 +137,27 @@ export function MainActivityEditor({
     () => readRecoveredDraft(recoveryKey, legacyRecoveryKey),
     [legacyRecoveryKey, recoveryKey],
   )
-  const [title, setTitle] = useState(recoveredDraft?.title ?? activity?.title ?? 'Main Activity')
-  const [instructions, setInstructions] = useState(recoveredDraft?.instructions ?? activity?.instructions ?? '')
-  const [maxAttempts, setMaxAttempts] = useState(recoveredDraft?.maxAttempts ?? String(activity?.max_attempts ?? 3))
-  const [passingScore, setPassingScore] = useState(recoveredDraft?.passingScore ?? activity?.passing_score ?? '')
-  const [opensAt, setOpensAt] = useState(recoveredDraft?.opensAt ?? toLocalDateTime(activity?.opens_at))
-  const [dueAt, setDueAt] = useState(recoveredDraft?.dueAt ?? toLocalDateTime(activity?.due_at))
-  const [allowLateSubmissions, setAllowLateSubmissions] = useState(
-    recoveredDraft?.allowLateSubmissions ?? activity?.allow_late_submissions ?? false,
+  const recoverableDraft = recoveredDraft && (
+    !activity || recoveredDraft.baseRevision === undefined || recoveredDraft.baseRevision === activity.revision
+  ) ? recoveredDraft : null
+  const [staleRecovery, setStaleRecovery] = useState(Boolean(recoveredDraft && !recoverableDraft))
+  const [title, setTitle] = useState(recoverableDraft?.title ?? activity?.title ?? 'Main Activity')
+  const [instructions, setInstructions] = useState(recoverableDraft?.instructions ?? activity?.instructions ?? '')
+  const [maxAttempts, setMaxAttempts] = useState(recoverableDraft?.maxAttempts ?? String(activity?.max_attempts ?? 3))
+  const [passingScore, setPassingScore] = useState(recoverableDraft?.passingScore ?? activity?.passing_score ?? '')
+  const [isPublished, setIsPublished] = useState(recoverableDraft?.isPublished ?? activity?.is_published ?? false)
+  const [gradingPeriod, setGradingPeriod] = useState<GradingPeriod | ''>(
+    recoverableDraft?.gradingPeriod ?? activity?.grading_period ?? '',
   )
-  const [isPublished, setIsPublished] = useState(recoveredDraft?.isPublished ?? activity?.is_published ?? false)
-  const [questionDrafts, setQuestionDrafts] = useState<QuestionDraft[]>(recoveredDraft?.questionDrafts ?? initialDrafts)
+  const [periodReassignments, setPeriodReassignments] = useState<MainActivityBulkAssignmentRequest['assignments']>(
+    recoverableDraft?.periodReassignments ?? [],
+  )
+  const [periodChangeDialog, setPeriodChangeDialog] = useState<PeriodChangeDialogState | null>(null)
+  const [loadingPeriodChange, setLoadingPeriodChange] = useState(false)
+  const [questionDrafts, setQuestionDrafts] = useState<QuestionDraft[]>(recoverableDraft?.questionDrafts ?? initialDrafts)
   const [savedActivityId, setSavedActivityId] = useState(activity?.id ?? null)
+  const [savedRevision, setSavedRevision] = useState(activity?.revision ?? 1)
+  const [revisionConflict, setRevisionConflict] = useState(false)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('not_started')
@@ -147,18 +169,17 @@ export function MainActivityEditor({
     .filter((question) => question.is_published)
     .reduce((total, question) => total + (Number(question.points) || 0), 0)
   const readinessWarnings = useMemo(
-    () => getReadinessWarnings(activeDrafts, title, passingScore, publishedPoints, opensAt, dueAt),
-    [activeDrafts, dueAt, opensAt, passingScore, publishedPoints, title],
+    () => getReadinessWarnings(activeDrafts, title, passingScore, publishedPoints, gradingPeriod),
+    [activeDrafts, gradingPeriod, passingScore, publishedPoints, title],
   )
   const draftSignature = JSON.stringify({
     title,
     instructions,
     maxAttempts,
     passingScore,
-    opensAt,
-    dueAt,
-    allowLateSubmissions,
     isPublished,
+    gradingPeriod,
+    periodReassignments,
     questionDrafts,
   })
   const savedSignature = useRef(JSON.stringify({
@@ -166,10 +187,9 @@ export function MainActivityEditor({
     instructions: activity?.instructions ?? '',
     maxAttempts: String(activity?.max_attempts ?? 3),
     passingScore: activity?.passing_score ?? '',
-    opensAt: toLocalDateTime(activity?.opens_at),
-    dueAt: toLocalDateTime(activity?.due_at),
-    allowLateSubmissions: activity?.allow_late_submissions ?? false,
     isPublished: activity?.is_published ?? false,
+    gradingPeriod: activity?.grading_period ?? '',
+    periodReassignments: [],
     questionDrafts: initialDrafts,
   }))
   const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
@@ -185,16 +205,39 @@ export function MainActivityEditor({
   }, [dirty, saveState])
 
   useEffect(() => {
-    if (dirty) window.localStorage.setItem(recoveryKey, draftSignature)
-  }, [dirty, draftSignature, recoveryKey])
+    if (dirty) {
+      window.localStorage.setItem(recoveryKey, JSON.stringify({
+        ...JSON.parse(draftSignature),
+        baseRevision: savedRevision,
+      }))
+    }
+  }, [dirty, draftSignature, recoveryKey, savedRevision])
 
   useEffect(() => {
-    if (!dirty || saving || (isPublished && readinessWarnings.length > 0)) return
+    if (
+      !dirty || saving || activity?.is_published || !gradingPeriod ||
+      (isPublished && readinessWarnings.length > 0)
+    ) return
     const timer = window.setTimeout(() => void saveActivity(undefined, true), 1200)
     return () => window.clearTimeout(timer)
     // saveActivity intentionally uses the complete signature captured by this render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftSignature, dirty, isPublished, readinessWarnings.length, saving])
+  }, [activity?.is_published, draftSignature, dirty, gradingPeriod, isPublished, readinessWarnings.length, saving])
+
+  function moveQuestion(id: string, direction: -1 | 1) {
+    setQuestionDrafts((current) => {
+      const active = current.filter((question) => !question.deleted)
+      const index = active.findIndex((question) => question.id === id)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= active.length) return current
+      const reordered = [...active]
+      ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
+      const orders = new Map(reordered.map((question, order) => [question.id, String(order + 1)]))
+      return current.map((question) => question.deleted
+        ? question
+        : { ...question, order: orders.get(question.id) ?? question.order })
+    })
+  }
 
   function addQuestion(questionType: ModuleActivityQuestionType = 'multiple_choice') {
     setQuestionDrafts((current) => [
@@ -219,8 +262,8 @@ export function MainActivityEditor({
   }
 
   function removeQuestion(id: string) {
-    setQuestionDrafts((current) =>
-      current
+    setQuestionDrafts((current) => {
+      const next = current
         .map((question) =>
           question.id === id
             ? question.serverId
@@ -228,8 +271,12 @@ export function MainActivityEditor({
               : null
             : question,
         )
-        .filter((question): question is QuestionDraft => Boolean(question)),
-    )
+        .filter((question): question is QuestionDraft => Boolean(question))
+      let order = 0
+      return next.map((question) => question.deleted
+        ? question
+        : { ...question, order: String(++order) })
+    })
   }
 
   function duplicateQuestion(question: QuestionDraft) {
@@ -286,9 +333,76 @@ export function MainActivityEditor({
     URL.revokeObjectURL(url)
   }
 
+  function downloadRecoveryDraft(draft: RecoveredEditorDraft | Record<string, unknown>) {
+    const blob = new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `main-activity-${lesson.id}-recovery.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function requestGradingPeriodChange(targetPeriod: GradingPeriod) {
+    if (!activity || !currentLinkedClassCount || targetPeriod === activity.grading_period) {
+      setGradingPeriod(targetPeriod)
+      setPeriodReassignments([])
+      return
+    }
+
+    setLoadingPeriodChange(true)
+    setMessage('Loading linked class categories...')
+    try {
+      const workspace = await api<MainActivityGradingWorkspace>(
+        `/modules/activities/${activity.id}/grading-workspace/`,
+      )
+      const linkedScheduleIds = Array.from(new Set(
+        workspace.grade_items
+          .filter((item) => {
+            const schedule = workspace.schedules.find((candidate) => candidate.id === item.schedule)
+            return item.module_activity === activity.id && schedule?.is_active && schedule.term_is_active
+          })
+          .map((item) => item.schedule as number),
+      ))
+      const selections = Object.fromEntries(linkedScheduleIds.map((scheduleId) => {
+        const schedule = workspace.schedules.find((candidate) => candidate.id === scheduleId)
+        const categories = workspace.grade_categories.filter((category) =>
+          schedule &&
+          category.subject === schedule.subject &&
+          category.category === 'QUIZ' &&
+          category.grading_period === targetPeriod,
+        )
+        return [scheduleId, categories.length === 1 ? String(categories[0].id) : '']
+      }))
+      setPeriodChangeDialog({ targetPeriod, workspace, linkedScheduleIds, selections })
+      setMessage('')
+    } catch (error) {
+      setMessage(`Could not prepare the period change. ${toErrorMessage(error)}`)
+    } finally {
+      setLoadingPeriodChange(false)
+    }
+  }
+
+  function confirmGradingPeriodChange() {
+    if (!periodChangeDialog) return
+    const assignments = periodChangeDialog.linkedScheduleIds.map((schedule) => ({
+      schedule,
+      grade_category: Number(periodChangeDialog.selections[schedule]),
+    }))
+    if (assignments.some((assignment) => !assignment.grade_category)) return
+    setGradingPeriod(periodChangeDialog.targetPeriod)
+    setPeriodReassignments(assignments)
+    setPeriodChangeDialog(null)
+  }
+
   async function saveActivity(nextTab?: EditorTab, silent = false) {
     if (!module || !topic) {
       setMessage('Lesson module context is missing.')
+      return
+    }
+    if (!gradingPeriod) {
+      setMessage('Select a grading period before saving this Main Activity.')
+      setActiveTab('setup')
       return
     }
     if (isPublished && readinessWarnings.length) {
@@ -306,6 +420,7 @@ export function MainActivityEditor({
           method: 'PUT',
           body: JSON.stringify({
             id: savedActivityId,
+            expected_revision: savedActivityId ? savedRevision : undefined,
             module: module.id,
             topic: topic.id,
             lesson: lesson.id,
@@ -315,9 +430,8 @@ export function MainActivityEditor({
             order: lesson.order,
             max_attempts: Number(maxAttempts || 3),
             passing_score: passingScore || null,
-            opens_at: fromLocalDateTime(opensAt),
-            due_at: fromLocalDateTime(dueAt),
-            allow_late_submissions: allowLateSubmissions,
+            grading_period: gradingPeriod,
+            period_reassignments: periodReassignments,
             accepts_text: false,
             accepts_file: false,
             is_published: isPublished,
@@ -328,6 +442,8 @@ export function MainActivityEditor({
       const savedActivity = workspace.activity
       if (!savedActivity) throw new Error('The saved Main Activity was not returned.')
       setSavedActivityId(savedActivity.id)
+      setSavedRevision(savedActivity.revision)
+      setRevisionConflict(false)
       savedSignature.current = draftSignature
       window.localStorage.removeItem(recoveryKey)
       setSaveState('saved')
@@ -337,7 +453,12 @@ export function MainActivityEditor({
       if (nextTab) setActiveTab(nextTab)
     } catch (caughtError) {
       setSaveState('error')
-      setMessage(`Changes are still in this browser. ${toErrorMessage(caughtError)}`)
+      if (caughtError instanceof ApiError && caughtError.status === 409) {
+        setRevisionConflict(true)
+        setMessage('This Main Activity changed in another editor. Your local draft was not overwritten.')
+      } else {
+        setMessage(`Changes are still in this browser. ${toErrorMessage(caughtError)}`)
+      }
     } finally {
       setSaving(false)
     }
@@ -355,13 +476,13 @@ export function MainActivityEditor({
   return (
     <section className="main-activity-editor">
       <SectionHeading
-        subtitle="Website-based, auto-graded lesson work"
+        subtitle="Website-based, auto-graded lesson work. This Main Activity saves separately from the lesson."
         title="Main Activity"
       />
 
       <div className="activity-readiness-strip" aria-label="Main Activity readiness summary">
         <span className={!dirty && saveState === 'saved' ? 'status-badge status-badge--ready' : 'status-badge'}>
-          {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : dirty ? 'Unsaved changes' : 'Saved'}
+          {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : dirty && activity?.is_published ? 'Unpublished changes' : dirty ? 'Unsaved changes' : 'Saved'}
         </span>
         <span className={isPublished ? 'status-badge status-badge--ready' : 'status-badge'}>
           {isPublished ? 'Published' : 'Draft'}
@@ -370,6 +491,9 @@ export function MainActivityEditor({
           {publishedQuestionCount} published question{publishedQuestionCount === 1 ? '' : 's'}
         </span>
         <span className="status-badge">{publishedPoints} question points</span>
+        <span className={gradingPeriod ? 'status-badge status-badge--ready' : 'status-badge'}>
+          {gradingPeriod ? formatPeriod(gradingPeriod) : 'Period not selected'}
+        </span>
         <span className={currentLinkedClassCount ? 'status-badge status-badge--ready' : 'status-badge'}>
           {currentLinkedClassCount} linked class{currentLinkedClassCount === 1 ? '' : 'es'}
         </span>
@@ -390,6 +514,24 @@ export function MainActivityEditor({
           <p>All published questions have the required answer data.</p>
         )}
       </section>
+
+      {staleRecovery || revisionConflict ? (
+        <section className="activity-readiness activity-readiness--warning" role="alert">
+          <div>
+            <p className="eyebrow">Version conflict</p>
+            <h3>{revisionConflict ? 'A newer server revision is available' : 'An older local recovery draft was found'}</h3>
+            <p>Download the local draft before reloading if you need to compare or recover its contents.</p>
+          </div>
+          <div className="lesson-editor__actions">
+            <button className="button button--secondary button--compact" onClick={() => downloadRecoveryDraft(recoveredDraft ?? JSON.parse(draftSignature))} type="button">Download local draft</button>
+            <button className="button button--primary button--compact" onClick={() => {
+              window.localStorage.removeItem(recoveryKey)
+              setStaleRecovery(false)
+              window.location.reload()
+            }} type="button">Reload server version</button>
+          </div>
+        </section>
+      ) : null}
 
       <nav className="main-activity-tabs" aria-label="Main Activity editor sections">
         {([
@@ -418,6 +560,21 @@ export function MainActivityEditor({
               <input onChange={(event) => setTitle(event.target.value)} type="text" value={title} />
             </label>
             <label className="admin-field">
+              <span>Grading period</span>
+              <select
+                disabled={loadingPeriodChange}
+                onChange={(event) => {
+                  const period = event.target.value as GradingPeriod
+                  if (period) void requestGradingPeriodChange(period)
+                }}
+                required
+                value={gradingPeriod}
+              >
+                <option disabled value="">Select grading period</option>
+                {gradingPeriods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
+              </select>
+            </label>
+            <label className="admin-field">
               <span>Points (from published questions)</span>
               <input disabled type="number" value={publishedPoints} />
             </label>
@@ -428,18 +585,6 @@ export function MainActivityEditor({
             <label className="admin-field">
               <span>Passing score</span>
               <input max={publishedPoints} min={0} onChange={(event) => setPassingScore(event.target.value)} type="number" value={passingScore} />
-            </label>
-            <label className="admin-field">
-              <span>Opens at</span>
-              <input onChange={(event) => setOpensAt(event.target.value)} type="datetime-local" value={opensAt} />
-            </label>
-            <label className="admin-field">
-              <span>Due at</span>
-              <input onChange={(event) => setDueAt(event.target.value)} type="datetime-local" value={dueAt} />
-            </label>
-            <label className="admin-check">
-              <input checked={allowLateSubmissions} onChange={(event) => setAllowLateSubmissions(event.target.checked)} type="checkbox" />
-              <span>Allow late submissions</span>
             </label>
             <label className="admin-check">
               <input checked={isPublished} onChange={(event) => setIsPublished(event.target.checked)} type="checkbox" />
@@ -466,9 +611,11 @@ export function MainActivityEditor({
               <QuestionEditorCard
                 duplicateQuestion={duplicateQuestion}
                 index={index}
+                moveQuestion={moveQuestion}
                 key={question.id}
                 question={question}
                 removeQuestion={removeQuestion}
+                totalQuestions={activeDrafts.length}
                 updateQuestion={updateQuestion}
               />
             ))}
@@ -560,10 +707,10 @@ export function MainActivityEditor({
       ) : null}
 
       {message ? <p className="admin-message">{message}</p> : null}
-      <div className="lesson-editor__actions">
+      <div className="lesson-editor__actions main-activity-editor__save-actions">
         <button className="button button--secondary" disabled={saving} onClick={() => void saveActivity()} type="button">
           <Icon name="save" />
-          <span>{saving ? 'Saving...' : dirty ? 'Save changes' : 'Saved'}</span>
+          <span>{saving ? 'Saving...' : activity?.is_published && dirty ? 'Publish changes' : dirty ? 'Save draft' : 'Saved'}</span>
         </button>
         {nextTab ? (
           <button className="button button--primary" disabled={saving} onClick={() => void saveActivity(nextTab)} type="button">
@@ -578,15 +725,24 @@ export function MainActivityEditor({
           onDownload={downloadImportExample}
         />
       ) : null}
+      {periodChangeDialog ? (
+        <PeriodChangeDialog
+          dialog={periodChangeDialog}
+          onCancel={() => setPeriodChangeDialog(null)}
+          onConfirm={confirmGradingPeriodChange}
+          setSelection={(scheduleId, categoryId) => setPeriodChangeDialog((current) => current ? ({
+            ...current,
+            selections: { ...current.selections, [scheduleId]: categoryId },
+          }) : current)}
+        />
+      ) : null}
     </section>
   )
 }
 
 const gradingPeriods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
-type GradingPeriod = (typeof gradingPeriods)[number]
 type AssignmentDraft = {
   selected: boolean
-  period: GradingPeriod
   categoryId: string
 }
 type ActivityGradingData = Pick<
@@ -652,7 +808,6 @@ function ActivityGradingAssignments({
       activity={activity}
       api={api}
       data={scopedData}
-      extensions={workspace.extensions}
       refresh={async () => { await workspaceQuery.refetch() }}
     />
   )
@@ -662,16 +817,15 @@ function ActivityGradingAssignmentsContent({
   activity,
   api,
   data,
-  extensions,
   refresh,
 }: {
   activity: ModuleActivity
   api: AuthedRequest
   data: ActivityGradingData
-  extensions: MainActivityGradingWorkspace['extensions']
   refresh: () => Promise<void>
 }) {
   const schedules = data.schedules
+  const period = activity.grading_period
   const existingItemsBySchedule = new Map(
     schedules.map((schedule) => [
       schedule.id,
@@ -683,17 +837,14 @@ function ActivityGradingAssignmentsContent({
       ),
     ]),
   )
-  const [defaultPeriod, setDefaultPeriod] = useState<GradingPeriod>('PRELIM')
   const [drafts, setDrafts] = useState<Record<number, AssignmentDraft>>(() =>
     Object.fromEntries(schedules.map((schedule) => {
       const existing = existingItemsBySchedule.get(schedule.id)?.[0]
       const category = data.gradeCategories.find((candidate) => candidate.id === existing?.grade_category)
-      const period = category?.grading_period ?? 'PRELIM'
-      const automaticCategory = quizCategoriesFor(data, schedule.id, period)[0]
+      const automaticCategory = period ? quizCategoriesFor(data, schedule.id, period)[0] : undefined
       return [schedule.id, {
-        selected: Boolean(existing),
-        period,
-        categoryId: String(category?.id ?? automaticCategory?.id ?? ''),
+        selected: Boolean(existing) && schedule.is_active && schedule.term_is_active && Boolean(period),
+        categoryId: String(category?.grading_period === period ? category.id : automaticCategory?.id ?? ''),
       }]
     })),
   )
@@ -711,33 +862,14 @@ function ActivityGradingAssignmentsContent({
     const schedule = schedules.find((candidate) => candidate.id === scheduleId)
     if (!schedule) return
     const current = drafts[scheduleId]
-    const category = current?.categoryId
+    const category = current?.categoryId && data.gradeCategories.some((candidate) =>
+      candidate.id === Number(current.categoryId) && candidate.grading_period === period,
+    )
       ? current.categoryId
-      : String(quizCategoriesFor(data, scheduleId, defaultPeriod)[0]?.id ?? '')
+      : String(period ? quizCategoriesFor(data, scheduleId, period)[0]?.id ?? '' : '')
     updateDraft(scheduleId, {
       selected,
-      period: current?.period ?? defaultPeriod,
       categoryId: category,
-    })
-  }
-
-  function changeDefaultPeriod(period: GradingPeriod) {
-    setDefaultPeriod(period)
-    setDrafts((current) => Object.fromEntries(schedules.map((schedule) => {
-      const draft = current[schedule.id]
-      if (!draft?.selected) return [schedule.id, draft]
-      return [schedule.id, {
-        ...draft,
-        period,
-        categoryId: String(quizCategoriesFor(data, schedule.id, period)[0]?.id ?? ''),
-      }]
-    })))
-  }
-
-  function changeRowPeriod(scheduleId: number, period: GradingPeriod) {
-    updateDraft(scheduleId, {
-      period,
-      categoryId: String(quizCategoriesFor(data, scheduleId, period)[0]?.id ?? ''),
     })
   }
 
@@ -805,16 +937,14 @@ function ActivityGradingAssignmentsContent({
           <h3>Count this Main Activity as a quiz</h3>
           <p>Select classes together, then review any per-class category overrides before applying.</p>
         </div>
-        <label className="admin-field">
-          <span>Default period</span>
-          <select onChange={(event) => changeDefaultPeriod(event.target.value as GradingPeriod)} value={defaultPeriod}>
-            {gradingPeriods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
-          </select>
-        </label>
+        <span className={period ? 'status-badge status-badge--ready' : 'status-badge status-badge--error'}>
+          {period ? formatPeriod(period) : 'Select a period in Setup'}
+        </span>
         <div className="lesson-editor__actions">
           <button
             className="button button--secondary button--compact"
-            onClick={() => schedules.forEach((schedule) => selectSchedule(schedule.id, true))}
+            disabled={!period}
+            onClick={() => schedules.filter((schedule) => schedule.is_active && schedule.term_is_active).forEach((schedule) => selectSchedule(schedule.id, true))}
             type="button"
           >
             Select all
@@ -830,8 +960,8 @@ function ActivityGradingAssignmentsContent({
       </div>
       <div className="activity-grading-list">
         {schedules.map((schedule) => {
-          const draft = drafts[schedule.id] ?? { selected: false, period: defaultPeriod, categoryId: '' }
-          const categories = quizCategoriesFor(data, schedule.id, draft.period)
+          const draft = drafts[schedule.id] ?? { selected: false, categoryId: '' }
+          const categories = period ? quizCategoriesFor(data, schedule.id, period) : []
           const existingItems = existingItemsBySchedule.get(schedule.id) ?? []
           const existingItem = existingItems[0]
           const existingCategory = data.gradeCategories.find((category) => category.id === existingItem?.grade_category)
@@ -840,28 +970,18 @@ function ActivityGradingAssignmentsContent({
               <label className="activity-grading-row__select">
                 <input
                   checked={draft.selected}
-                  disabled={existingItems.length > 1}
+                  disabled={!period || !schedule.is_active || !schedule.term_is_active || existingItems.length > 1}
                   onChange={(event) => selectSchedule(schedule.id, event.target.checked)}
                   type="checkbox"
                 />
                 <span className="activity-grading-row__class">
-                  <strong>{schedule.subject_code} {schedule.section || ''}</strong>
-                  <span>{schedule.term_name}</span>
+                   <strong>{schedule.subject_code} {schedule.section || ''}</strong>
+                   <span>{schedule.term_name}{schedule.is_active && schedule.term_is_active ? '' : ' · Archived'}</span>
                 </span>
               </label>
               <span className={`status-badge ${existingItems.length > 1 ? 'status-badge--error' : existingItem ? 'status-badge--ready' : ''}`}>
                 {existingItems.length > 1 ? 'Error: duplicate links' : existingItem ? 'Linked' : 'Not linked'}
               </span>
-              <label className="admin-field">
-                <span>Period</span>
-                <select
-                  disabled={!draft.selected || existingItems.length > 1}
-                  onChange={(event) => changeRowPeriod(schedule.id, event.target.value as GradingPeriod)}
-                  value={draft.period}
-                >
-                  {gradingPeriods.map((period) => <option key={period} value={period}>{formatPeriod(period)}</option>)}
-                </select>
-              </label>
               <label className="admin-field">
                 <span>Quiz category</span>
                 <select
@@ -890,7 +1010,7 @@ function ActivityGradingAssignmentsContent({
               </div>
               {!categories.length && draft.selected ? (
                 <p className="admin-message">
-                  No Quiz category for {formatPeriod(draft.period)}. <Link to="/admin/grades">Configure grade categories</Link>.
+                  No Quiz category for {period ? formatPeriod(period) : 'this period'}. <Link to="/admin/grades">Configure grade categories</Link>.
                 </p>
               ) : null}
             </article>
@@ -912,114 +1032,6 @@ function ActivityGradingAssignmentsContent({
           <span>{saving ? 'Applying assignments...' : 'Apply selected assignments'}</span>
         </button>
       </div>
-      <ActivityExtensions
-        activity={activity}
-        api={api}
-        data={data}
-        extensions={extensions}
-        refresh={refresh}
-        schedules={schedules}
-      />
-    </section>
-  )
-}
-
-function ActivityExtensions({
-  activity,
-  api,
-  data,
-  extensions,
-  refresh,
-  schedules,
-}: {
-  activity: ModuleActivity
-  api: AuthedRequest
-  data: ActivityGradingData
-  extensions: MainActivityGradingWorkspace['extensions']
-  refresh: () => Promise<void>
-  schedules: RouteData['schedules']
-}) {
-  const eligibleStudentIds = new Set(
-    data.enrollments
-      .filter((entry) => entry.is_active && schedules.some((schedule) => schedule.id === entry.schedule))
-      .map((entry) => entry.student),
-  )
-  const students = data.users
-    .filter((user) => user.role === 'STUDENT' && eligibleStudentIds.has(user.id))
-    .sort((first, second) => `${first.last_name} ${first.first_name}`.localeCompare(`${second.last_name} ${second.first_name}`))
-  const [studentId, setStudentId] = useState('')
-  const [extensionDueAt, setExtensionDueAt] = useState('')
-  const [message, setMessage] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  async function saveExtension() {
-    if (!studentId || !extensionDueAt) {
-      setMessage('Select a student and an extended due date.')
-      return
-    }
-    setSaving(true)
-    setMessage('')
-    try {
-      await api(`/modules/activities/${activity.id}/extensions/`, {
-        method: 'PUT',
-        body: JSON.stringify({ student: Number(studentId), due_at: fromLocalDateTime(extensionDueAt) }),
-      })
-      await refresh()
-      setStudentId('')
-      setExtensionDueAt('')
-      setMessage('Student extension saved.')
-    } catch (error) {
-      setMessage(toErrorMessage(error))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function removeExtension(student: number) {
-    setSaving(true)
-    setMessage('')
-    try {
-      await api(`/modules/activities/${activity.id}/extensions/`, {
-        method: 'DELETE',
-        body: JSON.stringify({ student }),
-      })
-      await refresh()
-      setMessage('Student extension removed.')
-    } catch (error) {
-      setMessage(toErrorMessage(error))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <section className="activity-extensions">
-      <div>
-        <p className="eyebrow">Individual due dates</p>
-        <h3>Student extensions</h3>
-        <p>Override the activity due date for a student in one of the linked classes.</p>
-      </div>
-      <div className="lesson-editor__grid">
-        <label className="admin-field">
-          <span>Student</span>
-          <select onChange={(event) => setStudentId(event.target.value)} value={studentId}>
-            <option value="">Select student</option>
-            {students.map((student) => <option key={student.id} value={student.id}>{student.last_name}, {student.first_name}</option>)}
-          </select>
-        </label>
-        <label className="admin-field">
-          <span>Extended due date</span>
-          <input onChange={(event) => setExtensionDueAt(event.target.value)} type="datetime-local" value={extensionDueAt} />
-        </label>
-      </div>
-      <button className="button button--secondary button--compact" disabled={saving} onClick={() => void saveExtension()} type="button">Save extension</button>
-      {extensions.map((extension) => (
-        <div className="activity-extension-row" key={extension.id}>
-          <span><strong>{extension.student_name}</strong><small>{new Date(extension.due_at).toLocaleString()}</small></span>
-          <button className="button button--secondary button--compact" disabled={saving} onClick={() => void removeExtension(extension.student)} type="button">Remove</button>
-        </div>
-      ))}
-      {message ? <p className="admin-message" role="status">{message}</p> : null}
     </section>
   )
 }
@@ -1046,24 +1058,47 @@ function formatEditorTab(tab: EditorTab) {
 function QuestionEditorCard({
   duplicateQuestion,
   index,
+  moveQuestion,
   question,
   removeQuestion,
+  totalQuestions,
   updateQuestion,
 }: {
   duplicateQuestion: (question: QuestionDraft) => void
   index: number
+  moveQuestion: (id: string, direction: -1 | 1) => void
   question: QuestionDraft
   removeQuestion: (id: string) => void
+  totalQuestions: number
   updateQuestion: UpdateQuestion
 }) {
+  const warnings = getQuestionWarnings(question)
   return (
-    <article className="main-activity-question-editor">
+    <article className={warnings.length ? 'main-activity-question-editor main-activity-question-editor--warning' : 'main-activity-question-editor'}>
       <div className="main-activity-question-editor__header">
         <div>
           <strong>Question {index + 1}</strong>
           <small>{questionTypeOptions.find((option) => option.value === question.question_type)?.label}</small>
         </div>
         <div className="lesson-editor__actions">
+          <button
+            aria-label={`Move Question ${index + 1} up`}
+            className="button button--secondary button--compact"
+            disabled={index === 0}
+            onClick={() => moveQuestion(question.id, -1)}
+            type="button"
+          >
+            Move up
+          </button>
+          <button
+            aria-label={`Move Question ${index + 1} down`}
+            className="button button--secondary button--compact"
+            disabled={index === totalQuestions - 1}
+            onClick={() => moveQuestion(question.id, 1)}
+            type="button"
+          >
+            Move down
+          </button>
           <button className="button button--secondary button--compact" onClick={() => duplicateQuestion(question)} type="button">
             Duplicate
           </button>
@@ -1087,10 +1122,6 @@ function QuestionEditorCard({
         <label className="admin-field">
           <span>Points</span>
           <input onChange={(event) => updateQuestion(question.id, 'points', event.target.value)} type="number" value={question.points} />
-        </label>
-        <label className="admin-field">
-          <span>Order</span>
-          <input onChange={(event) => updateQuestion(question.id, 'order', event.target.value)} type="number" value={question.order} />
         </label>
         <label className="admin-check">
           <input checked={question.is_published} onChange={(event) => updateQuestion(question.id, 'is_published', event.target.checked)} type="checkbox" />
@@ -1147,6 +1178,11 @@ function QuestionEditorCard({
           <textarea onChange={(event) => updateQuestion(question.id, 'explanation', event.target.value)} rows={3} value={question.explanation} />
         </label>
       </div>
+      {warnings.length ? (
+        <ul className="main-activity-question-editor__warnings" aria-label={`Readiness issues for Question ${index + 1}`}>
+          {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
     </article>
   )
 }
@@ -1207,18 +1243,15 @@ function getReadinessWarnings(
   title: string,
   passingScore: string,
   publishedPoints: number,
-  opensAt: string,
-  dueAt: string,
+  gradingPeriod: GradingPeriod | '',
 ) {
   const warnings: string[] = []
   if (!title.trim()) warnings.push('Add an activity title.')
+  if (!gradingPeriod) warnings.push('Select a grading period.')
   if (passingScore && Number(passingScore) > publishedPoints) {
     warnings.push('Passing score cannot exceed published question points.')
   }
   if (Number(passingScore) < 0) warnings.push('Passing score cannot be negative.')
-  if (opensAt && dueAt && new Date(opensAt) >= new Date(dueAt)) {
-    warnings.push('Due date must be after the opening date.')
-  }
   const publishedDrafts = drafts.filter((draft) => draft.is_published)
   if (!publishedDrafts.length) {
     warnings.push('Add at least one published question.')
@@ -1226,30 +1259,7 @@ function getReadinessWarnings(
 
   publishedDrafts.forEach((draft, index) => {
     const label = `Question ${index + 1}`
-    if (!draft.prompt.trim()) {
-      warnings.push(`${label}: add a prompt.`)
-    }
-    if (draft.question_type === 'multiple_choice' || draft.question_type === 'true_false') {
-      const choices = parseChoiceLines(draft.choices_text)
-      if (choices.length < 2) {
-        warnings.push(`${label}: add at least two choices.`)
-      }
-      if (choices.filter((choice) => choice.isCorrect).length !== 1) {
-        warnings.push(`${label}: mark exactly one correct choice with *.`)
-      }
-    }
-    if (draft.question_type === 'fill_blank' && !lineValues(draft.correct_text_answers).length) {
-      warnings.push(`${label}: add at least one accepted answer.`)
-    }
-    if (draft.question_type === 'ordering' && lineValues(draft.choices_text).length < 2) {
-      warnings.push(`${label}: add at least two ordered items.`)
-    }
-    if (draft.question_type === 'matching' && parseMatchingLines(draft.matching_text).length < 2) {
-      warnings.push(`${label}: add at least two matching pairs.`)
-    }
-    if (draft.question_type === 'code_output' && !draft.expected_output.trim()) {
-      warnings.push(`${label}: add expected output.`)
-    }
+    getQuestionWarnings(draft).forEach((warning) => warnings.push(`${label}: ${warning}`))
   })
 
   return warnings
@@ -1284,17 +1294,6 @@ function toAtomicQuestion(draft: QuestionDraft) {
         }))
       : [],
   }
-}
-
-function toLocalDateTime(value?: string | null) {
-  if (!value) return ''
-  const date = new Date(value)
-  const offset = date.getTimezoneOffset()
-  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16)
-}
-
-function fromLocalDateTime(value: string) {
-  return value ? new Date(value).toISOString() : null
 }
 
 function readRecoveredDraft(key: string, legacyKey: string): RecoveredEditorDraft | null {
@@ -1437,7 +1436,7 @@ function ActivityPreview({
               <span className="status-pill">{draft.points || '1'} pts</span>
             </div>
             <h2>{draft.prompt || 'Question prompt'}</h2>
-            <PreviewQuestionBody draft={draft} mode={mode} />
+            <PreviewQuestionBody draft={draft} mode={mode} questionId={index + 1} />
           </article>
         ))}
         {!drafts.filter((draft) => draft.is_published).length ? (
@@ -1451,41 +1450,158 @@ function ActivityPreview({
 function PreviewQuestionBody({
   draft,
   mode,
+  questionId,
 }: {
   draft: QuestionDraft
   mode: PreviewMode
+  questionId: number
 }) {
+  const choices = parseChoiceLines(draft.choices_text).map((choice, index) => ({
+    id: index + 1,
+    is_correct: choice.isCorrect,
+    text: choice.text,
+  }))
+  const pairs = parseMatchingLines(draft.matching_text).map((pair, index) => ({
+    id: index + 1,
+    left_text: pair.left,
+    right_text: pair.right,
+  }))
+  const previewDraft: ActivityDraft = {
+    selected_choice: null,
+    text_answer: '',
+    choice_order: choices.map((choice) => choice.id),
+    matching_answer: mode === 'review'
+      ? Object.fromEntries(pairs.map((pair) => [String(pair.id), pair.right_text]))
+      : {},
+  }
+  return (
+    <>
+      {draft.code_snippet ? <pre>{draft.code_snippet}</pre> : null}
+      <ActivityQuestionInput
+        choices={choices}
+        draft={previewDraft}
+        matchingOptions={pairs.map((pair) => pair.right_text)}
+        number={questionId}
+        onChange={() => undefined}
+        pairs={pairs}
+        question={{ id: questionId, question_type: draft.question_type }}
+        readonly
+        reviewUnlocked={mode === 'review'}
+      />
+      {mode === 'review' && draft.question_type === 'fill_blank' ? (
+        <p><strong>Accepted:</strong> {lineValues(draft.correct_text_answers).join(', ') || 'Missing accepted answer'}</p>
+      ) : null}
+      {mode === 'review' && draft.question_type === 'code_output' ? (
+        <p><strong>Expected output:</strong> {draft.expected_output || 'Missing expected output'}</p>
+      ) : null}
+    </>
+  )
+}
+
+function getQuestionWarnings(draft: QuestionDraft) {
+  if (!draft.is_published) return []
+  const warnings: string[] = []
+  if (!draft.prompt.trim()) warnings.push('Add a prompt.')
   if (draft.question_type === 'multiple_choice' || draft.question_type === 'true_false') {
     const choices = parseChoiceLines(draft.choices_text)
-    return (
-      <div className="choice-list">
-        {choices.map((choice) => (
-          <label className="choice-option" key={choice.text}>
-            <input disabled type="radio" />
-            <span>{choice.text}</span>
-            {mode === 'review' && choice.isCorrect ? <strong className="answer-review__mark">Correct</strong> : null}
-          </label>
-        ))}
+    if (choices.length < 2) warnings.push('Add at least two choices.')
+    if (choices.filter((choice) => choice.isCorrect).length !== 1) {
+      warnings.push('Mark exactly one correct choice with *.')
+    }
+  }
+  if (draft.question_type === 'fill_blank' && !lineValues(draft.correct_text_answers).length) {
+    warnings.push('Add at least one accepted answer.')
+  }
+  if (draft.question_type === 'ordering' && lineValues(draft.choices_text).length < 2) {
+    warnings.push('Add at least two ordered items.')
+  }
+  if (draft.question_type === 'matching' && parseMatchingLines(draft.matching_text).length < 2) {
+    warnings.push('Add at least two matching pairs.')
+  }
+  if (draft.question_type === 'code_output' && !draft.expected_output.trim()) {
+    warnings.push('Add expected output.')
+  }
+  return warnings
+}
+
+function PeriodChangeDialog({
+  dialog,
+  onCancel,
+  onConfirm,
+  setSelection,
+}: {
+  dialog: PeriodChangeDialogState
+  onCancel: () => void
+  onConfirm: () => void
+  setSelection: (scheduleId: number, categoryId: string) => void
+}) {
+  const rows = dialog.linkedScheduleIds.map((scheduleId) => {
+    const schedule = dialog.workspace.schedules.find((candidate) => candidate.id === scheduleId)
+    const linkedItems = dialog.workspace.grade_items.filter((item) => item.schedule === scheduleId)
+    const categories = dialog.workspace.grade_categories.filter((category) =>
+      schedule &&
+      category.subject === schedule.subject &&
+      category.category === 'QUIZ' &&
+      category.grading_period === dialog.targetPeriod,
+    )
+    return { categories, duplicate: linkedItems.length > 1, schedule, scheduleId }
+  })
+  const ready = rows.every((row) =>
+    row.schedule && !row.duplicate && Boolean(dialog.selections[row.scheduleId]),
+  )
+
+  return (
+    <div aria-labelledby="period-change-title" aria-modal="true" className="attendance-modal" role="dialog">
+      <div className="attendance-modal__backdrop" onClick={onCancel} />
+      <div className="attendance-modal__panel attendance-modal__panel--wide">
+        <div className="attendance-modal__header">
+          <div>
+            <span>Main Activity grading</span>
+            <strong id="period-change-title">Change period to {formatPeriod(dialog.targetPeriod)}</strong>
+          </div>
+          <button aria-label="Close" className="icon-button" onClick={onCancel} type="button">
+            <Icon name="close" />
+          </button>
+        </div>
+        <div className="structured-import-modal__body">
+          <p>Choose the replacement Quiz category for every linked class. Existing item scores will be preserved and recalculated in the new period.</p>
+          <div className="activity-grading-list">
+            {rows.map(({ categories, duplicate, schedule, scheduleId }) => (
+              <article className="activity-grading-row activity-grading-row--selected" key={scheduleId}>
+                <span className="activity-grading-row__class">
+                  <strong>{schedule ? `${schedule.subject_code} ${schedule.section || ''}` : `Class #${scheduleId}`}</strong>
+                  <span>{schedule?.term_name ?? 'Class details unavailable'}</span>
+                </span>
+                <label className="admin-field">
+                  <span>Replacement Quiz category</span>
+                  <select
+                    disabled={!schedule || duplicate || !categories.length}
+                    onChange={(event) => setSelection(scheduleId, event.target.value)}
+                    value={dialog.selections[scheduleId] ?? ''}
+                  >
+                    <option value="">Select Quiz category</option>
+                    {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                  </select>
+                </label>
+                {duplicate ? <p className="admin-message">Resolve duplicate gradebook links before changing the period.</p> : null}
+                {!duplicate && !categories.length ? (
+                  <p className="admin-message">
+                    No Quiz category for {formatPeriod(dialog.targetPeriod)}. <Link to="/admin/grades">Configure grade categories</Link>.
+                  </p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+          <div className="lesson-editor__actions">
+            <button className="button button--secondary" onClick={onCancel} type="button">Cancel</button>
+            <button className="button button--primary" disabled={!ready} onClick={onConfirm} type="button">
+              Confirm replacements
+            </button>
+          </div>
+        </div>
       </div>
-    )
-  }
-  if (draft.question_type === 'ordering') {
-    return <p>{lineValues(draft.choices_text).join(' -> ') || 'Ordered items appear here.'}</p>
-  }
-  if (draft.question_type === 'matching') {
-    return <p>{parseMatchingLines(draft.matching_text).map((pair) => mode === 'review' ? `${pair.left}: ${pair.right}` : `${pair.left}: Choose match`).join('; ') || 'Matching pairs appear here.'}</p>
-  }
-  if (draft.question_type === 'code_output') {
-    return (
-      <>
-        {draft.code_snippet ? <pre>{draft.code_snippet}</pre> : null}
-        {mode === 'review' ? <p><strong>Expected output:</strong> {draft.expected_output || 'Missing expected output'}</p> : <textarea disabled rows={3} value="" />}
-      </>
-    )
-  }
-  return mode === 'review'
-    ? <p><strong>Accepted:</strong> {lineValues(draft.correct_text_answers).join(', ') || 'Missing accepted answer'}</p>
-    : <input disabled placeholder="Type your answer" type="text" />
+    </div>
+  )
 }
 
 function StructuredImportExampleModal({

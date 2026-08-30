@@ -1,11 +1,13 @@
-from datetime import time
+from datetime import time, timedelta
 
 from django.conf import settings
 from django.core.management import BaseCommand, call_command
+from django.utils import timezone
 
 from accounts.models import StudentProfile, User
 from grades.models import GradeCategory, GradeCategoryChoices, GradingPeriod
 from learning_modules.models import (
+    LearningContextType,
     Module,
     ModuleAccess,
     ModuleActivity,
@@ -188,8 +190,9 @@ class Command(BaseCommand):
             title__startswith='Resume ',
         ).update(is_published=True)
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.ENROLLED,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
             activated_by=teacher,
+            expires_at=timezone.now() + timedelta(days=30),
             module=resume_module,
             student=students[0],
         )
@@ -257,6 +260,7 @@ class Command(BaseCommand):
             title='Paper Queue Quiz',
             instructions='Complete the printed Main Activity for manual checking.',
             points_possible=10,
+            grading_period=GradingPeriod.PRELIM,
             is_published=True,
         )
         workflow_question = ModuleActivityQuestion.objects.create(
@@ -325,8 +329,10 @@ class Command(BaseCommand):
             lesson=hydration_lesson,
             title='Saved Attempt Hydration',
             instructions='Continue the answer saved in this attempt.',
-            points_possible=1,
-            max_attempts=1,
+            points_possible=2,
+            max_attempts=3,
+            passing_score=2,
+            grading_period=GradingPeriod.PRELIM,
             is_published=True,
         )
         hydration_question = ModuleActivityQuestion.objects.create(
@@ -338,11 +344,53 @@ class Command(BaseCommand):
             order=1,
             is_published=True,
         )
+        hydration_question_two = ModuleActivityQuestion.objects.create(
+            activity=hydration_activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Which question is still open?',
+            correct_text_answers=['Question two'],
+            points=1,
+            order=2,
+            is_published=True,
+        )
+        frozen_snapshot = build_activity_snapshot(hydration_activity)
         ModuleActivityAttempt.objects.create(
             activity=hydration_activity,
             student=students[0],
+            context_type=LearningContextType.PERSONAL,
             attempt_number=1,
-            question_snapshot=build_activity_snapshot(hydration_activity),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=2,
+            max_score=2,
+            submitted_at=timezone.now() - timedelta(minutes=5),
+            question_snapshot=frozen_snapshot,
+            draft_answers={
+                str(hydration_question.id): {
+                    'selected_choice': None,
+                    'text_answer': 'The saved draft',
+                    'choice_order': [],
+                    'matching_answer': {},
+                    'is_correct': True,
+                    'points_earned': '1.00',
+                    'feedback': '',
+                },
+                str(hydration_question_two.id): {
+                    'selected_choice': None,
+                    'text_answer': 'Question two',
+                    'choice_order': [],
+                    'matching_answer': {},
+                    'is_correct': True,
+                    'points_earned': '1.00',
+                    'feedback': '',
+                },
+            },
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=hydration_activity,
+            student=students[0],
+            context_type=LearningContextType.PERSONAL,
+            attempt_number=2,
+            question_snapshot=frozen_snapshot,
             draft_answers={
                 str(hydration_question.id): {
                     'selected_choice': None,
@@ -353,8 +401,9 @@ class Command(BaseCommand):
             },
         )
         ModuleAccess.objects.create(
-            access_type=ModuleAccess.AccessType.ENROLLED,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
             activated_by=teacher,
+            expires_at=timezone.now() + timedelta(days=30),
             module=hydration_module,
             student=students[0],
         )

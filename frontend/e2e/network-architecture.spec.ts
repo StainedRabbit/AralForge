@@ -13,7 +13,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
 
   expect([...new Set(apiRequests.filter(path => path !== '/api/auth/token/'))]).toEqual([
@@ -32,11 +32,11 @@ test('retired teacher coding route returns to the teacher dashboard', async ({ p
   await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await page.goto('/admin/coding')
 
   await expect(page).toHaveURL(/\/admin$/)
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 })
 
 test('feature navigation loads only that route resources', async ({ page }) => {
@@ -44,7 +44,7 @@ test('feature navigation loads only that route resources', async ({ page }) => {
   await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   const routeRequests: string[] = []
   page.on('request', request => {
@@ -92,7 +92,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   await page.getByLabel('Student number').fill('e2e-teacher')
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   const loginRequest = apiRequests.find(request => request.pathname === '/api/auth/token/')
   expect(loginRequest?.origin).toBe('http://127.0.0.1:8001')
@@ -110,7 +110,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   apiRequests.length = 0
 
   await page.reload()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   expect(apiRequests.every(request => request.origin === 'http://127.0.0.1:8001')).toBe(true)
   const refreshRequest = apiRequests.find(

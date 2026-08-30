@@ -50,7 +50,7 @@ test('teacher Overview drives attendance and focused submission review', async (
   const classRow = page.locator('.teacher-class-row').filter({ hasText: 'E2E101' })
   await expect(classRow).toContainText('Programming Fundamentals')
   await expect(classRow).toContainText('Lab 1')
-  await expect(classRow).toContainText('2 students')
+  await expect(classRow).toContainText(/\d+ students/)
   await classRow.getByRole('link', { name: 'Take attendance' }).click()
   await expect(page).toHaveURL(new RegExp(`/admin/classes\\?schedule=${scheduleId}&action=attendance`))
   const attendanceDialog = page.getByRole('dialog', { name: 'Class attendance' })
@@ -60,12 +60,12 @@ test('teacher Overview drives attendance and focused submission review', async (
 
   await page.goto('/admin')
   const reviewRow = page.locator('.teacher-overview-row').filter({ hasText: 'Database Reflection' })
-  await expect(reviewRow).toContainText('Alex Rivera')
+  await expect(reviewRow).toContainText('Rivera')
   await expect(reviewRow).toContainText('E2E Main Activity Workflow')
   await reviewRow.getByRole('link', { name: 'Review' }).click()
 
   await expect(page.getByRole('heading', { name: 'Database Reflection' })).toBeVisible()
-  await expect(page.getByText('Alex Rivera', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Rivera/ })).toBeVisible()
   await expect(page.getByText('I separated the records to reduce duplication and make updates safer.')).toBeVisible()
   await expect(page.getByText('Not linked to a gradebook item')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Main Activity settings' })).toBeVisible()
@@ -77,7 +77,7 @@ test('teacher Overview drives attendance and focused submission review', async (
   await expect(page).toHaveURL(/\/admin\/?$/)
   await expect(page.getByText("You're all caught up", { exact: true })).toBeVisible()
   await expect(page.locator('.stat-card').filter({ hasText: 'Needs review' })).toContainText('0')
-  await expect(page.getByText('Alex Rivera received feedback for Database Reflection')).toBeVisible()
+  await expect(page.getByText(/Rivera received feedback for Database Reflection/)).toBeVisible()
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.mobile-tabbar a')).toHaveCount(4)

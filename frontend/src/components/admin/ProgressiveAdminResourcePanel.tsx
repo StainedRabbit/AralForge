@@ -204,13 +204,13 @@ export function ProgressiveAdminResourcePanel<TItem extends { id: number }>({
         />
       </label>
       <div className="progressive-resource__table" ref={scrollRef}>
-        <table className="admin-table">
+        <table className="admin-table mobile-card-table">
           <thead><tr>{columns.map((column) => <th key={column.header}>{column.header}</th>)}{fields.length ? <th>Actions</th> : null}</tr></thead>
           <tbody>
             {rows.map((item) => (
               <tr key={item.id}>
-                {columns.map((column) => <td key={column.header}>{column.render(item)}</td>)}
-                {fields.length ? <td><button aria-label={`Edit ${noun}`} className="icon-button" onClick={() => openEdit(item)} title="Edit" type="button"><Icon name="edit" /></button></td> : null}
+                {columns.map((column) => <td data-label={column.header} key={column.header}>{column.render(item)}</td>)}
+                {fields.length ? <td data-label="Actions"><button aria-label={`Edit ${noun}`} className="icon-button" onClick={() => openEdit(item)} title="Edit" type="button"><Icon name="edit" /></button></td> : null}
               </tr>
             ))}
             {pageQuery.isPending ? <SkeletonRows columns={columns.length + (fields.length ? 1 : 0)} /> : null}

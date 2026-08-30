@@ -6,14 +6,20 @@ import { queryKeys } from './queryKeys'
 import { toErrorMessage } from '../utils/format'
 
 export type WorkspaceResource = Exclude<keyof RouteData,
-  'currentUser' | 'profile' | 'loading' | 'error'
+  | 'currentUser'
+  | 'profile'
+  | 'learningContext'
+  | 'legacyHistoryCounts'
+  | 'activityStates'
+  | 'loading'
+  | 'error'
 >
 
 const paths: Record<WorkspaceResource, string> = {
   users: '/accounts/users/', profiles: '/accounts/students/',
   subjects: '/subjects/subjects/', schoolYears: '/subjects/school-years/',
   terms: '/subjects/school-year-semesters/', schedules: '/subjects/subject-schedules/',
-  enrollments: '/subjects/schedule-students/', modules: '/modules/modules/',
+  enrollments: '/subjects/schedule-students/', modules: '/modules/modules/?view=summary',
   moduleTopics: '/modules/topics/', moduleLessons: '/modules/lessons/',
   lessonAssets: '/modules/lesson-assets/', lessonExamples: '/modules/lesson-examples/',
   lessonProgress: '/modules/lesson-progress/', moduleAccess: '/modules/access/',
@@ -129,8 +135,10 @@ export function createEmptyWorkspace(currentUser: User, profile: StudentProfile 
     users: [], currentUser, profiles: profile ? [profile] : [], profile,
     subjects: [], schoolYears: [], terms: [], schedules: [], enrollments: [], modules: [],
     moduleTopics: [], moduleLessons: [], lessonAssets: [], lessonExamples: [], lessonProgress: [],
+    learningContext: null, legacyHistoryCounts: {},
     moduleAccess: [], activities: [], activityQuestions: [], activityChoices: [],
     activityMatchingPairs: [], activityAttempts: [], activityAnswers: [], submissions: [],
+    activityStates: [],
     progress: [], topicProgress: [], attendanceSessions: [], attendanceRecords: [], gradingTemplates: [],
     subjectGradingPolicies: [], gradingTemplateItems: [], gradeCategories: [], gradeItems: [],
     categoryGrades: [], gradeItemScores: [], periodGrades: [], finalGrades: [], points: [],

@@ -1,8 +1,9 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Case, CharField, Count, Exists, Max, OuterRef, Q, Subquery, Sum, Value, When
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -12,12 +13,13 @@ from rest_framework.views import APIView
 from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
 from accounts.models import User
 from accounts.serializers import UserSerializer
+from config.cache import CachedReferenceListMixin
 from attendance.models import AttendanceSession
 from gamification.models import LevelRule, PointLedger
 from gamification.serializers import LevelRuleSerializer, PointLedgerSerializer
 from learning_modules.models import Module, ModuleActivity, ModuleActivityAttempt
 from learning_modules.serializers import (
-    ModuleActivityAttemptSerializer,
+    ModuleActivityAttemptSummarySerializer,
     ModuleActivitySerializer,
 )
 from subjects.models import SchoolYearSemester, ScheduleStudent, Subject, SubjectSchedule
@@ -251,48 +253,59 @@ class TeacherGradebookView(APIView):
                 | Q(student__username__icontains=search)
                 | Q(student__student_profile__student_number__icontains=search)
             )
-        enrollments = list(
-            enrollment_queryset
-            .select_related('student__student_profile')
-            .order_by('student__last_name', 'student__first_name', 'student__username', 'id')
-        )
-        selected_scores = {}
-        selected_attempts = {}
+        status_counts = {key: 0 for key in ('PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN')}
         if selected_item:
-            selected_scores = {
-                score.student_id: score
-                for score in StudentGradeItemScore.objects.filter(grade_item=selected_item)
-            }
-            if selected_item.module_activity_id:
-                selected_attempts = {
-                    (attempt.student_id, attempt.submission_method): attempt
-                    for attempt in ModuleActivityAttempt.objects.filter(
-                        activity_id=selected_item.module_activity_id,
-                        student_id__in=[row.student_id for row in enrollments],
-                        is_submitted=True,
-                    ).order_by('id')
-                }
-
-        status_by_student = {
-            row.student_id: gradebook_roster_status(
-                selected_item,
-                selected_scores.get(row.student_id),
-                selected_attempts.get((row.student_id, 'PAPER')),
-                selected_attempts.get((row.student_id, 'ONLINE')),
+            score_rows = StudentGradeItemScore.objects.filter(
+                grade_item=selected_item,
+                student_id=OuterRef('student_id'),
             )
-            for row in enrollments
-        }
-        status_counts = {
-            key: sum(status == key for status in status_by_student.values())
-            for key in ('PENDING', 'ONLINE', 'PAPER', 'EXCUSED', 'OVERRIDDEN')
-        }
-        filtered = enrollments
+            paper_attempts = ModuleActivityAttempt.objects.filter(
+                paper_grade_item=selected_item,
+                student_id=OuterRef('student_id'),
+                submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+            )
+            online_attempts = ModuleActivityAttempt.objects.none()
+            if selected_item.module_activity_id:
+                online_attempts = ModuleActivityAttempt.objects.filter(
+                    activity_id=selected_item.module_activity_id,
+                    student_id=OuterRef('student_id'),
+                    submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                    status=ModuleActivityAttempt.Status.SUBMITTED,
+                    context_type='CLASS',
+                    schedule=schedule,
+                )
+            enrollment_queryset = enrollment_queryset.annotate(
+                _has_selected_score=Exists(score_rows),
+                _selected_score_status=Subquery(score_rows.values('status')[:1]),
+                _selected_score_origin=Subquery(score_rows.values('origin')[:1]),
+                _has_paper_attempt=Exists(paper_attempts),
+                _has_online_attempt=Exists(online_attempts),
+            ).annotate(
+                _roster_status=Case(
+                    When(_selected_score_status=StudentGradeItemScore.Status.EXCUSED, then=Value('EXCUSED')),
+                    When(_selected_score_origin=StudentGradeItemScore.Origin.OVERRIDE, then=Value('OVERRIDDEN')),
+                    When(_has_paper_attempt=True, then=Value('PAPER')),
+                    When(Q(_has_online_attempt=True) | Q(_has_selected_score=True), then=Value('ONLINE')),
+                    default=Value('PENDING'),
+                    output_field=CharField(),
+                ),
+            )
+            status_counts.update(grouped_counts(enrollment_queryset, '_roster_status'))
+        else:
+            enrollment_queryset = enrollment_queryset.annotate(
+                _roster_status=Value('PENDING', output_field=CharField()),
+            )
+            status_counts['PENDING'] = enrollment_queryset.count()
+
         if roster_filter != 'ALL':
-            filtered = [
-                row for row in filtered if status_by_student.get(row.student_id) == roster_filter
-            ]
-        count = len(filtered)
-        page_enrollments = filtered[offset:offset + limit]
+            enrollment_queryset = enrollment_queryset.filter(_roster_status=roster_filter)
+        count = enrollment_queryset.count()
+        page_enrollments = list(
+            enrollment_queryset.select_related('student__student_profile').order_by(
+                'student__last_name', 'student__first_name', 'student__username', 'id',
+            )[offset:offset + limit]
+        )
         page_student_ids = [row.student_id for row in page_enrollments]
         item_ids = [item.id for item in items]
         scores = StudentGradeItemScore.objects.filter(
@@ -308,7 +321,18 @@ class TeacherGradebookView(APIView):
         attempts = ModuleActivityAttempt.objects.filter(
             activity_id__in=activity_ids,
             student_id__in=page_student_ids,
-        ).select_related('student')
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        ).filter(
+            Q(
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                context_type='CLASS',
+                schedule=schedule,
+            )
+            | Q(
+                submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                paper_grade_item_id__in=item_ids,
+            )
+        ).select_related('student').defer('question_snapshot', 'draft_answers')
         activities = ModuleActivity.objects.filter(id__in=activity_ids).select_related('module', 'lesson')
         recorded_by_ids = attempts.exclude(recorded_by_id=None).values_list('recorded_by_id', flat=True)
         users = User.objects.filter(id__in=recorded_by_ids)
@@ -322,7 +346,7 @@ class TeacherGradebookView(APIView):
             'category_grades': StudentCategoryGradeSerializer(category_grades, many=True, context=context).data,
             'modules': [],
             'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
-            'activity_attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'activity_attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
             'attendance_sessions': [],
             'users': UserSerializer(users, many=True, context=context).data,
             'status_counts': status_counts,
@@ -419,18 +443,37 @@ class SubjectGradingPolicyViewSet(viewsets.ModelViewSet):
     search_fields = ('subject__code', 'subject__name', 'source_template__name')
 
 
-class GradingTemplateViewSet(viewsets.ModelViewSet):
+class GradingTemplateViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
+    cache_namespace = 'grading-templates'
     queryset = GradingTemplate.objects.prefetch_related('items')
     serializer_class = GradingTemplateSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
     search_fields = ('name', 'description')
 
     @action(detail=True, methods=['post'], url_path='apply-to-subject')
+    @transaction.atomic
     def apply_to_subject(self, request, pk=None):
         template = self.get_object()
         subject_id = request.data.get('subject')
         subject = get_object_or_404(Subject, pk=subject_id)
         categories = template.apply_to_subject(subject)
+        enrollment_count = ScheduleStudent.objects.filter(
+            schedule__subject=subject,
+            schedule__is_active=True,
+            is_active=True,
+        ).count()
+        if enrollment_count > 250:
+            from jobs.models import BackgroundJob
+
+            job = BackgroundJob.objects.filter(
+                job_type=BackgroundJob.Type.GRADE_RECALCULATION,
+                idempotency_key=f'grade-recalculation:subject:{subject.id}',
+            ).order_by('-created_at').first()
+            return Response({
+                'synced_categories': len(categories),
+                'job': str(job.id) if job else None,
+                'status': job.status if job else BackgroundJob.Status.PENDING,
+            }, status=status.HTTP_202_ACCEPTED)
         return Response({'synced_categories': len(categories)})
 
 
@@ -630,6 +673,8 @@ def main_activity_readiness_errors(activity):
         errors.append('Add a title before assigning it.')
     if not activity.instructions.strip():
         errors.append('Add instructions before assigning it.')
+    if not activity.grading_period:
+        errors.append('Select the Main Activity grading period before assigning it.')
     if activity.points_possible <= 0:
         errors.append('Points possible must be greater than zero.')
     if not any(question.is_published for question in activity.questions.all()):
@@ -661,7 +706,9 @@ def validate_main_activity_assignments(activity, assignments):
 
     schedules = {
         schedule.id: schedule
-        for schedule in SubjectSchedule.objects.select_for_update(of=('self',)).select_related('subject').filter(pk__in=schedule_ids)
+        for schedule in SubjectSchedule.objects.select_for_update(of=('self',)).select_related(
+            'subject', 'school_year_semester',
+        ).filter(pk__in=schedule_ids)
     }
     categories = {
         category.id: category
@@ -674,12 +721,14 @@ def validate_main_activity_assignments(activity, assignments):
         errors = {}
         if not schedule:
             errors['schedule'] = 'This class does not exist.'
-        elif not schedule.is_active:
-            errors['schedule'] = 'Archived classes cannot be assigned.'
+        elif not schedule.is_active or not schedule.school_year_semester.is_active:
+            errors['schedule'] = 'Inactive classes or terms cannot be assigned.'
         if not category:
             errors['grade_category'] = 'This grade category does not exist.'
         elif category.category != GradeCategoryChoices.QUIZ:
             errors['grade_category'] = 'Select an existing Quiz category.'
+        elif category.grading_period != activity.grading_period:
+            errors['grade_category'] = 'The Quiz category must match the Main Activity grading period.'
         if schedule and category and schedule.subject_id != category.subject_id:
             errors['grade_category'] = 'This Quiz category does not belong to the selected class subject.'
         if schedule and not (
@@ -934,6 +983,10 @@ class StudentGradeItemScoreViewSet(viewsets.ModelViewSet):
         refreshed = StudentGradeItemScore.objects.filter(grade_item=item, student=student).first()
         return Response(self.get_serializer(refreshed).data if refreshed else {'detail': 'Score is pending.'})
 
+    @action(detail=False, methods=['post'], url_path='batch')
+    def batch(self, request):
+        return PeriodGradeViewSet._apply_score_batch(self, request)
+
 
 class PeriodGradeViewSet(viewsets.ModelViewSet):
     serializer_class = PeriodGradeSerializer
@@ -953,6 +1006,174 @@ class PeriodGradeViewSet(viewsets.ModelViewSet):
                 schedule__is_active=True,
             ),
         ).distinct()
+
+    @transaction.atomic
+    def _apply_score_batch(self, request):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers can record gradebook scores.')
+
+        changes = request.data.get('changes')
+        if not isinstance(changes, list) or not changes:
+            raise serializers.ValidationError({'changes': 'Provide at least one score change.'})
+        if len(changes) > 500:
+            raise serializers.ValidationError({'changes': 'A batch is limited to 500 score changes.'})
+
+        normalized = []
+        errors = {}
+        seen = set()
+        item_ids = set()
+        student_ids = set()
+        for index, change in enumerate(changes):
+            if not isinstance(change, dict):
+                errors[str(index)] = {'detail': 'Each change must be an object.'}
+                continue
+            try:
+                item_id = int(change.get('grade_item'))
+                student_id = int(change.get('student'))
+            except (TypeError, ValueError):
+                errors[str(index)] = {'detail': 'grade_item and student must be integers.'}
+                continue
+            operation = str(change.get('operation') or 'upsert').strip().lower()
+            if operation not in {'upsert', 'delete'}:
+                errors[str(index)] = {'operation': 'Use upsert or delete.'}
+                continue
+            key = (item_id, student_id)
+            if key in seen:
+                errors[str(index)] = {'detail': 'This score appears more than once in the batch.'}
+                continue
+            seen.add(key)
+            item_ids.add(item_id)
+            student_ids.add(student_id)
+            normalized.append((index, operation, item_id, student_id, change))
+
+        items = {
+            item.id: item
+            for item in GradeItem.objects.filter(id__in=item_ids).select_related(
+                'schedule', 'grade_category', 'grade_category__subject',
+            )
+        }
+        students = {student.id: student for student in User.objects.filter(id__in=student_ids)}
+        enrolled = set(ScheduleStudent.objects.filter(
+            schedule_id__in={item.schedule_id for item in items.values() if item.schedule_id},
+            student_id__in=student_ids,
+        ).values_list('schedule_id', 'student_id'))
+        existing = {
+            (score.grade_item_id, score.student_id): score
+            for score in StudentGradeItemScore.objects.select_for_update().filter(
+                grade_item_id__in=item_ids,
+                student_id__in=student_ids,
+            ).select_related('grade_item__grade_category')
+        }
+
+        prepared = []
+        for index, operation, item_id, student_id, change in normalized:
+            item = items.get(item_id)
+            student = students.get(student_id)
+            row_errors = {}
+            if not item:
+                row_errors['grade_item'] = 'Unknown grade item.'
+            elif not item.schedule_id:
+                row_errors['grade_item'] = 'Assign this grade item to a class before recording scores.'
+            elif (item.schedule_id, student_id) not in enrolled:
+                row_errors['student'] = 'This student is not enrolled in the selected class.'
+            if not student:
+                row_errors['student'] = 'Unknown student.'
+
+            score = existing.get((item_id, student_id))
+            if operation == 'upsert' and score and score.origin == StudentGradeItemScore.Origin.AUTOMATIC:
+                row_errors['detail'] = 'Use the override action to change an automatically synchronized score.'
+
+            status_value = str(change.get('status') or StudentGradeItemScore.Status.GRADED).upper()
+            raw_score = None
+            remarks = str(change.get('remarks') or '')
+            if operation == 'upsert':
+                if status_value not in StudentGradeItemScore.Status.values:
+                    row_errors['status'] = 'Use GRADED or EXCUSED.'
+                if len(remarks) > 160:
+                    row_errors['remarks'] = 'Ensure this field has no more than 160 characters.'
+                if status_value != StudentGradeItemScore.Status.EXCUSED:
+                    try:
+                        raw_score = Decimal(str(change.get('raw_score')))
+                    except (InvalidOperation, TypeError, ValueError):
+                        row_errors['raw_score'] = 'A graded score requires a valid number.'
+                    if item and raw_score is not None and (raw_score < 0 or raw_score > item.points_possible):
+                        row_errors['raw_score'] = 'Score must be between zero and points possible.'
+
+            if row_errors:
+                errors[str(index)] = row_errors
+            else:
+                prepared.append((operation, item, student, score, raw_score, status_value, remarks))
+
+        if errors:
+            raise serializers.ValidationError({'changes': errors})
+
+        now = timezone.now()
+        creates = []
+        updates = []
+        delete_ids = []
+        deleted_keys = []
+        affected = set()
+        for operation, item, student, score, raw_score, status_value, remarks in prepared:
+            affected.add((student.id, item.grade_category_id, item.schedule_id))
+            if operation == 'delete':
+                if score:
+                    delete_ids.append(score.id)
+                    deleted_keys.append({'grade_item': item.id, 'student': student.id})
+                continue
+            if score:
+                score.raw_score = raw_score
+                score.status = status_value
+                score.remarks = remarks
+                score.computed_at = now
+                updates.append(score)
+            else:
+                creates.append(StudentGradeItemScore(
+                    grade_item=item,
+                    student=student,
+                    raw_score=raw_score,
+                    status=status_value,
+                    remarks=remarks,
+                    origin=StudentGradeItemScore.Origin.MANUAL,
+                ))
+
+        if delete_ids:
+            StudentGradeItemScore.objects.filter(id__in=delete_ids).delete()
+        if creates:
+            StudentGradeItemScore.objects.bulk_create(creates)
+        if updates:
+            StudentGradeItemScore.objects.bulk_update(
+                updates, ('raw_score', 'status', 'remarks', 'computed_at'),
+            )
+
+        from .services import recompute_student_category_from_items
+
+        students_by_id = students
+        categories = GradeCategory.objects.in_bulk(category_id for _, category_id, _ in affected)
+        schedules = SubjectSchedule.objects.in_bulk(schedule_id for _, _, schedule_id in affected)
+        for student_id, category_id, schedule_id in sorted(affected):
+            recompute_student_category_from_items(
+                students_by_id[student_id], categories[category_id], schedules[schedule_id],
+            )
+
+        changed_keys = [(item.id, student.id) for operation, item, student, *_ in prepared if operation == 'upsert']
+        changed_scores = StudentGradeItemScore.objects.filter(
+            grade_item_id__in={key[0] for key in changed_keys},
+            student_id__in={key[1] for key in changed_keys},
+        ).select_related(
+            'grade_item', 'grade_item__grade_category', 'grade_item__grade_category__subject',
+            'grade_item__schedule', 'student',
+        )
+        changed_key_set = set(changed_keys)
+        changed_scores = [
+            score for score in changed_scores
+            if (score.grade_item_id, score.student_id) in changed_key_set
+        ]
+        return Response({
+            'updated': self.get_serializer(changed_scores, many=True).data,
+            'deleted': deleted_keys,
+            'updated_count': len(changed_scores),
+            'deleted_count': len(deleted_keys),
+        })
 
 
 class FinalGradeViewSet(viewsets.ModelViewSet):

@@ -72,8 +72,10 @@ def submit_activity_attempt(attempt):
     attempt.score = total_score
     attempt.max_score = max_score
     attempt.submitted_at = attempt.submitted_at or timezone.now()
-    attempt.is_submitted = True
-    attempt.save(update_fields=['score', 'max_score', 'submitted_at', 'is_submitted'])
+    attempt.status = attempt.Status.SUBMITTED
+    attempt.save(update_fields=[
+        'score', 'max_score', 'submitted_at', 'status',
+    ])
     return attempt
 
 

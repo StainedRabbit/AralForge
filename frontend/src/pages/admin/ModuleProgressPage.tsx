@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
@@ -29,7 +29,9 @@ export function ModuleProgressPage({
     : null
   const [summary, setSummary] = useState<ModuleTeacherSummary | null>(null)
   const [query, setQuery] = useState('')
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [students, setStudents] = useState<ModuleTeacherSummaryStudent[]>([])
+  const [nextOffset, setNextOffset] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
 
@@ -45,9 +47,20 @@ export function ModuleProgressPage({
       setMessage('')
       setSummary(null)
     })
-    api<ModuleTeacherSummary>(`/modules/modules/${module.id}/teacher-summary/`)
+    const params = new URLSearchParams({
+      access_status: 'AVAILED',
+      limit: String(PAGE_SIZE),
+      offset: '0',
+    })
+    if (scheduleId) params.set('schedule', String(scheduleId))
+    if (debouncedQuery) params.set('search', debouncedQuery)
+    api<ModuleTeacherSummary>(`/modules/modules/${module.id}/teacher-summary/?${params.toString()}`)
       .then((payload) => {
-        if (!ignore) setSummary(payload)
+        if (!ignore) {
+          setSummary(payload)
+          setStudents(payload.students)
+          setNextOffset(payload.next)
+        }
       })
       .catch((caughtError) => {
         if (!ignore) setMessage(toErrorMessage(caughtError))
@@ -58,30 +71,38 @@ export function ModuleProgressPage({
     return () => {
       ignore = true
     }
-  }, [api, module])
+  }, [api, debouncedQuery, module, scheduleId])
 
   useEffect(() => {
-    queueMicrotask(() => setVisibleCount(PAGE_SIZE))
-  }, [query, scheduleId, module?.id])
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [query])
 
-  const students = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return (summary?.students ?? [])
-      .filter((student) => !scheduleId || student.schedule_id === scheduleId)
-      .filter((student) => student.access_status !== 'LOCKED')
-      .filter((student) => {
-        if (!normalizedQuery) return true
-        return [
-          student.student_name,
-          student.username,
-          student.email,
-          student.schedule_display,
-        ].join(' ').toLowerCase().includes(normalizedQuery)
+  const hasMore = nextOffset !== null
+
+  async function loadMore() {
+    if (!module || nextOffset === null || loading) return
+    setLoading(true)
+    setMessage('')
+    try {
+      const params = new URLSearchParams({
+        access_status: 'AVAILED',
+        limit: String(PAGE_SIZE),
+        offset: String(nextOffset),
       })
-      .sort(compareByAvailedDate)
-  }, [query, scheduleId, summary])
-  const visibleStudents = students.slice(0, visibleCount)
-  const hasMore = visibleCount < students.length
+      if (scheduleId) params.set('schedule', String(scheduleId))
+      if (debouncedQuery) params.set('search', debouncedQuery)
+      const payload = await api<ModuleTeacherSummary>(
+        `/modules/modules/${module.id}/teacher-summary/?${params.toString()}`,
+      )
+      setStudents((current) => [...current, ...payload.students])
+      setNextOffset(payload.next)
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (!module) {
     return (
@@ -112,10 +133,10 @@ export function ModuleProgressPage({
       <section className="section-block module-progress-page">
         <div className="module-progress-toolbar">
           <div className="module-teacher-stats">
-            <SummaryMetric label="Students" value={students.length} />
-            <SummaryMetric label="Active" value={students.filter((student) => student.access_status === 'ACTIVE').length} />
-            <SummaryMetric label="Completed" value={students.filter(isComplete).length} />
-            <SummaryMetric label="Ungraded" value={students.reduce((sum, student) => sum + student.activity_submissions.ungraded_count, 0)} />
+            <SummaryMetric label="Students" value={summary?.total_students ?? 0} />
+            <SummaryMetric label="Active" value={summary?.active_access_count ?? 0} />
+            <SummaryMetric label="Completed" value={summary?.completed_count ?? 0} />
+            <SummaryMetric label="Ungraded" value={summary?.ungraded_submission_count ?? 0} />
           </div>
           <label className="admin-search module-progress-search">
             <Icon name="search" />
@@ -135,11 +156,11 @@ export function ModuleProgressPage({
           onScroll={(event) => {
             const target = event.currentTarget
             if (target.scrollTop + target.clientHeight >= target.scrollHeight - 48 && hasMore) {
-              setVisibleCount((current) => current + PAGE_SIZE)
+              void loadMore()
             }
           }}
         >
-          <table className="admin-table module-teacher-table">
+          <table className="admin-table module-teacher-table mobile-card-table">
             <thead>
               <tr>
                 <th>Student</th>
@@ -151,7 +172,7 @@ export function ModuleProgressPage({
               </tr>
             </thead>
             <tbody>
-              {visibleStudents.map((student) => (
+              {students.map((student) => (
                 <ModuleProgressRow key={student.student_id} student={student} />
               ))}
               {loading ? (
@@ -169,7 +190,7 @@ export function ModuleProgressPage({
           {hasMore ? (
             <button
               className="button button--secondary module-progress-load-more"
-              onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}
+              onClick={() => void loadMore()}
               type="button"
             >
               <Icon name="arrow-right" />
@@ -188,15 +209,15 @@ function ModuleProgressRow({ student }: { student: ModuleTeacherSummaryStudent }
 
   return (
     <tr>
-      <td>
+      <td data-label="Student">
         <strong>{student.student_name}</strong>
         <span className="admin-table-muted">
           {student.schedule_display || student.username}
           {!student.is_enrolled ? ' - advance access' : ''}
         </span>
       </td>
-      <td>{student.access_activated_at ? formatDateTime(student.access_activated_at) : '-'}</td>
-      <td>
+      <td data-label="Availed">{student.access_activated_at ? formatDateTime(student.access_activated_at) : '-'}</td>
+      <td data-label="Access">
         <span className={`module-access-pill module-access-pill--${student.access_status.toLowerCase()}`}>
           {accessStatusLabel(student.access_status)}
         </span>
@@ -204,19 +225,19 @@ function ModuleProgressRow({ student }: { student: ModuleTeacherSummaryStudent }
           <small className="admin-table-muted">Until {formatDateTime(student.access_expires_at)}</small>
         ) : null}
       </td>
-      <td>
+      <td data-label="Lesson progress">
         <strong>{progress.percent_complete}%</strong>
         <span className="admin-table-muted">
           {progress.completed_count}/{progress.total_count} lessons complete
         </span>
       </td>
-      <td>
+      <td data-label="Last viewed">
         <span>{progress.last_viewed_lesson || '-'}</span>
         {progress.last_viewed_at ? (
           <small className="admin-table-muted">{formatDateTime(progress.last_viewed_at)}</small>
         ) : null}
       </td>
-      <td>
+      <td data-label="Activities">
         <strong>
           {submissions.submitted_count}/{submissions.total_count} submitted
         </strong>
@@ -235,22 +256,6 @@ function SummaryMetric({ label, value }: { label: string; value: number }) {
       {label}
     </span>
   )
-}
-
-function compareByAvailedDate(
-  first: ModuleTeacherSummaryStudent,
-  second: ModuleTeacherSummaryStudent,
-) {
-  return dateValue(second.access_activated_at) - dateValue(first.access_activated_at)
-}
-
-function dateValue(value: string | null) {
-  return value ? new Date(value).getTime() : 0
-}
-
-function isComplete(student: ModuleTeacherSummaryStudent) {
-  const progress = student.lesson_progress
-  return Boolean(progress.total_count && progress.completed_count >= progress.total_count)
 }
 
 function accessStatusLabel(status: ModuleTeacherSummaryAccessStatus) {

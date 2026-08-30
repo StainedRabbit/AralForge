@@ -510,7 +510,7 @@ a.teacher-recent-item:focus-visible {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .teacher-overview-row,
   .teacher-class-row {
     grid-template-columns: 40px minmax(0, 1fr);
@@ -636,7 +636,7 @@ a.teacher-recent-item:focus-visible {
   color: var(--text-muted);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .class-roster-table,
   .class-roster-table tbody,
   .class-roster-table tr,
@@ -5028,6 +5028,9 @@ a.teacher-recent-item:focus-visible {
 }
 
 .main-activity-tabs {
+  position: sticky;
+  top: 8px;
+  z-index: 12;
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -5035,6 +5038,18 @@ a.teacher-recent-item:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-muted);
+}
+
+.main-activity-editor__save-actions {
+  position: sticky;
+  bottom: 8px;
+  z-index: 11;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(10px);
 }
 
 .main-activity-tabs button {
@@ -5067,6 +5082,20 @@ a.teacher-recent-item:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-muted);
+}
+
+.main-activity-question-editor--warning {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.main-activity-question-editor__warnings {
+  margin: 0;
+  padding: 10px 12px 10px 30px;
+  border-radius: 10px;
+  color: #92400e;
+  background: #fffbeb;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .main-activity-question-editor__header {

@@ -111,16 +111,16 @@ export function AttendanceSessionDetails({ api, data, refresh, session }: {
       </div>
     </div> : null}
     <div className="table-wrap">
-      <table className="admin-table attendance-breakdown__table">
+      <table className="admin-table attendance-breakdown__table mobile-card-table">
         <thead><tr><th>Student</th><th>Status</th><th>Points</th><th>Remarks</th><th>Edit</th></tr></thead>
         <tbody>{students.map((student) => {
           const record = recordsByStudent.get(student.id)
           return <tr key={student.id}>
-            <td>{studentDisplayName(student)}</td>
-            <td><span className={`attendance-status attendance-status--${(record?.status ?? 'unmarked').toLowerCase()}`}>{record?.status ?? 'UNMARKED'}</span></td>
-            <td>{record ? numeric(record.points_earned) : 0}</td>
-            <td><input className="attendance-remarks-input" defaultValue={record?.remarks ?? ''} disabled={!record || savingStudentId === student.id} onBlur={(event) => void updateRemarks(record, event.target.value)} placeholder={record ? 'Add remarks' : 'Set status first'} type="text" /></td>
-            <td><select className="attendance-status-select" disabled={savingStudentId === student.id} onChange={(event) => updateStatus(student, event.target.value as AttendanceStatus | '')} value={record?.status ?? ''}>
+            <td data-label="Student">{studentDisplayName(student)}</td>
+            <td data-label="Status"><span className={`attendance-status attendance-status--${(record?.status ?? 'unmarked').toLowerCase()}`}>{record?.status ?? 'UNMARKED'}</span></td>
+            <td data-label="Points">{record ? numeric(record.points_earned) : 0}</td>
+            <td data-label="Remarks"><input className="attendance-remarks-input" defaultValue={record?.remarks ?? ''} disabled={!record || savingStudentId === student.id} onBlur={(event) => void updateRemarks(record, event.target.value)} placeholder={record ? 'Add remarks' : 'Set status first'} type="text" /></td>
+            <td data-label="Edit"><select className="attendance-status-select" disabled={savingStudentId === student.id} onChange={(event) => updateStatus(student, event.target.value as AttendanceStatus | '')} value={record?.status ?? ''}>
               <option value="">Set status</option><option value="PRESENT">Present</option><option value="LATE">Late</option><option value="ABSENT">Absent</option><option value="EXCUSED">Excused</option>
             </select></td>
           </tr>

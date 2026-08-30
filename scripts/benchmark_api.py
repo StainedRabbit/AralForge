@@ -6,6 +6,7 @@ import math
 import statistics
 import sys
 import time
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -34,12 +35,17 @@ def request_json(url, *, data=None, token=None, timeout=20):
     request = Request(url, data=body, headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode('utf-8'))
-            return response.status, payload, (time.perf_counter() - started_at) * 1000
+            raw = response.read()
+            payload = json.loads(raw.decode('utf-8'))
+            server_timing = response.headers.get('Server-Timing', '')
+            db_match = re.search(r'db;dur=([0-9.]+)', server_timing)
+            app_ms = float(response.headers.get('X-Response-Time-Ms', '0') or 0)
+            db_ms = float(db_match.group(1)) if db_match else 0.0
+            return response.status, payload, (time.perf_counter() - started_at) * 1000, app_ms, db_ms, len(raw)
     except HTTPError as error:
-        return error.code, None, (time.perf_counter() - started_at) * 1000
+        return error.code, None, (time.perf_counter() - started_at) * 1000, 0.0, 0.0, 0
     except (TimeoutError, URLError):
-        return 0, None, (time.perf_counter() - started_at) * 1000
+        return 0, None, (time.perf_counter() - started_at) * 1000, 0.0, 0.0, 0
 
 
 def percentile(values, percentile_value):
@@ -64,7 +70,7 @@ def main():
         parser.error('--requests and --concurrency must be positive integers')
 
     base_url = args.base_url.rstrip('/') + '/'
-    status, payload, login_ms = request_json(
+    status, payload, login_ms, _, _, _ = request_json(
         urljoin(base_url, 'auth/token/'),
         data={'username': args.username, 'password': args.password},
     )
@@ -76,10 +82,10 @@ def main():
 
     def run(index):
         path = paths[index % len(paths)]
-        response_status, _, duration_ms = request_json(
+        response_status, _, duration_ms, app_ms, db_ms, response_bytes = request_json(
             urljoin(base_url, path), token=payload['access'],
         )
-        return path, response_status, duration_ms
+        return path, response_status, duration_ms, app_ms, db_ms, response_bytes
 
     started_at = time.perf_counter()
     results = []
@@ -89,20 +95,28 @@ def main():
             results.append(future.result())
 
     elapsed = time.perf_counter() - started_at
-    durations = [duration for _, status_code, duration in results if 200 <= status_code < 400]
+    durations = [result[2] for result in results if 200 <= result[1] < 400]
     errors = [result for result in results if not 200 <= result[1] < 400]
     p95 = percentile(durations, 95)
+    app_durations = [result[3] for result in results if result[3] > 0]
+    db_durations = [result[4] for result in results if result[4] > 0]
+    response_sizes = [result[5] for result in results if 200 <= result[1] < 400]
 
     print(f'Login: {login_ms:.1f} ms')
     print(f'Requests: {len(results)} at concurrency {args.concurrency} in {elapsed:.2f} s')
     print(f'Throughput: {len(results) / elapsed:.1f} requests/s')
     if durations:
-        print(f'Latency: mean {statistics.fmean(durations):.1f} ms, p50 {percentile(durations, 50):.1f} ms, p95 {p95:.1f} ms, max {max(durations):.1f} ms')
+        print(f'Latency: mean {statistics.fmean(durations):.1f} ms, p50 {percentile(durations, 50):.1f} ms, p95 {p95:.1f} ms, p99 {percentile(durations, 99):.1f} ms, max {max(durations):.1f} ms')
+        if app_durations:
+            print(f'Application: p50 {percentile(app_durations, 50):.1f} ms, p95 {percentile(app_durations, 95):.1f} ms')
+        if db_durations:
+            print(f'Database: p50 {percentile(db_durations, 50):.1f} ms, p95 {percentile(db_durations, 95):.1f} ms')
+        print(f'Response bytes: mean {statistics.fmean(response_sizes):.0f}, p95 {percentile(response_sizes, 95):.0f}, max {max(response_sizes)}')
     else:
         print('Latency: no successful responses')
     print(f'Errors: {len(errors)} ({(len(errors) / len(results)) * 100:.1f}%)')
     for path in paths:
-        path_durations = [duration for result_path, status_code, duration in results if result_path == path and 200 <= status_code < 400]
+        path_durations = [result[2] for result in results if result[0] == path and 200 <= result[1] < 400]
         if path_durations:
             print(f'  {path}: p95 {percentile(path_durations, 95):.1f} ms')
 

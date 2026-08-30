@@ -46,9 +46,7 @@ test('locked enrolled module exposes topic downloads but no online content', asy
   await expect(page.getByRole('button', { name: 'Download Module PDF' })).toHaveCount(0)
   await expect(page.locator('a[href*="lesson="]')).toHaveCount(0)
 
-  await page.getByRole('link', { name: 'Module Contents' }).click()
-  await expect(page.getByRole('heading', { name: 'Download a topic' })).toBeVisible()
-  await expect(page.getByText('Quiz Workflow Topic', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Module Contents' })).toHaveCount(0)
   await expect(page.locator('.student-lesson-reader')).toHaveCount(0)
   await expect(page.getByText('Paper Queue Quiz', { exact: true })).toHaveCount(0)
 })

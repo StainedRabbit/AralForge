@@ -7,6 +7,15 @@ export type ApiPage<T> = {
   results: T[]
 }
 
+export type PaginatedResponse<T> = ApiPage<T>
+
+export type CursorPage<T> = {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+
 export type ApiList<T> = T[] | ApiPage<T>
 
 export type TokenPair = {
@@ -70,6 +79,7 @@ export type SubjectSchedule = {
   subject_name: string
   school_year_semester: number
   term_name: string
+  term_is_active: boolean
   days: string
   start_time: string
   end_time: string
@@ -96,6 +106,8 @@ export type ScheduleStudent = {
   subject_name: string
   school_year_semester: number
   term_name: string
+  schedule_is_active: boolean
+  term_is_active: boolean
   added_at: string
   is_active: boolean
   added_by: number | null
@@ -125,6 +137,29 @@ export type Module = {
   is_published: boolean
   created_at: string
   updated_at: string
+}
+
+export type BackgroundJob = {
+  id: string
+  job_type: 'GRADE_RECALCULATION' | 'MODULE_PROGRESS' | 'PDF_GENERATION' | 'IMPORT' | 'EXPORT'
+  owner: number | null
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  progress: number
+  total: number
+  result: Record<string, unknown>
+  error: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export type BatchScoreChange = {
+  operation: 'upsert' | 'delete'
+  grade_item: number
+  student: number
+  raw_score?: string
+  status?: 'GRADED' | 'EXCUSED'
+  remarks?: string
 }
 
 export type DownloadableModuleTopic = {
@@ -240,6 +275,9 @@ export type ModuleActivityType =
   | 'FILE_UPLOAD'
   | 'INTERACTIVE'
 
+export type GradingPeriod = 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
+export type LearningContextType = 'CLASS' | 'PERSONAL' | 'LEGACY'
+
 export type ModuleActivity = {
   id: number
   module: number
@@ -252,13 +290,14 @@ export type ModuleActivity = {
   points_possible: string
   opens_at: string | null
   due_at: string | null
-  effective_due_at: string | null
   allow_late_submissions: boolean
   accepts_text: boolean
   accepts_file: boolean
   max_attempts: number
   passing_score: string | null
+  grading_period: GradingPeriod | null
   is_published: boolean
+  revision: number
   created_at: string
 }
 
@@ -309,12 +348,20 @@ export type ModuleActivityAttempt = {
   submission_method: 'ONLINE' | 'PAPER'
   recorded_by: number | null
   paper_grade_item: number | null
+  schedule: number | null
+  context_type: LearningContextType
   attempt_number: number
+  status: 'IN_PROGRESS' | 'SUBMITTED' | 'SUPERSEDED'
+  activity_revision: number
+  passing_score_snapshot: string | null
   score: string | null
   max_score: string
   started_at: string
   submitted_at: string | null
   is_submitted: boolean
+  passed: boolean
+  draft_revision: number
+  draft_saved_at: string | null
   question_snapshot?: ModuleActivityQuestionSnapshot[]
   draft_answers?: Record<string, ModuleActivityDraftAnswer>
 }
@@ -334,13 +381,34 @@ export type MainActivityGradingWorkspace = {
   grade_categories: GradeCategory[]
   grade_items: GradeItem[]
   linked_class_count: number
-  extensions: Array<{
-    id: number
-    activity: number
-    student: number
-    student_name: string
-    due_at: string
-  }>
+}
+
+export type MainActivityState = {
+  activity: number
+  attempt_limit: number
+  attempt_count: number
+  submitted_count: number
+  attempts_remaining: number
+  active_attempt_id: number | null
+  best_attempt_id: number | null
+  best_percentage: string | null
+  passed: boolean
+  review_unlocked: boolean
+  requirement_met: boolean
+  paper_terminal: boolean
+  paper_attempt_id: number | null
+  can_start_attempt: boolean
+}
+
+export type MainActivityAttemptResponse = {
+  attempt: ModuleActivityAttempt
+  state: MainActivityState
+  created?: boolean
+}
+
+export type MainActivityDraftSaveResponse = {
+  draft_revision: number
+  saved_at: string
 }
 
 export type ModuleActivityDraftAnswer = {
@@ -362,7 +430,8 @@ export type ModuleActivityQuestionSnapshot = Omit<
     id: number
     text: string
     is_correct?: boolean
-    order: number
+    order?: number
+    presentation_order?: number
   }>
   matching_pairs: Array<{
     id: number
@@ -405,6 +474,8 @@ export type ModuleProgress = {
   id: number
   module: number
   student: number
+  schedule: number | null
+  context_type: LearningContextType
   started_at: string
   completed_at: string | null
 }
@@ -413,6 +484,8 @@ export type ModuleTopicProgress = {
   id: number
   topic: number
   student: number
+  schedule: number | null
+  context_type: LearningContextType
   started_at: string
   completed_at: string | null
 }
@@ -421,6 +494,8 @@ export type ModuleLessonProgress = {
   id: number
   lesson: number
   student: number
+  schedule: number | null
+  context_type: LearningContextType
   started_at: string
   last_viewed_at: string
   completed_at: string | null
@@ -482,6 +557,9 @@ export type ModuleTeacherSummary = {
   locked_count: number
   completed_count: number
   ungraded_submission_count: number
+  count: number
+  next: number | null
+  previous: number | null
   students: ModuleTeacherSummaryStudent[]
 }
 
@@ -543,7 +621,7 @@ export type GradingTemplateItem = {
   id: number
   template: number
   template_label?: string
-  grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
+  grading_period: GradingPeriod
   category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
   weight: string
@@ -555,7 +633,7 @@ export type GradeCategory = {
   subject_label?: string
   template_item: number | null
   template_item_label?: string
-  grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
+  grading_period: GradingPeriod
   category: 'QUIZ' | 'EXAM' | 'ACTIVITY' | 'ATTENDANCE' | 'OTHER'
   name: string
   weight: string
@@ -642,7 +720,7 @@ export type PeriodGrade = {
   schedule: number | null
   subject: number
   student: number
-  grading_period: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
+  grading_period: GradingPeriod
   raw_score: string | null
   remarks: string
   completion_status: 'PENDING' | 'COMPLETE' | 'NOT_APPLICABLE'

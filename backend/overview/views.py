@@ -202,7 +202,7 @@ def ungraded_submissions():
 def teacher_recent_activity(today):
     events = []
     attempts = ModuleActivityAttempt.objects.filter(
-        is_submitted=True,
+        status=ModuleActivityAttempt.Status.SUBMITTED,
     ).select_related(
         'activity__module',
         'student',

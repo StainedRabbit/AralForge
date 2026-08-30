@@ -40,6 +40,7 @@ export function ModulesPage({
     [activeSubjectIds, data.subjects],
   )
   const requestedSubjectId = Number(searchParams.get('subject')) || null
+  const requestedScheduleId = Number(searchParams.get('schedule')) || null
   const [subjectId, setSubjectId] = useState<number | null>(
     requestedSubjectId ?? visibleSubjects[0]?.id ?? null,
   )
@@ -82,11 +83,35 @@ export function ModulesPage({
       ),
     [data.moduleLessons, publishedTopics],
   )
+  const matchingEnrollments = useMemo(
+    () => data.enrollments.filter((enrollment) =>
+      enrollment.subject === subjectId &&
+      enrollment.is_active &&
+      enrollment.schedule_is_active &&
+      enrollment.term_is_active,
+    ),
+    [data.enrollments, subjectId],
+  )
+  const selectedEnrollment = matchingEnrollments.find(
+    (enrollment) => enrollment.schedule === requestedScheduleId,
+  ) ?? (matchingEnrollments.length === 1 ? matchingEnrollments[0] : null)
+  const personalStudy = !matchingEnrollments.length && selectedModule?.access_status === 'ADVANCE_ACTIVE'
+  const contextReady = Boolean(selectedEnrollment || personalStudy)
+  const scopedLessonProgress = useMemo(
+    () => data.lessonProgress.filter((progress) =>
+      selectedEnrollment
+        ? progress.context_type === 'CLASS' && progress.schedule === selectedEnrollment.schedule
+        : personalStudy
+          ? progress.context_type === 'PERSONAL'
+          : false,
+    ),
+    [data.lessonProgress, personalStudy, selectedEnrollment],
+  )
   const resumeTarget = useMemo(
     () =>
       getLessonResumeTarget(
         publishedLessons,
-        data.lessonProgress,
+        scopedLessonProgress,
         {
           currentUserId: data.currentUser?.id ?? null,
           isAccessible: Boolean(selectedModule?.is_accessible),
@@ -94,7 +119,7 @@ export function ModulesPage({
       ),
     [
       data.currentUser?.id,
-      data.lessonProgress,
+      scopedLessonProgress,
       publishedLessons,
       selectedModule?.is_accessible,
     ],
@@ -146,9 +171,18 @@ export function ModulesPage({
 
   const selectedSubject = data.subjects.find((subject) => subject.id === subjectId)
 
+  function moduleTarget(parameters: Record<string, number> = {}) {
+    if (!selectedModule || !contextReady) return '/modules'
+    const next = new URLSearchParams()
+    Object.entries(parameters).forEach(([key, value]) => next.set(key, String(value)))
+    if (selectedEnrollment) next.set('schedule', String(selectedEnrollment.schedule))
+    else next.set('context', 'PERSONAL')
+    return `/modules/${selectedModule.id}?${next.toString()}`
+  }
+
   function openSelectedTopic() {
-    if (selectedModule?.is_accessible && topicId) {
-      navigate(`/modules/${selectedModule.id}?topic=${topicId}`)
+    if (selectedModule?.is_accessible && topicId && contextReady) {
+      navigate(moduleTarget({ topic: topicId }))
     }
   }
 
@@ -179,6 +213,8 @@ export function ModulesPage({
                     const next = new URLSearchParams(current)
                     if (nextSubjectId) next.set('subject', String(nextSubjectId))
                     else next.delete('subject')
+                    next.delete('schedule')
+                    next.delete('context')
                     return next
                   }, { replace: true })
                   setTopicId(null)
@@ -196,6 +232,34 @@ export function ModulesPage({
                 ))}
               </select>
             </label>
+
+            {matchingEnrollments.length ? (
+              <label className="student-module-control">
+                <span>Class</span>
+                <select
+                  onChange={(event) => {
+                    const scheduleId = Number(event.target.value) || null
+                    setSearchParams((current) => {
+                      const next = new URLSearchParams(current)
+                      if (scheduleId) next.set('schedule', String(scheduleId))
+                      else next.delete('schedule')
+                      next.delete('context')
+                      return next
+                    }, { replace: true })
+                  }}
+                  value={selectedEnrollment?.schedule ?? ''}
+                >
+                  {matchingEnrollments.length > 1 ? <option value="">Select class</option> : null}
+                  {matchingEnrollments.map((enrollment) => (
+                    <option key={enrollment.schedule} value={enrollment.schedule}>
+                      {enrollment.schedule_display} · {enrollment.term_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : personalStudy ? (
+              <span className="status-pill">Personal Study</span>
+            ) : null}
 
             <label className="student-module-control">
               <span>Topic</span>
@@ -221,7 +285,7 @@ export function ModulesPage({
 
             <button
               className="button button--primary"
-              disabled={!selectedModule || !topicId}
+              disabled={!selectedModule || !topicId || !contextReady}
               onClick={openSelectedTopic}
               type="button"
             >
@@ -253,12 +317,12 @@ export function ModulesPage({
                       ? publishedTopics.length
                       : selectedModule.downloadable_topics.length) === 1 ? '' : 's'}
                   </span>
-                  <Link to={`/modules/${selectedModule.id}`}>Module Contents</Link>
+                  {contextReady ? <Link to={moduleTarget()}>Module Contents</Link> : <span>Select a class</span>}
                 </div>
                 {resumeTarget ? (
                   <Link
                     className="button button--primary lesson-resume-action"
-                    to={`/modules/${selectedModule.id}?topic=${resumeTarget.lesson.topic}&lesson=${resumeTarget.lesson.id}`}
+                    to={moduleTarget({ topic: resumeTarget.lesson.topic, lesson: resumeTarget.lesson.id })}
                   >
                     <Icon name="arrow-right" />
                     <span className="lesson-resume-action__copy">
@@ -282,12 +346,14 @@ export function ModulesPage({
                 const topic = result.topic
                 const lesson = result.kind === 'lesson' ? result.lesson : null
                 const target = lesson
-                  ? `/modules/${selectedModule?.id}?topic=${topic.id}&lesson=${lesson.id}`
-                  : `/modules/${selectedModule?.id}?topic=${topic.id}`
+                  ? moduleTarget({ topic: topic.id, lesson: lesson.id })
+                  : moduleTarget({ topic: topic.id })
                 return (
                   <Link
+                    aria-disabled={!contextReady}
                     className="student-learning-result"
                     key={`${result.kind}-${lesson?.id ?? topic.id}`}
+                    onClick={(event) => { if (!contextReady) event.preventDefault() }}
                     to={target}
                   >
                     <span className="student-learning-result__icon">

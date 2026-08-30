@@ -24,6 +24,7 @@ from .models import (
     ModuleLessonAsset,
     ModuleLessonExample,
     ModuleLessonProgress,
+    LearningContextType,
     ModuleProgress,
     ModuleTopic,
     ModuleTopicProgress,
@@ -31,34 +32,72 @@ from .models import (
     user_has_module_access,
     user_has_module_class_access,
 )
-from .services.activity_snapshots import effective_activity_due_at, validate_activity_window
+from .services.learning_context import learning_context_query, resolve_learning_context
+from .services.activity_snapshots import validate_activity_window
+from .services.activity_state import evaluate_main_activity_state
 
 
-def activity_review_unlocked_for_user(user, activity):
+def activity_review_unlocked_for_user(
+    user,
+    activity,
+    *,
+    context_type=None,
+    schedule=None,
+):
     if not user or user.is_anonymous or user.is_admin_teacher or not activity:
         return bool(user and not user.is_anonymous and user.is_admin_teacher)
 
-    submitted_attempts = ModuleActivityAttempt.objects.filter(
-        activity=activity,
-        student=user,
-        is_submitted=True,
-    )
-    passing_score = activity.passing_score
-    if passing_score is not None and submitted_attempts.filter(score__gte=passing_score).exists():
-        return True
-    if passing_score is None and submitted_attempts.filter(
-        score__isnull=False,
-        max_score__gt=0,
-        score__gte=models.F('max_score'),
-    ).exists():
-        return True
-    return submitted_attempts.count() >= activity.max_attempts
+    if context_type:
+        attempts = list(ModuleActivityAttempt.objects.filter(
+            activity=activity,
+            student=user,
+            **learning_context_query(context_type, schedule),
+        ))
+    else:
+        return False
+    return evaluate_main_activity_state(activity, attempts)['review_unlocked']
 
 
-def student_can_review_activity(request, activity):
+def student_can_review_activity(request, activity, attempt=None):
     if not request:
         return False
-    return activity_review_unlocked_for_user(request.user, activity)
+    cache = getattr(request, '_main_activity_review_cache', None)
+    if cache is None:
+        cache = {}
+        request._main_activity_review_cache = cache
+    if attempt:
+        context_type = attempt.context_type
+        schedule = attempt.schedule_id
+    else:
+        schedule = request.query_params.get('schedule')
+        context_type = request.query_params.get('context')
+        if schedule:
+            context_type = LearningContextType.CLASS
+        elif context_type == LearningContextType.PERSONAL:
+            schedule = None
+        else:
+            return False
+    cache_key = (activity.id, context_type, getattr(schedule, 'id', schedule))
+    if cache_key not in cache:
+        group_cache = getattr(request, '_main_activity_attempt_groups', None)
+        if group_cache is None:
+            group_cache = {}
+            request._main_activity_attempt_groups = group_cache
+        context_key = (context_type, getattr(schedule, 'id', schedule))
+        if context_key not in group_cache:
+            groups = {}
+            attempts = ModuleActivityAttempt.objects.filter(
+                student=request.user,
+                **learning_context_query(context_type, schedule),
+            )
+            for candidate in attempts:
+                groups.setdefault(candidate.activity_id, []).append(candidate)
+            group_cache[context_key] = groups
+        cache[cache_key] = evaluate_main_activity_state(
+            activity,
+            group_cache[context_key].get(activity.id, []),
+        )['review_unlocked']
+    return cache[cache_key]
 
 
 def masked_choice_order(choice):
@@ -139,18 +178,26 @@ class ModuleSerializer(serializers.ModelSerializer):
         if not request or request.user.is_admin_teacher:
             return True
 
+        grants = getattr(obj, '_current_user_grants', None)
+        if grants is not None:
+            return any(grant.is_available for grant in grants)
+
         return user_has_module_access(request.user, obj)
 
     def get_access_status(self, obj):
         request = self.context.get('request')
         if not request or request.user.is_admin_teacher:
             return 'ADMIN'
-        grant = obj.access_grants.filter(
-            student=request.user,
-            is_active=True,
-            activated_by__isnull=False,
-            expires_at__gt=timezone.now(),
-        ).order_by('-updated_at').first()
+        grants = getattr(obj, '_current_user_grants', None)
+        if grants is None:
+            grant = obj.access_grants.filter(
+                student=request.user,
+                is_active=True,
+                activated_by__isnull=False,
+                expires_at__gt=timezone.now(),
+            ).order_by('-updated_at').first()
+        else:
+            grant = next((candidate for candidate in grants if candidate.is_available), None)
         if not grant:
             return 'LOCKED'
         return (
@@ -160,7 +207,9 @@ class ModuleSerializer(serializers.ModelSerializer):
         )
 
     def get_downloadable_topics(self, obj):
-        topics = obj.topics.filter(is_published=True).order_by('order', 'id')
+        topics = getattr(obj, '_published_topics', None)
+        if topics is None:
+            topics = obj.topics.filter(is_published=True).order_by('order', 'id')
         return DownloadableModuleTopicSerializer(topics, many=True).data
 
     def to_representation(self, instance):
@@ -179,6 +228,26 @@ class ModuleSerializer(serializers.ModelSerializer):
             ):
                 data.pop(field, None)
         return data
+
+
+class ModuleSummarySerializer(ModuleSerializer):
+    """Bounded module list representation; full authoring content stays opt-in."""
+
+    class Meta(ModuleSerializer.Meta):
+        fields = (
+            'id',
+            'title',
+            'slug',
+            'subject',
+            'description',
+            'is_accessible',
+            'access_status',
+            'downloadable_topics',
+            'subjects',
+            'is_published',
+            'created_at',
+            'updated_at',
+        )
 
 
 class ModuleAccessSerializer(serializers.ModelSerializer):
@@ -382,6 +451,8 @@ class ModuleLessonProgressSerializer(serializers.ModelSerializer):
             'id',
             'lesson',
             'student',
+            'schedule',
+            'context_type',
             'started_at',
             'last_viewed_at',
             'completed_at',
@@ -409,6 +480,17 @@ class ModuleLessonProgressSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'student': 'A progress record cannot be moved to another student.'}
                 )
+            if 'schedule' in attrs and attrs['schedule'] != self.instance.schedule:
+                raise serializers.ValidationError(
+                    {'schedule': 'A progress record cannot be moved to another class.'}
+                )
+            if (
+                'context_type' in attrs
+                and attrs['context_type'] != self.instance.context_type
+            ):
+                raise serializers.ValidationError(
+                    {'context_type': 'A progress record cannot change learning context.'}
+                )
 
         if request and not request.user.is_admin_teacher:
             lesson = attrs.get('lesson') or getattr(self.instance, 'lesson', None)
@@ -416,24 +498,44 @@ class ModuleLessonProgressSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
                 )
+            if lesson and not self.instance:
+                context_type, schedule = resolve_learning_context(
+                    request.user,
+                    lesson.topic.module,
+                    schedule=attrs.get('schedule'),
+                    context_type=attrs.get('context_type'),
+                )
+                attrs['context_type'] = context_type
+                attrs['schedule'] = schedule
             if lesson and attrs.get('completed_at'):
                 main_activity = ModuleActivity.objects.filter(
                     lesson=lesson,
                     activity_type=ModuleActivity.ActivityType.INTERACTIVE,
                     is_published=True,
                 ).first()
-                qualifying_attempts = ModuleActivityAttempt.objects.filter(
+                qualifying_attempts = list(ModuleActivityAttempt.objects.filter(
                     activity=main_activity,
                     student=request.user,
-                    is_submitted=True,
-                ) if main_activity else ModuleActivityAttempt.objects.none()
-                if main_activity and main_activity.passing_score is not None:
-                    qualifying_attempts = qualifying_attempts.filter(
-                        score__gte=main_activity.passing_score,
-                    )
-                if main_activity and not qualifying_attempts.exists():
+                    context_type=(
+                        self.instance.context_type
+                        if self.instance
+                        else attrs.get('context_type')
+                    ),
+                    schedule=(
+                        self.instance.schedule
+                        if self.instance
+                        else attrs.get('schedule')
+                    ),
+                )) if main_activity else []
+                state = (
+                    evaluate_main_activity_state(main_activity, qualifying_attempts)
+                    if main_activity
+                    else None
+                )
+                requirement_met = not main_activity or state['requirement_met']
+                if main_activity and not requirement_met:
                     raise serializers.ValidationError(
-                        'Pass the Main Activity before marking this lesson complete.'
+                        'Pass the Main Activity or finish all attempts before marking this lesson complete.'
                         if main_activity.passing_score is not None
                         else 'Finish the Main Activity before marking this lesson complete.'
                     )
@@ -491,8 +593,6 @@ class ModuleLessonAssetSerializer(serializers.ModelSerializer):
 
 
 class ModuleActivitySerializer(serializers.ModelSerializer):
-    effective_due_at = serializers.SerializerMethodField()
-
     class Meta:
         model = ModuleActivity
         fields = (
@@ -507,22 +607,17 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'points_possible',
             'opens_at',
             'due_at',
-            'effective_due_at',
             'allow_late_submissions',
             'accepts_text',
             'accepts_file',
             'max_attempts',
             'passing_score',
+            'grading_period',
             'is_published',
+            'revision',
             'created_at',
         )
-        read_only_fields = ('id', 'created_at', 'effective_due_at')
-
-    def get_effective_due_at(self, obj):
-        request = self.context.get('request')
-        if not request or request.user.is_anonymous or request.user.is_admin_teacher:
-            return obj.due_at
-        return effective_activity_due_at(obj, request.user)
+        read_only_fields = ('id', 'revision', 'created_at')
 
     def validate(self, attrs):
         lesson = attrs.get('lesson') or getattr(self.instance, 'lesson', None)
@@ -540,8 +635,16 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'passing_score',
             getattr(self.instance, 'passing_score', None),
         )
+        grading_period = attrs.get(
+            'grading_period',
+            getattr(self.instance, 'grading_period', None),
+        )
         opens_at = attrs.get('opens_at', getattr(self.instance, 'opens_at', None))
         due_at = attrs.get('due_at', getattr(self.instance, 'due_at', None))
+        if lesson and not grading_period:
+            raise serializers.ValidationError({
+                'grading_period': 'Select a grading period for this Main Activity.',
+            })
         if passing_score is not None and points_possible is not None and passing_score > points_possible:
             raise serializers.ValidationError({
                 'passing_score': 'Passing score cannot exceed points possible.',
@@ -550,7 +653,7 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'passing_score': 'Passing score cannot be negative.',
             })
-        if opens_at and due_at and opens_at >= due_at:
+        if not lesson and opens_at and due_at and opens_at >= due_at:
             raise serializers.ValidationError({
                 'due_at': 'Due date must be after the opening date.',
             })
@@ -643,7 +746,10 @@ class ModuleActivityQuestionSerializer(serializers.ModelSerializer):
     def get_matching_options(self, obj):
         return [
             pair.right_text
-            for pair in obj.matching_pairs.all().order_by('right_text', 'id')
+            for pair in sorted(
+                obj.matching_pairs.all(),
+                key=lambda pair: (pair.right_text, pair.id),
+            )
         ]
 
     def to_representation(self, instance):
@@ -722,6 +828,9 @@ class ModuleActivityMatchingPairSerializer(serializers.ModelSerializer):
 
 
 class ModuleActivityAttemptSummarySerializer(serializers.ModelSerializer):
+    passed = serializers.SerializerMethodField()
+    is_submitted = serializers.SerializerMethodField()
+
     class Meta:
         model = ModuleActivityAttempt
         fields = (
@@ -731,19 +840,36 @@ class ModuleActivityAttemptSummarySerializer(serializers.ModelSerializer):
             'submission_method',
             'recorded_by',
             'paper_grade_item',
+            'schedule',
+            'context_type',
             'attempt_number',
+            'status',
+            'activity_revision',
+            'passing_score_snapshot',
             'score',
             'max_score',
             'started_at',
             'submitted_at',
             'is_submitted',
+            'passed',
+            'draft_revision',
+            'draft_saved_at',
         )
         read_only_fields = fields
+
+    def get_passed(self, obj):
+        from .services.activity_state import attempt_passed
+        return attempt_passed(obj)
+
+    def get_is_submitted(self, obj):
+        return obj.status == ModuleActivityAttempt.Status.SUBMITTED
 
 
 class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
     question_snapshot = serializers.SerializerMethodField()
     draft_answers = serializers.SerializerMethodField()
+    passed = serializers.SerializerMethodField()
+    is_submitted = serializers.SerializerMethodField()
     class Meta:
         model = ModuleActivityAttempt
         fields = (
@@ -753,7 +879,12 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'submission_method',
             'recorded_by',
             'paper_grade_item',
+            'schedule',
+            'context_type',
             'attempt_number',
+            'status',
+            'activity_revision',
+            'passing_score_snapshot',
             'score',
             'max_score',
             'started_at',
@@ -761,6 +892,9 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'is_submitted',
             'question_snapshot',
             'draft_answers',
+            'passed',
+            'draft_revision',
+            'draft_saved_at',
         )
         read_only_fields = (
             'id',
@@ -772,8 +906,14 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             'started_at',
             'submitted_at',
             'is_submitted',
+            'status',
+            'activity_revision',
+            'passing_score_snapshot',
             'question_snapshot',
             'draft_answers',
+            'passed',
+            'draft_revision',
+            'draft_saved_at',
         )
         validators = []
 
@@ -787,7 +927,12 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         activity = attrs.get('activity') or getattr(self.instance, 'activity', None)
 
-        if self.instance and self.instance.is_submitted and request and not request.user.is_admin_teacher:
+        if (
+            self.instance
+            and self.instance.status != ModuleActivityAttempt.Status.IN_PROGRESS
+            and request
+            and not request.user.is_admin_teacher
+        ):
             raise serializers.ValidationError('Submitted attempts cannot be edited.')
 
         if request and not request.user.is_admin_teacher:
@@ -800,9 +945,6 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                     'This module has not been activated for your account.'
                 )
 
-            if activity:
-                validate_activity_window(activity, request.user)
-
             if activity and (
                 not activity.is_published
                 or activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE
@@ -814,18 +956,31 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('This activity is not available.')
 
             if not self.instance and activity:
+                validate_activity_window(activity, request.user)
+                student = attrs.get('student', request.user)
+                context_type, schedule = resolve_learning_context(
+                    student,
+                    activity.module,
+                    schedule=attrs.get('schedule'),
+                    context_type=attrs.get('context_type'),
+                )
+                attrs['context_type'] = context_type
+                attrs['schedule'] = schedule
+                context = learning_context_query(context_type, schedule)
                 if ModuleActivityAttempt.objects.filter(
                     activity=activity,
-                    student=request.user,
+                    student=student,
                     submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
-                    is_submitted=True,
+                    status=ModuleActivityAttempt.Status.SUBMITTED,
+                    **context,
                 ).exists():
                     raise serializers.ValidationError(
                         'A paper submission has already been recorded for this activity.'
                     )
                 existing_count = ModuleActivityAttempt.objects.filter(
                     activity=activity,
-                    student=request.user,
+                    student=student,
+                    **context,
                 ).count()
                 if existing_count >= activity.max_attempts:
                     raise serializers.ValidationError(
@@ -833,7 +988,23 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                     )
                 attrs['attempt_number'] = existing_count + 1
 
+        if self.instance:
+            if 'schedule' in attrs and attrs['schedule'] != self.instance.schedule:
+                raise serializers.ValidationError({
+                    'schedule': 'An attempt cannot be moved to another class.',
+                })
+            if (
+                'context_type' in attrs
+                and attrs['context_type'] != self.instance.context_type
+            ):
+                raise serializers.ValidationError({
+                    'context_type': 'An attempt cannot change learning context.',
+                })
+
         return attrs
+
+    def get_is_submitted(self, obj):
+        return obj.status == ModuleActivityAttempt.Status.SUBMITTED
 
     def get_question_snapshot(self, obj):
         snapshot = obj.question_snapshot or []
@@ -841,6 +1012,7 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
         if not request or request.user.is_admin_teacher or student_can_review_activity(
             request,
             obj.activity,
+            obj,
         ):
             return snapshot
         redacted = []
@@ -853,16 +1025,16 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             for choice in safe.get('choices', []):
                 visible_choice = dict(choice)
                 visible_choice.pop('is_correct', None)
+                if safe.get('question_type') == ModuleActivityQuestion.QuestionType.ORDERING:
+                    visible_choice.pop('order', None)
                 choices.append(visible_choice)
-            if safe.get('question_type') == ModuleActivityQuestion.QuestionType.ORDERING:
-                choices.sort(key=lambda choice: hashlib.sha256(
-                    f"snapshot:{safe.get('id')}:{choice.get('id')}:{choice.get('text')}".encode('utf-8'),
-                ).hexdigest())
+            choices.sort(key=lambda choice: (
+                choice.get('presentation_order', choice.get('order', 0)),
+                choice.get('id', 0),
+            ))
             safe['choices'] = choices
             original_pairs = safe.get('matching_pairs', [])
-            safe['matching_options'] = sorted(
-                str(pair.get('right_text') or '') for pair in original_pairs
-            )
+            safe['matching_options'] = list(safe.get('matching_options') or [])
             pairs = []
             for pair in original_pairs:
                 visible_pair = dict(pair)
@@ -872,12 +1044,17 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             redacted.append(safe)
         return redacted
 
+    def get_passed(self, obj):
+        from .services.activity_state import attempt_passed
+        return attempt_passed(obj)
+
     def get_draft_answers(self, obj):
         answers = obj.draft_answers or {}
         request = self.context.get('request')
         if not request or request.user.is_admin_teacher or student_can_review_activity(
             request,
             obj.activity,
+            obj,
         ):
             return answers
         return {
@@ -940,7 +1117,9 @@ class PaperActivityScoreBatchSerializer(serializers.Serializer):
                 activity=activity,
                 student_id__in=student_ids,
                 submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
-                is_submitted=True,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                context_type=LearningContextType.CLASS,
+                schedule=item.schedule,
             ).values_list('student_id', flat=True)
         )
         row_errors = {}
@@ -988,7 +1167,9 @@ class PaperActivityScoreUpdateSerializer(serializers.Serializer):
             activity=attempt.activity,
             student=attempt.student,
             submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            context_type=LearningContextType.CLASS,
+            schedule=item.schedule,
         ).exclude(pk=attempt.pk).exists():
             raise serializers.ValidationError(
                 'This student already submitted the Main Activity online.'
@@ -1002,7 +1183,11 @@ def validate_paper_score_item(item):
         raise serializers.ValidationError({
             'grade_item': 'Select a grade item linked to a Main Activity.',
         })
-    if not item.schedule_id or not item.schedule.is_active:
+    if (
+        not item.schedule_id
+        or not item.schedule.is_active
+        or not item.schedule.school_year_semester.is_active
+    ):
         raise serializers.ValidationError({
             'grade_item': 'Paper scores require an active class assignment.',
         })
@@ -1040,6 +1225,7 @@ class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
         if request and not request.user.is_admin_teacher and not student_can_review_activity(
             request,
             instance.attempt.activity,
+            instance.attempt,
         ):
             data.pop('is_correct', None)
             data.pop('points_earned', None)
@@ -1068,7 +1254,7 @@ class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
         if request and not request.user.is_admin_teacher:
             if attempt and attempt.student_id != request.user.id:
                 raise serializers.ValidationError('Students can only answer their own attempts.')
-            if attempt and attempt.is_submitted:
+            if attempt and attempt.status != ModuleActivityAttempt.Status.IN_PROGRESS:
                 raise serializers.ValidationError('Submitted attempts cannot be edited.')
             if attempt:
                 validate_activity_window(attempt.activity, request.user)
@@ -1099,6 +1285,8 @@ class ModuleProgressSerializer(serializers.ModelSerializer):
             'id',
             'module',
             'student',
+            'schedule',
+            'context_type',
             'started_at',
             'completed_at',
         )
@@ -1121,6 +1309,21 @@ class ModuleProgressSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
                 )
+            if module and not self.instance:
+                context_type, schedule = resolve_learning_context(
+                    request.user,
+                    module,
+                    schedule=attrs.get('schedule'),
+                    context_type=attrs.get('context_type'),
+                )
+                attrs['context_type'] = context_type
+                attrs['schedule'] = schedule
+
+        if self.instance:
+            if 'schedule' in attrs and attrs['schedule'] != self.instance.schedule:
+                raise serializers.ValidationError({'schedule': 'Progress cannot be moved to another class.'})
+            if 'context_type' in attrs and attrs['context_type'] != self.instance.context_type:
+                raise serializers.ValidationError({'context_type': 'Progress cannot change learning context.'})
 
         return attrs
 
@@ -1132,6 +1335,8 @@ class ModuleTopicProgressSerializer(serializers.ModelSerializer):
             'id',
             'topic',
             'student',
+            'schedule',
+            'context_type',
             'started_at',
             'completed_at',
         )
@@ -1154,5 +1359,20 @@ class ModuleTopicProgressSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     'This module has not been activated for your account.'
                 )
+            if topic and not self.instance:
+                context_type, schedule = resolve_learning_context(
+                    request.user,
+                    topic.module,
+                    schedule=attrs.get('schedule'),
+                    context_type=attrs.get('context_type'),
+                )
+                attrs['context_type'] = context_type
+                attrs['schedule'] = schedule
+
+        if self.instance:
+            if 'schedule' in attrs and attrs['schedule'] != self.instance.schedule:
+                raise serializers.ValidationError({'schedule': 'Progress cannot be moved to another class.'})
+            if 'context_type' in attrs and attrs['context_type'] != self.instance.context_type:
+                raise serializers.ValidationError({'context_type': 'Progress cannot change learning context.'})
 
         return attrs

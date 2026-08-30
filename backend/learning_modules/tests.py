@@ -1,14 +1,17 @@
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from unittest import skipUnless
 from pathlib import Path
 from decimal import Decimal
 
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
-from django.test.utils import override_settings
+from django.db import close_old_connections, connection
+from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 
 def result_rows(response):
@@ -26,6 +29,7 @@ from grades.models import (
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 from .models import (
+    LearningContextType,
     Module,
     ModuleAccess,
     ModuleActivity,
@@ -143,7 +147,7 @@ class ModuleAccessApiTests(APITestCase):
 
         retired = self.client.get('/api/assessments/')
         workspace = self.client.get(
-            f'/api/modules/modules/{self.paid_module.id}/workspace/',
+            f'/api/modules/modules/{self.paid_module.id}/workspace/?schedule={self.schedule.id}',
         )
 
         self.assertEqual(retired.status_code, 404)
@@ -246,6 +250,34 @@ class ModuleAccessApiTests(APITestCase):
         self.assertNotIn('amount_paid', response.data)
         self.assertNotIn('payment_reference', response.data)
 
+    def test_teacher_batch_activates_one_class_without_per_student_requests(self):
+        classmates = [
+            User.objects.create_user(
+                username=f'batch_classmate_{index}',
+                password='testpass123',
+                role=User.Role.STUDENT,
+            )
+            for index in range(3)
+        ]
+        for classmate in classmates:
+            ScheduleStudent.objects.create(schedule=self.schedule, student=classmate)
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/modules/access/batch-activate/',
+            {'module': self.paid_module.id, 'schedule': self.schedule.id, 'notes': 'Class activation'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['student_count'], 4)
+        self.assertEqual(response.data['created_count'], 4)
+        self.assertEqual(ModuleAccess.objects.filter(
+            module=self.paid_module,
+            access_type=ModuleAccess.AccessType.ENROLLED,
+            is_active=True,
+        ).count(), 4)
+
     def test_teacher_reactivates_historical_grant_and_becomes_activator(self):
         historical = ModuleAccess.objects.create(
             activated_by=None,
@@ -311,6 +343,8 @@ class ModuleAccessApiTests(APITestCase):
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             completed_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
@@ -358,6 +392,8 @@ class ModuleAccessApiTests(APITestCase):
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             completed_at=timezone.now(),
         )
         ModuleAccess.objects.create(
@@ -462,6 +498,7 @@ class ModuleAccessApiTests(APITestCase):
         progress = ModuleLessonProgress.objects.create(
             lesson=lesson,
             student=self.student,
+            context_type=LearningContextType.PERSONAL,
             completed_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
@@ -750,6 +787,62 @@ class ModuleTeacherSummaryApiTests(APITestCase):
         self.assertEqual(statuses[self.revoked_student.id], 'REVOKED')
         self.assertEqual(response.data['active_access_count'], 0)
 
+    def test_teacher_summary_paginates_with_bounded_queries(self):
+        extra_students = [
+            User(
+                username=f'summary_scale_{index:03d}',
+                role=User.Role.STUDENT,
+                first_name='Scale',
+                last_name=f'{index:03d}',
+            )
+            for index in range(60)
+        ]
+        User.objects.bulk_create(extra_students)
+        ModuleAccess.objects.bulk_create([
+            ModuleAccess(
+                activated_by=self.teacher,
+                expires_at=timezone.now() + timezone.timedelta(days=30),
+                module=self.module,
+                student=student,
+            )
+            for student in extra_students
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f'/api/modules/modules/{self.module.id}/teacher-summary/?limit=30&access_status=AVAILED',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 60)
+        self.assertEqual(len(response.data['students']), 30)
+        self.assertEqual(response.data['next'], 30)
+        self.assertLessEqual(len(queries), 20)
+
+    def test_compact_module_list_does_not_query_per_module(self):
+        modules = [
+            Module(
+                title=f'Scale module {index:03d}',
+                slug=f'scale-module-{index:03d}',
+                is_published=True,
+            )
+            for index in range(100)
+        ]
+        Module.objects.bulk_create(modules)
+        ModuleTopic.objects.bulk_create([
+            ModuleTopic(module=module, title='Published topic', is_published=True)
+            for module in modules
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/api/modules/modules/?view=summary&limit=100')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(result_rows(response)), 100)
+        self.assertLessEqual(len(queries), 8)
+
 
 class ModuleLessonProgressApiTests(APITestCase):
     def setUp(self):
@@ -774,7 +867,7 @@ class ModuleLessonProgressApiTests(APITestCase):
             school_year=school_year,
             semester=Semester.FIRST,
         )
-        schedule = SubjectSchedule.objects.create(
+        self.schedule = SubjectSchedule.objects.create(
             subject=self.subject,
             school_year_semester=term,
             days='MWF',
@@ -782,7 +875,7 @@ class ModuleLessonProgressApiTests(APITestCase):
             end_time='09:00',
             section='A',
         )
-        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
         self.module = Module.objects.create(
             title='CC 102 Module',
             slug='cc-102-module-tests',
@@ -990,6 +1083,8 @@ class PaperMainActivityEntryApiTests(APITestCase):
         abandoned = ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
         )
         self.client.force_authenticate(self.teacher)
@@ -1073,11 +1168,13 @@ class PaperMainActivityEntryApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.other_student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
             score=Decimal('6.00'),
             max_score=Decimal('6.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         online_duplicate = self.client.post(
@@ -1100,6 +1197,8 @@ class PaperMainActivityEntryApiTests(APITestCase):
         abandoned = ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
         )
         self.client.force_authenticate(self.teacher)
@@ -1112,15 +1211,18 @@ class PaperMainActivityEntryApiTests(APITestCase):
 
         self.client.force_authenticate(self.student)
         submit = self.client.post(
-            f'/api/modules/activity-attempts/{abandoned.id}/submit/',
+            f'/api/modules/activity-attempts/{abandoned.id}/submit/?schedule={self.schedule.id}',
         )
         self.assertEqual(submit.status_code, 403)
         create = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
+            f'/api/modules/activities/{self.activity.id}/start-attempt/?schedule={self.schedule.id}',
+            {},
             format='json',
         )
-        self.assertEqual(create.status_code, 400)
+        self.assertEqual(create.status_code, 409)
+        self.assertTrue(create.data['state']['paper_terminal'])
+        abandoned.refresh_from_db()
+        self.assertEqual(abandoned.status, ModuleActivityAttempt.Status.SUPERSEDED)
 
     def test_paper_score_batch_rejects_invalid_rows_atomically(self):
         self.client.force_authenticate(self.teacher)
@@ -1190,11 +1292,13 @@ class PaperMainActivityEntryApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=online_student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
             score=Decimal('7.50'),
             max_score=Decimal('12.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         self.client.force_authenticate(self.teacher)
@@ -1273,15 +1377,26 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
     def setUp(self):
         ModuleLessonProgressApiTests.setUp(self)
 
+    def completion_payload(self, lesson=None):
+        return {
+            'lesson': (lesson or self.lesson_one).id,
+            'student': self.student.id,
+            'context_type': LearningContextType.CLASS,
+            'schedule': self.schedule.id,
+            'completed_at': '2026-06-24T08:00:00Z',
+        }
+
     def test_progress_identity_cannot_be_reassigned(self):
         progress = ModuleLessonProgress.objects.create(
             lesson=self.lesson_one,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
         )
         self.client.force_authenticate(self.student)
 
         response = self.client.patch(
-            f'/api/modules/lesson-progress/{progress.id}/',
+            f'/api/modules/lesson-progress/{progress.id}/?schedule={self.schedule.id}',
             {'lesson': self.lesson_two.id},
             format='json',
         )
@@ -1311,11 +1426,7 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
 
         response = self.client.post(
             '/api/modules/lesson-progress/',
-            {
-                'lesson': self.lesson_one.id,
-                'student': self.student.id,
-                'completed_at': '2026-06-24T08:00:00Z',
-            },
+            self.completion_payload(),
             format='json',
         )
 
@@ -1335,41 +1446,135 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
 
         response = self.client.post(
             '/api/modules/lesson-progress/',
-            {
-                'lesson': self.lesson_one.id,
-                'student': self.student.id,
-                'completed_at': '2026-06-24T08:00:00Z',
-            },
+            self.completion_payload(),
             format='json',
         )
 
         self.assertEqual(response.status_code, 201)
+
+    def test_student_can_complete_after_reaching_passing_score(self):
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson_one,
+            title='Passing activity',
+            instructions='Reach the target.',
+            activity_type=ModuleActivity.ActivityType.INTERACTIVE,
+            max_attempts=2,
+            passing_score=Decimal('1.00'),
+            is_published=True,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            score=Decimal('1.00'),
+            max_score=Decimal('1.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            '/api/modules/lesson-progress/',
+            self.completion_payload(),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_student_cannot_complete_after_failed_attempt_with_retry_remaining(self):
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson_one,
+            title='Retry activity',
+            instructions='Reach the target.',
+            activity_type=ModuleActivity.ActivityType.INTERACTIVE,
+            max_attempts=2,
+            passing_score=Decimal('1.00'),
+            is_published=True,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            score=Decimal('0.00'),
+            max_score=Decimal('1.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            '/api/modules/lesson-progress/',
+            self.completion_payload(),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('finish all attempts', str(response.data))
+
+    def test_student_can_complete_after_failed_attempts_are_exhausted(self):
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson_one,
+            title='Exhausted activity',
+            instructions='Reach the target.',
+            activity_type=ModuleActivity.ActivityType.INTERACTIVE,
+            max_attempts=2,
+            passing_score=Decimal('1.00'),
+            is_published=True,
+        )
+        for attempt_number in (1, 2):
+            ModuleActivityAttempt.objects.create(
+                activity=activity,
+                student=self.student,
+                context_type=LearningContextType.CLASS,
+                schedule=self.schedule,
+                attempt_number=attempt_number,
+                score=Decimal('0.00'),
+                max_score=Decimal('1.00'),
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                submitted_at=timezone.now(),
+            )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(
+            '/api/modules/lesson-progress/',
+            self.completion_payload(),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
 
     def test_completing_all_lessons_rolls_up_topic_and_module(self):
         self.client.force_authenticate(self.student)
 
         first_response = self.client.post(
             '/api/modules/lesson-progress/',
-            {
-                'lesson': self.lesson_one.id,
-                'student': self.student.id,
-                'completed_at': '2026-06-24T08:00:00Z',
-            },
+            self.completion_payload(),
             format='json',
         )
         second_response = self.client.post(
             '/api/modules/lesson-progress/',
             {
-                'lesson': self.lesson_two.id,
-                'student': self.student.id,
+                **self.completion_payload(self.lesson_two),
                 'completed_at': '2026-06-24T09:00:00Z',
             },
             format='json',
@@ -1388,11 +1593,15 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
         ModuleLessonProgress.objects.create(
             lesson=self.lesson_one,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             completed_at=timezone.now(),
         )
         ModuleLessonProgress.objects.create(
             lesson=self.lesson_two,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             completed_at=timezone.now(),
         )
 
@@ -1414,6 +1623,8 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
         ModuleLessonProgress.objects.create(
             lesson=self.lesson_one,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
         )
         self.client.force_authenticate(self.teacher)
 
@@ -1421,6 +1632,213 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(result_rows(response)), 1)
+
+
+class LearningContextMainActivityApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='context-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='context-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.other_student = User.objects.create_user(
+            username='context-other-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.subject = Subject.objects.create(code='CTX101', name='Learning contexts')
+        school_year = SchoolYear.objects.create(start_year=2045, end_year=2046)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        self.schedule_a = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='08:00',
+            end_time='09:00',
+            section='A',
+        )
+        self.schedule_b = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='TTH',
+            start_time='09:00',
+            end_time='10:00',
+            section='B',
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule_b, student=self.student)
+        self.module = Module.objects.create(
+            title='Context module',
+            slug='context-module',
+            subject=self.subject,
+            is_published=True,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ENROLLED,
+            activated_by=self.teacher,
+            module=self.module,
+            student=self.student,
+        )
+        self.topic = ModuleTopic.objects.create(
+            module=self.module,
+            title='Context topic',
+            is_published=True,
+        )
+        self.lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Context lesson',
+            is_published=True,
+        )
+        self.activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            lesson=self.lesson,
+            title='Context Main Activity',
+            instructions='Complete in the selected context.',
+            max_attempts=2,
+            grading_period=ModuleActivity.GradingPeriod.PRELIM,
+            is_published=True,
+        )
+        self.question = ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Name the active context.',
+            correct_text_answers=['class'],
+            explanation='Each class keeps a separate record.',
+            points=Decimal('1.00'),
+        )
+
+    def create_attempt(self, *, schedule=None, context_type=LearningContextType.CLASS,
+                       attempt_number=1, student=None, score='0.00'):
+        return ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=student or self.student,
+            context_type=context_type,
+            schedule=schedule,
+            attempt_number=attempt_number,
+            score=Decimal(score),
+            max_score=Decimal('1.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+
+    def test_module_workspace_scopes_attempts_and_returns_context_metadata(self):
+        attempt_a = self.create_attempt(schedule=self.schedule_a)
+        self.create_attempt(schedule=self.schedule_b)
+        self.create_attempt(context_type=LearningContextType.LEGACY, schedule=None)
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?schedule={self.schedule_a.id}',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [row['id'] for row in response.data['activity_attempts']],
+            [attempt_a.id],
+        )
+        self.assertEqual(response.data['learning_context'], {
+            'context_type': LearningContextType.CLASS,
+            'schedule': self.schedule_a.id,
+            'label': 'CTX101 A',
+        })
+        self.assertEqual(
+            response.data['legacy_history_counts'],
+            {str(self.activity.id): 1},
+        )
+
+    def test_review_unlock_does_not_leak_between_classes(self):
+        self.create_attempt(schedule=self.schedule_a, attempt_number=1)
+        self.create_attempt(schedule=self.schedule_a, attempt_number=2)
+        self.create_attempt(schedule=self.schedule_b, attempt_number=1)
+        self.client.force_authenticate(self.student)
+
+        unlocked = self.client.get(
+            f'/api/modules/activity-questions/?schedule={self.schedule_a.id}',
+        )
+        locked = self.client.get(
+            f'/api/modules/activity-questions/?schedule={self.schedule_b.id}',
+        )
+        unlocked_row = next(
+            row for row in result_rows(unlocked) if row['id'] == self.question.id
+        )
+        locked_row = next(
+            row for row in result_rows(locked) if row['id'] == self.question.id
+        )
+
+        self.assertEqual(unlocked_row['correct_text_answers'], ['class'])
+        self.assertEqual(unlocked_row['explanation'], 'Each class keeps a separate record.')
+        self.assertNotIn('correct_text_answers', locked_row)
+        self.assertNotIn('explanation', locked_row)
+
+    def test_personal_study_workspace_excludes_class_and_legacy_attempts(self):
+        personal_student = User.objects.create_user(
+            username='context-personal-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            activated_by=self.teacher,
+            expires_at=timezone.now() + timezone.timedelta(days=30),
+            module=self.module,
+            student=personal_student,
+        )
+        personal = self.create_attempt(
+            context_type=LearningContextType.PERSONAL,
+            schedule=None,
+            student=personal_student,
+        )
+        self.create_attempt(
+            context_type=LearningContextType.LEGACY,
+            schedule=None,
+            student=personal_student,
+        )
+        self.client.force_authenticate(personal_student)
+
+        response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?context=PERSONAL',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [row['id'] for row in response.data['activity_attempts']],
+            [personal.id],
+        )
+        self.assertEqual(response.data['learning_context']['context_type'], 'PERSONAL')
+        self.assertEqual(response.data['learning_context']['label'], 'Personal Study')
+
+    def test_legacy_history_is_read_only_student_owned_and_summary_only(self):
+        own = self.create_attempt(
+            context_type=LearningContextType.LEGACY,
+            schedule=None,
+        )
+        own.question_snapshot = [{'id': self.question.id, 'correct_text_answers': ['secret']}]
+        own.draft_answers = {str(self.question.id): {'text_answer': 'secret'}}
+        own.save(update_fields=['question_snapshot', 'draft_answers'])
+        self.create_attempt(
+            context_type=LearningContextType.LEGACY,
+            schedule=None,
+            student=self.other_student,
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/legacy-history/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([row['id'] for row in response.data['attempts']], [own.id])
+        self.assertNotIn('question_snapshot', response.data['attempts'][0])
+        self.assertNotIn('draft_answers', response.data['attempts'][0])
 
 
 class ModuleLessonExampleApiTests(APITestCase):
@@ -1967,6 +2385,20 @@ class LessonMainActivityApiTests(APITestCase):
             role=User.Role.TEACHER,
         )
         self.subject = Subject.objects.create(code='ACT101', name='Interactive Activities')
+        school_year = SchoolYear.objects.create(start_year=2038, end_year=2039)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+        )
+        self.schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='13:00',
+            end_time='14:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
         self.module = Module.objects.create(
             title='Activity Module',
             slug='activity-module',
@@ -1991,6 +2423,7 @@ class LessonMainActivityApiTests(APITestCase):
             instructions='Answer each item.',
             points_possible=10,
             max_attempts=2,
+            grading_period=ModuleActivity.GradingPeriod.PRELIM,
             is_published=True,
         )
         ModuleAccess.objects.create(
@@ -2010,7 +2443,28 @@ class LessonMainActivityApiTests(APITestCase):
             **kwargs,
         )
 
-    def test_teacher_can_create_lesson_main_activity_question(self):
+    def attempt_payload(self):
+        return {
+            'activity': self.activity.id,
+            'student': self.student.id,
+            'context_type': LearningContextType.CLASS,
+            'schedule': self.schedule.id,
+        }
+
+    def context_url(self, path):
+        separator = '&' if '?' in path else '?'
+        return f'{path}{separator}schedule={self.schedule.id}'
+
+    def start_attempt(self):
+        return self.client.post(
+            self.context_url(
+                f'/api/modules/activities/{self.activity.id}/start-attempt/'
+            ),
+            {},
+            format='json',
+        )
+
+    def test_teacher_must_use_atomic_save_for_lesson_main_activity_question(self):
         self.client.force_authenticate(self.teacher)
 
         response = self.client.post(
@@ -2027,11 +2481,8 @@ class LessonMainActivityApiTests(APITestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(
-            ModuleActivityQuestion.objects.get(id=response.data['id']).activity,
-            self.activity,
-        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.activity.questions.exists())
 
     def test_student_sees_published_activity_but_not_answer_keys(self):
         question = self.create_question(
@@ -2043,7 +2494,7 @@ class LessonMainActivityApiTests(APITestCase):
         )
         self.client.force_authenticate(self.student)
 
-        response = self.client.get('/api/modules/activity-questions/')
+        response = self.client.get(self.context_url('/api/modules/activity-questions/'))
 
         self.assertEqual(response.status_code, 200)
         row = next(item for item in result_rows(response) if item['id'] == question.id)
@@ -2070,31 +2521,35 @@ class LessonMainActivityApiTests(APITestCase):
             order=2,
         )
         self.client.force_authenticate(self.student)
-        attempt_response = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
-        answer_response = self.client.post(
-            '/api/modules/activity-answers/',
+        attempt_response = self.start_attempt()
+        attempt = attempt_response.data['attempt']
+        answer_response = self.client.patch(
+            self.context_url(
+                f'/api/modules/activity-attempts/{attempt["id"]}/draft/'
+            ),
             {
-                'attempt': attempt_response.data['id'],
-                'question': question.id,
-                'selected_choice': wrong_choice.id,
-                'text_answer': '',
-                'choice_order': [],
-                'matching_answer': {},
+                'base_revision': attempt['draft_revision'],
+                'answers': {str(question.id): {
+                    'selected_choice': wrong_choice.id,
+                    'text_answer': '',
+                    'choice_order': [],
+                    'matching_answer': {},
+                }},
             },
             format='json',
         )
-        self.client.post(
-            f'/api/modules/activity-attempts/{attempt_response.data["id"]}/submit/',
+        submit_response = self.client.post(
+            self.context_url(
+                f'/api/modules/activity-attempts/{attempt["id"]}/submit/'
+            ),
+            {'draft_revision': answer_response.data['draft_revision']},
+            format='json',
         )
 
-        question_response = self.client.get('/api/modules/activity-questions/')
-        choice_response = self.client.get('/api/modules/activity-choices/')
-        answer_detail_response = self.client.get(
-            f'/api/modules/activity-answers/{answer_response.data["id"]}/',
+        question_response = self.client.get(self.context_url('/api/modules/activity-questions/'))
+        choice_response = self.client.get(self.context_url('/api/modules/activity-choices/'))
+        attempt_detail_response = self.client.get(
+            self.context_url(f'/api/modules/activity-attempts/{attempt["id"]}/'),
         )
 
         question_row = next(item for item in result_rows(question_response) if item['id'] == question.id)
@@ -2103,9 +2558,11 @@ class LessonMainActivityApiTests(APITestCase):
         )
         self.assertNotIn('explanation', question_row)
         self.assertNotIn('is_correct', correct_choice_row)
-        self.assertNotIn('is_correct', answer_detail_response.data)
-        self.assertNotIn('points_earned', answer_detail_response.data)
-        self.assertNotIn('feedback', answer_detail_response.data)
+        self.assertEqual(submit_response.status_code, 200, submit_response.data)
+        saved_answer = attempt_detail_response.data['draft_answers'][str(question.id)]
+        self.assertNotIn('is_correct', saved_answer)
+        self.assertNotIn('points_earned', saved_answer)
+        self.assertNotIn('feedback', saved_answer)
 
     def test_student_can_see_answer_keys_after_attempts_are_exhausted(self):
         question = self.create_question(
@@ -2118,24 +2575,28 @@ class LessonMainActivityApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             score=Decimal('0.00'),
             max_score=Decimal('1.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=2,
             score=Decimal('0.00'),
             max_score=Decimal('1.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
 
-        response = self.client.get('/api/modules/activity-questions/')
+        response = self.client.get(self.context_url('/api/modules/activity-questions/'))
 
         row = next(item for item in result_rows(response) if item['id'] == question.id)
         self.assertEqual(row['correct_text_answers'], ['JVM'])
@@ -2163,16 +2624,18 @@ class LessonMainActivityApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             score=Decimal('1.00'),
             max_score=Decimal('1.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
 
-        question_response = self.client.get('/api/modules/activity-questions/')
-        choice_response = self.client.get('/api/modules/activity-choices/')
+        question_response = self.client.get(self.context_url('/api/modules/activity-questions/'))
+        choice_response = self.client.get(self.context_url('/api/modules/activity-choices/'))
 
         question_row = next(item for item in result_rows(question_response) if item['id'] == question.id)
         choice_row = next(item for item in result_rows(choice_response) if item['id'] == correct_choice.id)
@@ -2182,24 +2645,28 @@ class LessonMainActivityApiTests(APITestCase):
     def test_student_attempt_limit_is_enforced(self):
         self.client.force_authenticate(self.student)
 
-        first = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
+        first = self.start_attempt()
+        first_submit = self.client.post(
+            self.context_url(
+                f'/api/modules/activity-attempts/{first.data["attempt"]["id"]}/submit/'
+            ),
+            {'draft_revision': first.data['attempt']['draft_revision']},
             format='json',
         )
-        second = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
+        second = self.start_attempt()
+        second_submit = self.client.post(
+            self.context_url(
+                f'/api/modules/activity-attempts/{second.data["attempt"]["id"]}/submit/'
+            ),
+            {'draft_revision': second.data['attempt']['draft_revision']},
             format='json',
         )
-        third = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
+        third = self.start_attempt()
 
         self.assertEqual(first.status_code, 201)
+        self.assertEqual(first_submit.status_code, 200)
         self.assertEqual(second.status_code, 201)
+        self.assertEqual(second_submit.status_code, 200)
         self.assertEqual(third.status_code, 400)
 
     def test_auto_grades_all_mvp_question_types(self):
@@ -2264,48 +2731,70 @@ class LessonMainActivityApiTests(APITestCase):
             expected_output='Hello',
         )
         self.client.force_authenticate(self.student)
-        attempt_response = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
-        attempt_id = attempt_response.data['id']
+        attempt_response = self.start_attempt()
+        attempt_id = attempt_response.data['attempt']['id']
 
-        answers = [
-            {'question': multiple_choice.id, 'selected_choice': correct_choice.id},
-            {'question': true_false.id, 'selected_choice': tf_choice.id},
-            {'question': fill_blank.id, 'text_answer': ' bytecode '},
-            {'question': ordering.id, 'choice_order': [order_one.id, order_two.id]},
-            {'question': matching.id, 'matching_answer': {str(pair.id): 'Runs bytecode'}},
-            {'question': code_output.id, 'text_answer': 'Hello'},
-        ]
-        for answer in answers:
-            payload = {
-                'attempt': attempt_id,
-                'selected_choice': None,
+        answers = {
+            str(multiple_choice.id): {
+                'selected_choice': correct_choice.id,
                 'text_answer': '',
                 'choice_order': [],
                 'matching_answer': {},
-                **answer,
-            }
-            response = self.client.post(
-                '/api/modules/activity-answers/',
-                payload,
-                format='json',
-            )
-            self.assertEqual(response.status_code, 201)
+            },
+            str(true_false.id): {
+                'selected_choice': tf_choice.id,
+                'text_answer': '',
+                'choice_order': [],
+                'matching_answer': {},
+            },
+            str(fill_blank.id): {
+                'selected_choice': None,
+                'text_answer': ' bytecode ',
+                'choice_order': [],
+                'matching_answer': {},
+            },
+            str(ordering.id): {
+                'selected_choice': None,
+                'text_answer': '',
+                'choice_order': [order_one.id, order_two.id],
+                'matching_answer': {},
+            },
+            str(matching.id): {
+                'selected_choice': None,
+                'text_answer': '',
+                'choice_order': [],
+                'matching_answer': {str(pair.id): 'Runs bytecode'},
+            },
+            str(code_output.id): {
+                'selected_choice': None,
+                'text_answer': 'Hello',
+                'choice_order': [],
+                'matching_answer': {},
+            },
+        }
+        draft_response = self.client.patch(
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/draft/'),
+            {'base_revision': 0, 'answers': answers},
+            format='json',
+        )
+        self.assertEqual(draft_response.status_code, 200, draft_response.data)
 
         submit_response = self.client.post(
-            f'/api/modules/activity-attempts/{attempt_id}/submit/',
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/submit/'),
+            {'draft_revision': draft_response.data['draft_revision']},
+            format='json',
         )
 
         self.assertEqual(submit_response.status_code, 200)
-        self.assertEqual(Decimal(submit_response.data['score']), Decimal('6.00'))
         self.assertEqual(
-            ModuleActivityAnswer.objects.filter(
-                attempt_id=attempt_id,
-                is_correct=True,
-            ).count(),
+            Decimal(submit_response.data['attempt']['score']),
+            Decimal('6.00'),
+        )
+        self.assertEqual(
+            sum(
+                answer.get('is_correct') is True
+                for answer in submit_response.data['attempt']['draft_answers'].values()
+            ),
             6,
         )
 
@@ -2319,7 +2808,7 @@ class LessonMainActivityApiTests(APITestCase):
             activity=self.activity,
             student=self.student,
             attempt_number=1,
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         answer = ModuleActivityAnswer.objects.create(
@@ -2335,7 +2824,144 @@ class LessonMainActivityApiTests(APITestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 403)
+
+    def test_student_generic_answer_writes_are_disabled_for_open_attempts(self):
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            1,
+            correct_text_answers=['JVM'],
+        )
+        self.client.force_authenticate(self.student)
+        started = self.start_attempt()
+        attempt_id = started.data['attempt']['id']
+
+        created = self.client.post(
+            '/api/modules/activity-answers/',
+            {
+                'attempt': attempt_id,
+                'question': question.id,
+                'text_answer': 'JVM',
+            },
+            format='json',
+        )
+        answer = ModuleActivityAnswer.objects.create(
+            attempt_id=attempt_id,
+            question=question,
+            text_answer='original',
+        )
+        updated = self.client.patch(
+            f'/api/modules/activity-answers/{answer.id}/',
+            {'text_answer': 'changed'},
+            format='json',
+        )
+        deleted = self.client.delete(f'/api/modules/activity-answers/{answer.id}/')
+
+        self.assertEqual(created.status_code, 403)
+        self.assertEqual(updated.status_code, 403)
+        self.assertEqual(deleted.status_code, 403)
+        answer.refresh_from_db()
+        self.assertEqual(answer.text_answer, 'original')
+
+    def test_lesson_main_activity_generic_write_routes_require_atomic_save(self):
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.MATCHING,
+            1,
+        )
+        choice = ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='Choice',
+            order=1,
+        )
+        pair = ModuleActivityMatchingPair.objects.create(
+            question=question,
+            left_text='Left',
+            right_text='Right',
+            order=1,
+        )
+        original_revision = self.activity.revision
+        self.client.force_authenticate(self.teacher)
+
+        responses = [
+            self.client.patch(
+                f'/api/modules/activities/{self.activity.id}/',
+                {'title': 'Bypass'},
+                format='json',
+            ),
+            self.client.patch(
+                f'/api/modules/activity-questions/{question.id}/',
+                {'prompt': 'Bypass'},
+                format='json',
+            ),
+            self.client.post(
+                '/api/modules/activity-choices/',
+                {'question': question.id, 'text': 'Bypass', 'order': 2},
+                format='json',
+            ),
+            self.client.patch(
+                f'/api/modules/activity-choices/{choice.id}/',
+                {'text': 'Bypass'},
+                format='json',
+            ),
+            self.client.post(
+                '/api/modules/activity-matching-pairs/',
+                {
+                    'question': question.id,
+                    'left_text': 'Bypass',
+                    'right_text': 'Bypass',
+                    'order': 2,
+                },
+                format='json',
+            ),
+            self.client.patch(
+                f'/api/modules/activity-matching-pairs/{pair.id}/',
+                {'right_text': 'Bypass'},
+                format='json',
+            ),
+        ]
+
+        self.assertTrue(all(item.status_code == 400 for item in responses), responses)
+        self.activity.refresh_from_db()
+        question.refresh_from_db()
+        choice.refresh_from_db()
+        pair.refresh_from_db()
+        self.assertEqual(self.activity.title, 'Main Activity')
+        self.assertEqual(self.activity.revision, original_revision)
+        self.assertNotEqual(question.prompt, 'Bypass')
+        self.assertNotEqual(choice.text, 'Bypass')
+        self.assertNotEqual(pair.right_text, 'Bypass')
+
+    def test_non_lesson_activity_keeps_legacy_generic_authoring(self):
+        legacy = ModuleActivity.objects.create(
+            module=self.module,
+            topic=self.topic,
+            title='Legacy activity',
+            instructions='Legacy workflow.',
+            activity_type=ModuleActivity.ActivityType.INTERACTIVE,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        updated = self.client.patch(
+            f'/api/modules/activities/{legacy.id}/',
+            {'title': 'Legacy activity updated'},
+            format='json',
+        )
+        question = self.client.post(
+            '/api/modules/activity-questions/',
+            {
+                'activity': legacy.id,
+                'question_type': ModuleActivityQuestion.QuestionType.FILL_BLANK,
+                'prompt': 'Legacy question',
+                'points': '1.00',
+                'correct_text_answers': ['yes'],
+            },
+            format='json',
+        )
+
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(question.status_code, 201, question.data)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.title, 'Legacy activity updated')
 
     def test_atomic_editor_save_updates_activity_and_questions_together(self):
         self.client.force_authenticate(self.teacher)
@@ -2343,6 +2969,7 @@ class LessonMainActivityApiTests(APITestCase):
             '/api/modules/activities/atomic-save/',
             {
                 'id': self.activity.id,
+                'expected_revision': self.activity.revision,
                 'module': self.module.id,
                 'topic': self.topic.id,
                 'lesson': self.lesson.id,
@@ -2373,10 +3000,167 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual(self.activity.points_possible, Decimal('2.00'))
         self.assertEqual(self.activity.questions.count(), 1)
         self.assertEqual(response.data['activity']['id'], self.activity.id)
+        self.assertEqual(response.data['activity']['grading_period'], GradingPeriod.PRELIM)
         self.assertEqual(len(response.data['questions']), 1)
         self.assertEqual(response.data['questions'][0]['prompt'], 'Name the runtime.')
         self.assertEqual(response.data['choices'], [])
         self.assertEqual(response.data['matching_pairs'], [])
+
+    def test_atomic_editor_create_requires_grading_period(self):
+        lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Activity without period',
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'module': self.module.id,
+                'topic': self.topic.id,
+                'lesson': lesson.id,
+                'title': 'Missing period',
+                'instructions': 'Complete every question.',
+                'activity_type': 'INTERACTIVE',
+                'questions': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('grading_period', response.data)
+        self.assertFalse(ModuleActivity.objects.filter(lesson=lesson).exists())
+
+    def test_atomic_period_change_reassigns_link_and_preserves_score(self):
+        school_year = SchoolYear.objects.create(start_year=2041, end_year=2042)
+        term = SchoolYearSemester.objects.create(school_year=school_year, semester=Semester.FIRST)
+        schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='08:00',
+            end_time='09:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        prelim = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Prelim quizzes',
+            weight=Decimal('100.00'),
+        )
+        midterm = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.MIDTERM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Midterm quizzes',
+            weight=Decimal('100.00'),
+        )
+        item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=prelim,
+            title=self.activity.title,
+            points_possible=Decimal('10.00'),
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        score = StudentGradeItemScore.objects.create(
+            grade_item=item,
+            student=self.student,
+            raw_score=Decimal('8.00'),
+        )
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            1,
+            correct_text_answers=['JVM'],
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'expected_revision': self.activity.revision,
+                'grading_period': GradingPeriod.MIDTERM,
+                'period_reassignments': [{
+                    'schedule': schedule.id,
+                    'grade_category': midterm.id,
+                }],
+                'is_published': True,
+                'questions': [{
+                    'id': question.id,
+                    'question_type': 'fill_blank',
+                    'prompt': question.prompt,
+                    'points': '1.00',
+                    'order': 1,
+                    'correct_text_answers': ['JVM'],
+                    'is_published': True,
+                    'choices': [],
+                    'matching_pairs': [],
+                }],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.activity.refresh_from_db()
+        item.refresh_from_db()
+        score.refresh_from_db()
+        self.assertEqual(self.activity.grading_period, GradingPeriod.MIDTERM)
+        self.assertEqual(item.grade_category, midterm)
+        self.assertEqual(score.raw_score, Decimal('8.00'))
+
+    def test_atomic_period_change_rolls_back_invalid_replacement(self):
+        school_year = SchoolYear.objects.create(start_year=2041, end_year=2042)
+        term = SchoolYearSemester.objects.create(school_year=school_year, semester=Semester.FIRST)
+        schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='TTH',
+            start_time='09:00',
+            end_time='10:00',
+            section='B',
+        )
+        prelim = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Prelim quizzes',
+            weight=Decimal('100.00'),
+        )
+        item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=prelim,
+            title=self.activity.title,
+            points_possible=Decimal('10.00'),
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'expected_revision': self.activity.revision,
+                'title': 'Must roll back',
+                'grading_period': GradingPeriod.MIDTERM,
+                'period_reassignments': [{
+                    'schedule': schedule.id,
+                    'grade_category': prelim.id,
+                }],
+                'questions': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.activity.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(self.activity.title, 'Main Activity')
+        self.assertEqual(self.activity.grading_period, GradingPeriod.PRELIM)
+        self.assertEqual(item.grade_category, prelim)
 
     def test_atomic_editor_save_rolls_back_when_publishing_invalid_question(self):
         self.client.force_authenticate(self.teacher)
@@ -2384,6 +3168,7 @@ class LessonMainActivityApiTests(APITestCase):
             '/api/modules/activities/atomic-save/',
             {
                 'id': self.activity.id,
+                'expected_revision': self.activity.revision,
                 'title': 'Should not persist',
                 'is_published': True,
                 'questions': [{
@@ -2411,39 +3196,19 @@ class LessonMainActivityApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_teacher_can_create_and_remove_an_enrolled_student_extension(self):
-        school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)
-        term = SchoolYearSemester.objects.create(
-            school_year=school_year,
-            semester=Semester.FIRST,
-        )
-        schedule = SubjectSchedule.objects.create(
-            subject=self.subject,
-            school_year_semester=term,
-            days='M',
-            start_time='09:00',
-            end_time='10:00',
-            section='A',
-        )
-        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
-        self.activity.due_at = timezone.now() + timezone.timedelta(hours=1)
-        self.activity.save(update_fields=['due_at'])
-        extended_due_at = timezone.now() + timezone.timedelta(hours=2)
+    def test_student_extension_management_endpoint_is_retired(self):
         self.client.force_authenticate(self.teacher)
 
-        created = self.client.put(
+        response = self.client.put(
             f'/api/modules/activities/{self.activity.id}/extensions/',
-            {'student': self.student.id, 'due_at': extended_due_at.isoformat()},
-            format='json',
-        )
-        removed = self.client.delete(
-            f'/api/modules/activities/{self.activity.id}/extensions/',
-            {'student': self.student.id},
+            {
+                'student': self.student.id,
+                'due_at': (timezone.now() + timezone.timedelta(hours=2)).isoformat(),
+            },
             format='json',
         )
 
-        self.assertEqual(created.status_code, 200)
-        self.assertEqual(removed.status_code, 204)
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(ModuleActivityExtension.objects.filter(activity=self.activity).exists())
 
     def test_attempt_draft_is_saved_once_and_graded_from_frozen_snapshot(self):
@@ -2455,56 +3220,52 @@ class LessonMainActivityApiTests(APITestCase):
             question=question, text='Browser', is_correct=False, order=2,
         )
         self.client.force_authenticate(self.student)
-        created = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
-        attempt_id = created.data['id']
+        created = self.start_attempt()
+        attempt_id = created.data['attempt']['id']
 
         original.is_correct = False
         original.save(update_fields=['is_correct'])
         replacement.is_correct = True
         replacement.save(update_fields=['is_correct'])
         draft = self.client.put(
-            f'/api/modules/activity-attempts/{attempt_id}/draft/',
-            {'answers': {str(question.id): {
-                'selected_choice': original.id,
-                'text_answer': '',
-                'choice_order': [],
-                'matching_answer': {},
-            }}},
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/draft/'),
+            {
+                'base_revision': created.data['attempt']['draft_revision'],
+                'answers': {str(question.id): {
+                    'selected_choice': original.id,
+                    'text_answer': '',
+                    'choice_order': [],
+                    'matching_answer': {},
+                }},
+            },
             format='json',
         )
-        submitted = self.client.post(f'/api/modules/activity-attempts/{attempt_id}/submit/')
+        submitted = self.client.post(
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/submit/'),
+            {'draft_revision': draft.data['draft_revision']},
+            format='json',
+        )
 
         self.assertEqual(draft.status_code, 200)
         self.assertEqual(submitted.status_code, 200)
-        self.assertEqual(Decimal(submitted.data['score']), Decimal('1.00'))
+        self.assertEqual(Decimal(submitted.data['attempt']['score']), Decimal('1.00'))
 
-    def test_activity_window_and_student_extension_are_enforced(self):
+    def test_lesson_activity_ignores_hidden_global_window(self):
         self.activity.due_at = timezone.now() - timezone.timedelta(hours=1)
         self.activity.save(update_fields=['due_at'])
         self.client.force_authenticate(self.student)
-        closed = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
-        ModuleActivityExtension.objects.create(
-            activity=self.activity,
-            student=self.student,
-            due_at=timezone.now() + timezone.timedelta(hours=1),
-            granted_by=self.teacher,
-        )
-        extended = self.client.post(
-            '/api/modules/activity-attempts/',
-            {'activity': self.activity.id, 'student': self.student.id},
-            format='json',
-        )
+        started = self.start_attempt()
+        repeated = self.start_attempt()
 
-        self.assertEqual(closed.status_code, 400)
-        self.assertEqual(extended.status_code, 201)
+        self.activity.refresh_from_db()
+        self.assertIsNone(self.activity.due_at)
+        self.assertEqual(started.status_code, 201, started.data)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertFalse(repeated.data['created'])
+        self.assertEqual(
+            repeated.data['attempt']['id'],
+            started.data['attempt']['id'],
+        )
 
     def test_passing_score_unlocks_review_without_exhausting_attempts(self):
         self.activity.passing_score = Decimal('0.50')
@@ -2518,14 +3279,16 @@ class LessonMainActivityApiTests(APITestCase):
         ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             score=Decimal('1.00'),
             max_score=Decimal('1.00'),
-            is_submitted=True,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
             submitted_at=timezone.now(),
         )
         self.client.force_authenticate(self.student)
-        response = self.client.get('/api/modules/activity-questions/')
+        response = self.client.get(self.context_url('/api/modules/activity-questions/'))
         row = next(item for item in result_rows(response) if item['id'] == question.id)
         self.assertEqual(row['explanation'], 'Runtime explanation.')
 
@@ -2533,25 +3296,39 @@ class LessonMainActivityApiTests(APITestCase):
         attempt = ModuleActivityAttempt.objects.create(
             activity=self.activity,
             student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
             attempt_number=1,
             question_snapshot=[{'id': 99, 'correct_text_answers': ['secret']}],
             draft_answers={'99': {'text_answer': 'private draft', 'feedback': 'private'}},
         )
         self.client.force_authenticate(self.student)
 
-        workspace = self.client.get(f'/api/modules/modules/{self.module.id}/workspace/')
-        summary_list = self.client.get('/api/modules/activity-attempts/?view=summary')
-        compatibility_list = self.client.get('/api/modules/activity-attempts/')
-        detail = self.client.get(f'/api/modules/activity-attempts/{attempt.id}/')
+        workspace = self.client.get(
+            self.context_url(f'/api/modules/modules/{self.module.id}/workspace/')
+        )
+        summary_list = self.client.get(
+            self.context_url('/api/modules/activity-attempts/?view=summary')
+        )
+        unscoped_summary_list = self.client.get(
+            '/api/modules/activity-attempts/?view=summary'
+        )
+        default_list = self.client.get(
+            self.context_url('/api/modules/activity-attempts/')
+        )
+        detail = self.client.get(
+            self.context_url(f'/api/modules/activity-attempts/{attempt.id}/')
+        )
 
         self.assertEqual(workspace.status_code, 200)
+        self.assertEqual(result_rows(unscoped_summary_list), [])
         workspace_row = workspace.data['activity_attempts'][0]
         summary_row = result_rows(summary_list)[0]
         for row in (workspace_row, summary_row):
             self.assertNotIn('question_snapshot', row)
             self.assertNotIn('draft_answers', row)
-        self.assertIn('question_snapshot', result_rows(compatibility_list)[0])
-        self.assertIn('draft_answers', result_rows(compatibility_list)[0])
+        self.assertNotIn('question_snapshot', result_rows(default_list)[0])
+        self.assertNotIn('draft_answers', result_rows(default_list)[0])
         self.assertIn('question_snapshot', detail.data)
         self.assertIn('draft_answers', detail.data)
 
@@ -2611,15 +3388,8 @@ class LessonMainActivityApiTests(APITestCase):
             school_year=school_year,
             semester=Semester.FIRST,
         )
-        schedule = SubjectSchedule.objects.create(
-            subject=self.subject,
-            school_year_semester=term,
-            days='M',
-            start_time='09:00',
-            end_time='10:00',
-            section='A',
-        )
-        enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        schedule = self.schedule
+        enrollment = ScheduleStudent.objects.get(schedule=schedule, student=self.student)
         category = GradeCategory.objects.create(
             subject=self.subject,
             grading_period=GradingPeriod.PRELIM,
@@ -2634,12 +3404,6 @@ class LessonMainActivityApiTests(APITestCase):
             points_possible=self.activity.points_possible,
             source_type=GradeItemSourceType.MODULE_ACTIVITY,
             module_activity=self.activity,
-        )
-        extension = ModuleActivityExtension.objects.create(
-            activity=self.activity,
-            student=self.student,
-            due_at=timezone.now() + timezone.timedelta(days=1),
-            granted_by=self.teacher,
         )
         outside_subject = Subject.objects.create(code='OUT101', name='Outside')
         outside_schedule = SubjectSchedule.objects.create(
@@ -2661,8 +3425,603 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual({row['id'] for row in response.data['enrollments']}, {enrollment.id})
         self.assertEqual({row['id'] for row in response.data['grade_categories']}, {category.id})
         self.assertEqual({row['id'] for row in response.data['grade_items']}, {item.id})
-        self.assertEqual({row['id'] for row in response.data['extensions']}, {extension.id})
+        self.assertNotIn('extensions', response.data)
         self.assertNotIn(outside_schedule.id, {row['id'] for row in response.data['schedules']})
+
+    def test_start_is_idempotent_and_generic_student_create_is_disabled(self):
+        self.client.force_authenticate(self.student)
+
+        first = self.start_attempt()
+        repeated = self.start_attempt()
+        generic = self.client.post(
+            '/api/modules/activity-attempts/',
+            self.attempt_payload(),
+            format='json',
+        )
+        generic_update = self.client.patch(
+            self.context_url(
+                f'/api/modules/activity-attempts/{first.data["attempt"]["id"]}/'
+            ),
+            {'attempt_number': 99},
+            format='json',
+        )
+        generic_delete = self.client.delete(
+            self.context_url(
+                f'/api/modules/activity-attempts/{first.data["attempt"]["id"]}/'
+            ),
+        )
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertTrue(first.data['created'])
+        self.assertEqual(repeated.status_code, 200, repeated.data)
+        self.assertFalse(repeated.data['created'])
+        self.assertEqual(first.data['attempt']['id'], repeated.data['attempt']['id'])
+        self.assertEqual(generic.status_code, 403)
+        self.assertEqual(generic_update.status_code, 403)
+        self.assertEqual(generic_delete.status_code, 403)
+        self.assertEqual(
+            ModuleActivityAttempt.objects.filter(
+                activity=self.activity,
+                student=self.student,
+                status=ModuleActivityAttempt.Status.IN_PROGRESS,
+            ).count(),
+            1,
+        )
+
+    def test_draft_revision_blocks_stale_tabs_and_delayed_saves(self):
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            1,
+            correct_text_answers=['JVM'],
+        )
+        self.client.force_authenticate(self.student)
+        started = self.start_attempt()
+        attempt_id = started.data['attempt']['id']
+        path = self.context_url(f'/api/modules/activity-attempts/{attempt_id}/draft/')
+        answer = {
+            str(question.id): {
+                'selected_choice': None,
+                'text_answer': 'JVM',
+                'choice_order': [],
+                'matching_answer': {},
+            },
+        }
+
+        with patch('grades.signals.sync_activity_attempt_target') as grade_sync:
+            saved = self.client.patch(
+                path,
+                {'base_revision': 0, 'answers': answer},
+                format='json',
+            )
+        stale = self.client.patch(
+            path,
+            {'base_revision': 0, 'answers': answer},
+            format='json',
+        )
+        submitted = self.client.post(
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/submit/'),
+            {'draft_revision': saved.data['draft_revision']},
+            format='json',
+        )
+        repeated = self.client.post(
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/submit/'),
+            {'draft_revision': saved.data['draft_revision']},
+            format='json',
+        )
+        delayed = self.client.patch(
+            path,
+            {'base_revision': saved.data['draft_revision'], 'answers': answer},
+            format='json',
+        )
+
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual(saved.data['draft_revision'], 1)
+        grade_sync.assert_not_called()
+        self.assertEqual(stale.status_code, 409, stale.data)
+        self.assertEqual(submitted.status_code, 200, submitted.data)
+        self.assertEqual(repeated.status_code, 200, repeated.data)
+        self.assertEqual(delayed.status_code, 400, delayed.data)
+        self.assertEqual(submitted.data['attempt']['draft_answers'][str(question.id)]['text_answer'], 'JVM')
+
+    def test_workspace_attempt_detail_and_draft_queries_do_not_grow_per_question(self):
+        self.create_question(
+            ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            1,
+            correct_text_answers=['one'],
+        )
+        self.client.force_authenticate(self.student)
+        first = self.start_attempt()
+        first_id = first.data['attempt']['id']
+
+        with CaptureQueriesContext(connection) as small_workspace_queries:
+            small_workspace = self.client.get(
+                self.context_url(f'/api/modules/modules/{self.module.id}/workspace/')
+            )
+        with CaptureQueriesContext(connection) as small_detail_queries:
+            small_detail = self.client.get(
+                self.context_url(f'/api/modules/activity-attempts/{first_id}/')
+            )
+        with CaptureQueriesContext(connection) as small_draft_queries:
+            small_draft = self.client.patch(
+                self.context_url(f'/api/modules/activity-attempts/{first_id}/draft/'),
+                {'base_revision': 0, 'answers': {}},
+                format='json',
+            )
+        self.client.post(
+            self.context_url(f'/api/modules/activity-attempts/{first_id}/submit/'),
+            {'draft_revision': small_draft.data['draft_revision']},
+            format='json',
+        )
+
+        for index in range(2, 32):
+            self.create_question(
+                ModuleActivityQuestion.QuestionType.FILL_BLANK,
+                index,
+                correct_text_answers=[str(index)],
+            )
+        second = self.start_attempt()
+        second_id = second.data['attempt']['id']
+
+        with CaptureQueriesContext(connection) as large_workspace_queries:
+            large_workspace = self.client.get(
+                self.context_url(f'/api/modules/modules/{self.module.id}/workspace/')
+            )
+        with CaptureQueriesContext(connection) as large_detail_queries:
+            large_detail = self.client.get(
+                self.context_url(f'/api/modules/activity-attempts/{second_id}/')
+            )
+        with CaptureQueriesContext(connection) as large_draft_queries:
+            large_draft = self.client.patch(
+                self.context_url(f'/api/modules/activity-attempts/{second_id}/draft/'),
+                {'base_revision': 0, 'answers': {}},
+                format='json',
+            )
+
+        for api_response in (
+            small_workspace,
+            small_detail,
+            small_draft,
+            large_workspace,
+            large_detail,
+            large_draft,
+        ):
+            self.assertEqual(api_response.status_code, 200, api_response.data)
+        self.assertLessEqual(
+            len(large_workspace_queries),
+            len(small_workspace_queries) + 2,
+        )
+        self.assertLessEqual(len(large_detail_queries), len(small_detail_queries) + 1)
+        self.assertLessEqual(len(large_draft_queries), len(small_draft_queries) + 1)
+
+    def test_ordering_snapshot_hides_canonical_order_and_is_stable(self):
+        question = self.create_question(ModuleActivityQuestion.QuestionType.ORDERING, 1)
+        choices = [
+            ModuleActivityQuestionChoice.objects.create(
+                question=question,
+                text=f'Step {index}',
+                order=index,
+            )
+            for index in range(1, 7)
+        ]
+        self.client.force_authenticate(self.student)
+        started = self.start_attempt()
+        attempt_id = started.data['attempt']['id']
+        path = self.context_url(f'/api/modules/activity-attempts/{attempt_id}/')
+
+        first = self.client.get(path)
+        refreshed = self.client.get(path)
+        snapshot = first.data['question_snapshot'][0]
+        first_ids = [choice['id'] for choice in snapshot['choices']]
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(first.data['question_snapshot'], refreshed.data['question_snapshot'])
+        self.assertTrue(all('order' not in choice for choice in snapshot['choices']))
+        self.assertTrue(all('is_correct' not in choice for choice in snapshot['choices']))
+        self.assertCountEqual(first_ids, [choice.id for choice in choices])
+
+        invalid = self.client.patch(
+            self.context_url(f'/api/modules/activity-attempts/{attempt_id}/draft/'),
+            {
+                'base_revision': 0,
+                'answers': {str(question.id): {
+                    'selected_choice': None,
+                    'text_answer': '',
+                    'choice_order': first_ids[:-1],
+                    'matching_answer': {},
+                }},
+            },
+            format='json',
+        )
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+
+    def test_randomized_presentation_differs_between_attempts_and_true_false_is_stable(self):
+        multiple_choice = self.create_question(
+            ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            1,
+        )
+        ordering = self.create_question(
+            ModuleActivityQuestion.QuestionType.ORDERING,
+            2,
+        )
+        matching = self.create_question(
+            ModuleActivityQuestion.QuestionType.MATCHING,
+            3,
+        )
+        true_false = self.create_question(
+            ModuleActivityQuestion.QuestionType.TRUE_FALSE,
+            4,
+        )
+        for index in range(8):
+            ModuleActivityQuestionChoice.objects.create(
+                question=multiple_choice,
+                text=f'MCQ {index}',
+                is_correct=index == 0,
+                order=index,
+            )
+            ModuleActivityQuestionChoice.objects.create(
+                question=ordering,
+                text=f'Order {index}',
+                order=index,
+            )
+            ModuleActivityMatchingPair.objects.create(
+                question=matching,
+                left_text=f'Left {index}',
+                right_text=f'Right {index}',
+                order=index,
+            )
+        true_false_choices = [
+            ModuleActivityQuestionChoice.objects.create(
+                question=true_false,
+                text=text,
+                is_correct=text == 'True',
+                order=index,
+            )
+            for index, text in enumerate(('True', 'False'))
+        ]
+        self.client.force_authenticate(self.student)
+
+        first = self.start_attempt()
+        first_snapshot = {
+            question['id']: question
+            for question in first.data['attempt']['question_snapshot']
+        }
+        self.client.post(
+            self.context_url(
+                f'/api/modules/activity-attempts/{first.data["attempt"]["id"]}/submit/'
+            ),
+            {'draft_revision': first.data['attempt']['draft_revision']},
+            format='json',
+        )
+        second = self.start_attempt()
+        second_snapshot = {
+            question['id']: question
+            for question in second.data['attempt']['question_snapshot']
+        }
+
+        choice_ids = lambda snapshot, question_id: [
+            choice['id'] for choice in snapshot[question_id]['choices']
+        ]
+        self.assertNotEqual(
+            choice_ids(first_snapshot, multiple_choice.id),
+            choice_ids(second_snapshot, multiple_choice.id),
+        )
+        self.assertNotEqual(
+            choice_ids(first_snapshot, ordering.id),
+            choice_ids(second_snapshot, ordering.id),
+        )
+        self.assertNotEqual(
+            first_snapshot[matching.id]['matching_options'],
+            second_snapshot[matching.id]['matching_options'],
+        )
+        expected_true_false = [choice.id for choice in true_false_choices]
+        self.assertEqual(
+            choice_ids(first_snapshot, true_false.id),
+            expected_true_false,
+        )
+        self.assertEqual(
+            choice_ids(second_snapshot, true_false.id),
+            expected_true_false,
+        )
+
+    def test_stale_teacher_revision_returns_conflict_without_overwrite(self):
+        self.client.force_authenticate(self.teacher)
+        first = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'expected_revision': self.activity.revision,
+                'title': 'First editor wins',
+                'is_published': False,
+                'questions': [],
+            },
+            format='json',
+        )
+        stale = self.client.put(
+            '/api/modules/activities/atomic-save/',
+            {
+                'id': self.activity.id,
+                'expected_revision': self.activity.revision,
+                'title': 'Stale editor overwrite',
+                'is_published': False,
+                'questions': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(first.data['activity']['revision'], self.activity.revision + 1)
+        self.assertEqual(stale.status_code, 409, stale.data)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.title, 'First editor wins')
+
+    def test_best_attempt_uses_percentage_across_revisions(self):
+        from learning_modules.services.activity_state import evaluate_main_activity_state
+
+        lower_points_better_percentage = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            score=Decimal('8.00'),
+            max_score=Decimal('10.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=2,
+            score=Decimal('9.00'),
+            max_score=Decimal('20.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+
+        state = evaluate_main_activity_state(
+            self.activity,
+            self.activity.attempts.all(),
+        )
+
+        self.assertEqual(state['best_attempt_id'], lower_points_better_percentage.id)
+        self.assertEqual(state['best_percentage'], '80.0')
+
+
+@skipUnless(
+    connection.vendor == 'postgresql',
+    'Row-lock concurrency tests require PostgreSQL.',
+)
+class MainActivityPostgresConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='concurrent-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='concurrent-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        subject = Subject.objects.create(code='LOCK101', name='Locking activity')
+        year = SchoolYear.objects.create(start_year=2050, end_year=2051)
+        term = SchoolYearSemester.objects.create(
+            school_year=year,
+            semester=Semester.FIRST,
+        )
+        self.schedule = SubjectSchedule.objects.create(
+            subject=subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time='08:00',
+            end_time='09:00',
+            section='A',
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
+        self.module = Module.objects.create(
+            title='Locking module',
+            slug='locking-module',
+            subject=subject,
+            is_published=True,
+        )
+        topic = ModuleTopic.objects.create(
+            module=self.module,
+            title='Locking topic',
+            is_published=True,
+        )
+        self.lesson = ModuleLesson.objects.create(
+            topic=topic,
+            title='Locking lesson',
+            is_published=True,
+        )
+        self.activity = ModuleActivity.objects.create(
+            module=self.module,
+            topic=topic,
+            lesson=self.lesson,
+            title='Locking Main Activity',
+            instructions='Exercise transactional paths.',
+            points_possible=Decimal('1.00'),
+            max_attempts=3,
+            grading_period=ModuleActivity.GradingPeriod.PRELIM,
+            is_published=True,
+        )
+        self.question = ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.FILL_BLANK,
+            prompt='Type lock.',
+            points=Decimal('1.00'),
+            correct_text_answers=['lock'],
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ENROLLED,
+            activated_by=self.teacher,
+            module=self.module,
+            student=self.student,
+        )
+
+    def parallel_requests(self, call):
+        def run(index):
+            close_old_connections()
+            client = APIClient()
+            client.force_authenticate(self.student)
+            try:
+                return call(client, index)
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            return list(executor.map(run, range(2)))
+
+    def start_path(self):
+        return (
+            f'/api/modules/activities/{self.activity.id}/start-attempt/'
+            f'?schedule={self.schedule.id}'
+        )
+
+    def test_duplicate_start_requests_return_one_attempt(self):
+        responses = self.parallel_requests(
+            lambda client, _index: client.post(self.start_path(), {}, format='json')
+        )
+
+        self.assertEqual(sorted(item.status_code for item in responses), [200, 201])
+        self.assertEqual(
+            {item.data['attempt']['id'] for item in responses},
+            {ModuleActivityAttempt.objects.get().id},
+        )
+        self.assertEqual(ModuleActivityAttempt.objects.count(), 1)
+
+    def test_simultaneous_drafts_accept_only_one_revision(self):
+        client = APIClient()
+        client.force_authenticate(self.student)
+        started = client.post(self.start_path(), {}, format='json')
+        attempt_id = started.data['attempt']['id']
+        path = (
+            f'/api/modules/activity-attempts/{attempt_id}/draft/'
+            f'?schedule={self.schedule.id}'
+        )
+        responses = self.parallel_requests(
+            lambda thread_client, index: thread_client.patch(
+                path,
+                {
+                    'base_revision': 0,
+                    'answers': {str(self.question.id): {
+                        'selected_choice': None,
+                        'text_answer': f'answer-{index}',
+                        'choice_order': [],
+                        'matching_answer': {},
+                    }},
+                },
+                format='json',
+            )
+        )
+
+        self.assertEqual(sorted(item.status_code for item in responses), [200, 409])
+        attempt = ModuleActivityAttempt.objects.get(pk=attempt_id)
+        self.assertEqual(attempt.draft_revision, 1)
+        self.assertIn(
+            attempt.draft_answers[str(self.question.id)]['text_answer'],
+            {'answer-0', 'answer-1'},
+        )
+
+    def test_draft_submit_race_never_overwrites_submitted_data(self):
+        client = APIClient()
+        client.force_authenticate(self.student)
+        started = client.post(self.start_path(), {}, format='json')
+        attempt_id = started.data['attempt']['id']
+        draft_path = (
+            f'/api/modules/activity-attempts/{attempt_id}/draft/'
+            f'?schedule={self.schedule.id}'
+        )
+        submit_path = (
+            f'/api/modules/activity-attempts/{attempt_id}/submit/'
+            f'?schedule={self.schedule.id}'
+        )
+
+        def race(thread_client, index):
+            if index == 0:
+                return thread_client.patch(
+                    draft_path,
+                    {
+                        'base_revision': 0,
+                        'answers': {str(self.question.id): {
+                            'selected_choice': None,
+                            'text_answer': 'late draft',
+                            'choice_order': [],
+                            'matching_answer': {},
+                        }},
+                    },
+                    format='json',
+                )
+            return thread_client.post(
+                submit_path,
+                {'draft_revision': 0},
+                format='json',
+            )
+
+        responses = self.parallel_requests(race)
+        statuses = {item.status_code for item in responses}
+        self.assertTrue(statuses in ({200, 409}, {200, 400}), responses)
+        attempt = ModuleActivityAttempt.objects.get(pk=attempt_id)
+        if attempt.status == ModuleActivityAttempt.Status.SUBMITTED:
+            self.assertNotEqual(
+                attempt.draft_answers.get(str(self.question.id), {}).get('text_answer'),
+                'late draft',
+            )
+        else:
+            self.assertEqual(attempt.draft_revision, 1)
+
+    def test_repeated_submit_and_stale_editor_requests_are_serialized(self):
+        client = APIClient()
+        client.force_authenticate(self.student)
+        started = client.post(self.start_path(), {}, format='json')
+        attempt_id = started.data['attempt']['id']
+        submit_path = (
+            f'/api/modules/activity-attempts/{attempt_id}/submit/'
+            f'?schedule={self.schedule.id}'
+        )
+        submitted = self.parallel_requests(
+            lambda thread_client, _index: thread_client.post(
+                submit_path,
+                {'draft_revision': 0},
+                format='json',
+            )
+        )
+        self.assertEqual([item.status_code for item in submitted], [200, 200])
+
+        expected_revision = self.activity.revision
+
+        def edit(_student_client, index):
+            teacher_client = APIClient()
+            teacher_client.force_authenticate(self.teacher)
+            return teacher_client.put(
+                '/api/modules/activities/atomic-save/',
+                {
+                    'id': self.activity.id,
+                    'expected_revision': expected_revision,
+                    'title': f'Concurrent edit {index}',
+                    'grading_period': ModuleActivity.GradingPeriod.PRELIM,
+                    'is_published': True,
+                    'questions': [{
+                        'id': self.question.id,
+                        'question_type': self.question.question_type,
+                        'prompt': self.question.prompt,
+                        'points': '1.00',
+                        'order': 1,
+                        'correct_text_answers': ['lock'],
+                        'is_published': True,
+                        'choices': [],
+                        'matching_pairs': [],
+                    }],
+                },
+                format='json',
+            )
+
+        edited = self.parallel_requests(edit)
+        self.assertEqual(sorted(item.status_code for item in edited), [200, 409])
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.revision, expected_revision + 1)
 
 
 class SubmissionReviewApiTests(APITestCase):

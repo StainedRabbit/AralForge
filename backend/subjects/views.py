@@ -16,6 +16,7 @@ from accounts.services import (
     create_student_account,
     validate_student_number_available,
 )
+from config.cache import CachedReferenceListMixin
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .serializers import (
@@ -27,19 +28,22 @@ from .serializers import (
 )
 
 
-class SubjectViewSet(viewsets.ModelViewSet):
+class SubjectViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
+    cache_namespace = 'subjects'
     queryset = Subject.objects.all()
     serializer_class = SubjectSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
 
 
-class SchoolYearViewSet(viewsets.ModelViewSet):
+class SchoolYearViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
+    cache_namespace = 'school-years'
     queryset = SchoolYear.objects.all()
     serializer_class = SchoolYearSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
 
 
-class SchoolYearSemesterViewSet(viewsets.ModelViewSet):
+class SchoolYearSemesterViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
+    cache_namespace = 'school-year-semesters'
     queryset = SchoolYearSemester.objects.select_related('school_year')
     serializer_class = SchoolYearSemesterSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
@@ -202,6 +206,74 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             'next': offset + limit if offset + limit < count else None,
             'previous': max(offset - limit, 0) if offset else None,
             'results': results,
+        })
+
+    @action(detail=True, methods=['get'], url_path='workspace')
+    def workspace(self, request, pk=None):
+        schedule = self.get_object()
+        enrollments = list(schedule.students.select_related(
+            'student', 'student__student_profile', 'schedule__subject',
+            'schedule__school_year_semester__school_year',
+        ).order_by('student__last_name', 'student__first_name', 'student__username'))
+        student_ids = [enrollment.student_id for enrollment in enrollments]
+
+        from accounts.serializers import StudentProfileSerializer, UserSerializer
+        from attendance.models import AttendanceRecord, AttendanceSession
+        from attendance.serializers import AttendanceRecordSerializer, AttendanceSessionSerializer
+        from grades.models import (
+            FinalGrade, GradeCategory, GradeItem, PeriodGrade,
+            StudentCategoryGrade, StudentGradeItemScore,
+        )
+        from grades.serializers import (
+            FinalGradeSerializer, GradeCategorySerializer, GradeItemSerializer,
+            PeriodGradeSerializer, StudentCategoryGradeSerializer,
+            StudentGradeItemScoreSerializer,
+        )
+
+        sessions = AttendanceSession.objects.filter(schedule=schedule)
+        session_ids = sessions.values_list('id', flat=True)
+        categories = GradeCategory.objects.filter(subject=schedule.subject)
+        items = GradeItem.objects.filter(schedule=schedule).select_related(
+            'grade_category', 'module_activity', 'attendance_session',
+        )
+        context = {'request': request}
+        users = [enrollment.student for enrollment in enrollments]
+        profiles = [
+            enrollment.student.student_profile
+            for enrollment in enrollments
+            if hasattr(enrollment.student, 'student_profile')
+        ]
+        return Response({
+            'users': UserSerializer(users, many=True, context=context).data,
+            'profiles': StudentProfileSerializer(profiles, many=True, context=context).data,
+            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+            'attendance_sessions': AttendanceSessionSerializer(sessions, many=True, context=context).data,
+            'attendance_records': AttendanceRecordSerializer(
+                AttendanceRecord.objects.filter(session_id__in=session_ids), many=True, context=context,
+            ).data,
+            'grade_categories': GradeCategorySerializer(categories, many=True, context=context).data,
+            'grade_items': GradeItemSerializer(items, many=True, context=context).data,
+            'grade_item_scores': StudentGradeItemScoreSerializer(
+                StudentGradeItemScore.objects.filter(
+                    grade_item__schedule=schedule, student_id__in=student_ids,
+                ).select_related('grade_item__grade_category__subject', 'grade_item__schedule', 'student'),
+                many=True, context=context,
+            ).data,
+            'category_grades': StudentCategoryGradeSerializer(
+                StudentCategoryGrade.objects.filter(schedule=schedule, student_id__in=student_ids)
+                .select_related('schedule', 'subject', 'student', 'grade_category'),
+                many=True, context=context,
+            ).data,
+            'period_grades': PeriodGradeSerializer(
+                PeriodGrade.objects.filter(schedule=schedule, student_id__in=student_ids)
+                .select_related('schedule', 'subject', 'student'),
+                many=True, context=context,
+            ).data,
+            'final_grades': FinalGradeSerializer(
+                FinalGrade.objects.filter(schedule=schedule, student_id__in=student_ids)
+                .select_related('schedule', 'subject', 'student'),
+                many=True, context=context,
+            ).data,
         })
 
     @action(detail=True, methods=['post'], url_path='enroll-students')

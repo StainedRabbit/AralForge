@@ -17,6 +17,7 @@ class AralForgeQueryFilterBackend(BaseFilterBackend):
         'term': 'school_year_semester_id',
         'period': 'grading_period',
         'date': 'date',
+        'role': 'role',
     }
 
     def filter_queryset(self, request, queryset, view):

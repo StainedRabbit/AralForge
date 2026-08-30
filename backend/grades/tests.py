@@ -27,8 +27,10 @@ from grades.models import (
 )
 from grades.services import compute_final_grade, compute_period_grade, compute_student_category_grade
 from learning_modules.models import (
+    LearningContextType,
     Module,
     ModuleActivity,
+    ModuleActivityAttempt,
     ModuleActivityQuestion,
     ModuleLesson,
     ModuleTopic,
@@ -383,6 +385,74 @@ class ClassScopedGradeTests(APITestCase):
         )
         self.assertEqual(score_response.status_code, 400)
 
+    def test_batch_score_changes_are_atomic_and_recompute_once_per_student_category(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Batch quiz',
+            points_possible=Decimal('20.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+
+        created = self.client.post(
+            '/api/grades/item-scores/batch/',
+            {'changes': [
+                {
+                    'operation': 'upsert', 'grade_item': item.id,
+                    'student': self.student.id, 'raw_score': '18.00', 'remarks': 'Strong work',
+                },
+                {
+                    'operation': 'upsert', 'grade_item': item.id,
+                    'student': self.other_student.id, 'status': 'EXCUSED', 'remarks': 'Approved',
+                },
+            ]},
+            format='json',
+        )
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.data['updated_count'], 2)
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.student).raw_score,
+            Decimal('18.00'),
+        )
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.other_student).status,
+            StudentGradeItemScore.Status.EXCUSED,
+        )
+
+        rejected = self.client.post(
+            '/api/grades/item-scores/batch/',
+            {'changes': [
+                {
+                    'operation': 'upsert', 'grade_item': item.id,
+                    'student': self.student.id, 'raw_score': '15.00',
+                },
+                {
+                    'operation': 'upsert', 'grade_item': item.id,
+                    'student': self.other_student.id, 'raw_score': '25.00',
+                },
+            ]},
+            format='json',
+        )
+
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.student).raw_score,
+            Decimal('18.00'),
+        )
+
+        deleted = self.client.post(
+            '/api/grades/item-scores/batch/',
+            {'changes': [{
+                'operation': 'delete', 'grade_item': item.id, 'student': self.student.id,
+            }]},
+            format='json',
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.data['deleted_count'], 1)
+        self.assertFalse(StudentGradeItemScore.objects.filter(grade_item=item, student=self.student).exists())
+
     def test_score_sheet_creates_complete_roster_and_coerces_blank_to_zero(self):
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
         self.client.force_authenticate(self.teacher)
@@ -695,7 +765,7 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
         lesson = ModuleLesson.objects.create(topic=topic, title='Bulk lesson')
         self.activity = ModuleActivity.objects.create(
             module=module, lesson=lesson, title='Main quiz', instructions='Answer every item.',
-            points_possible=Decimal('10.00'), is_published=True,
+            points_possible=Decimal('10.00'), grading_period=GradingPeriod.PRELIM, is_published=True,
         )
         ModuleActivityQuestion.objects.create(
             activity=self.activity,
@@ -727,7 +797,7 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
         self.assertEqual(repeated.data['updated_count'], 2)
         self.assertEqual(GradeItem.objects.filter(module_activity=self.activity).count(), 2)
 
-    def test_bulk_assignment_moves_selected_link_and_preserves_unselected_link(self):
+    def test_bulk_assignment_rejects_category_from_another_period(self):
         self.assign([
             {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
             {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
@@ -737,10 +807,10 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
             {'schedule': self.schedule_a.id, 'grade_category': self.midterm_quiz.id},
         ])
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
         self.assertEqual(
             GradeItem.objects.get(schedule=self.schedule_a, module_activity=self.activity).grade_category,
-            self.midterm_quiz,
+            self.prelim_quiz,
         )
         self.assertEqual(
             GradeItem.objects.get(schedule=self.schedule_b, module_activity=self.activity).grade_category,
@@ -778,6 +848,60 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
         self.assertEqual(archived.status_code, 400)
         self.assertEqual(forbidden.status_code, 403)
         self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())
+
+    def test_gradebook_excludes_other_class_and_personal_activity_attempts(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule_b, student=self.student)
+        assigned = self.assign([
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+        ])
+        item_a = next(
+            item for item in assigned.data['items']
+            if item['schedule'] == self.schedule_a.id
+        )
+        class_a = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule_a,
+            attempt_number=1,
+            score=Decimal('4.00'),
+            max_score=Decimal('10.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule_b,
+            attempt_number=1,
+            score=Decimal('9.00'),
+            max_score=Decimal('10.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.PERSONAL,
+            attempt_number=1,
+            score=Decimal('10.00'),
+            max_score=Decimal('10.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+
+        response = self.client.get(
+            f'/api/grades/gradebook/?schedule={self.schedule_a.id}'
+            f'&period=PRELIM&item={item_a["id"]}',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [attempt['id'] for attempt in response.data['activity_attempts']],
+            [class_a.id],
+        )
+        self.assertEqual(response.data['status_counts']['ONLINE'], 1)
+        self.assertNotIn('question_snapshot', response.data['activity_attempts'][0])
 
 
 class ScalableTeacherGradesApiTests(APITestCase):

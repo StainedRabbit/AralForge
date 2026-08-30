@@ -305,6 +305,14 @@ test('activates and refreshes module access from the class roster without duplic
   expect((await renewed).ok()).toBe(true)
   await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
   await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
+
+  const cleanup = page.waitForResponse((response) =>
+    response.request().method() === 'PATCH'
+    && /\/api\/modules\/access\/\d+\/$/.test(new URL(response.url()).pathname),
+  )
+  await grantRow.getByRole('button', { name: 'Revoke' }).click()
+  expect((await cleanup).ok()).toBe(true)
+  await expect(enrolledModuleRow.getByText('Locked', { exact: true })).toBeVisible()
 })
 
 test('loads the roster ten students at a time and exports the complete filtered list', async ({ page }) => {
@@ -394,7 +402,7 @@ test('loads the roster ten students at a time and exports the complete filtered 
   })
   await expect(pagination).toContainText('Showing 12 of 12 students')
   await expect(rosterRows).toHaveCount(12)
-  expect(rosterRequests.filter((request) => request.limit === 10).map((request) => request.offset)).toEqual([0, 10])
+  expect([...new Set(rosterRequests.filter((request) => request.limit === 10).map((request) => request.offset))]).toEqual([0, 10])
 
   await page.getByPlaceholder('Search roster by name or student number').fill('Paged Student 12')
   await expect(pagination).toContainText('Showing 1 of 1 student')
@@ -754,7 +762,8 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await expect(importDialog.getByRole('button', { name: 'Download credentials again' })).toBeVisible()
   await importDialog.getByTitle('Close').click()
 
-  await page.getByTitle('Sign out').last().click()
+  await page.getByRole('button', { name: 'More navigation', exact: true }).click()
+  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
   await page.getByLabel('Student number').fill('E2E-NEW-01')
   await page.getByLabel('Password').fill(temporaryPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()

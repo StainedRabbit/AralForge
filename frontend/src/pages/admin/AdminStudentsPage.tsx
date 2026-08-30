@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { asArray } from '../../api'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import {
   AdminResourcePanel,
@@ -9,20 +11,20 @@ import { ManageStudentModulesDialog } from '../../components/admin/ManageStudent
 import { Icon } from '../../components/Icon'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type {
+  ApiList,
   ModuleAccess,
   ScheduleStudent,
   StudentProfile,
+  SubjectSchedule,
   User,
 } from '../../types'
+import { queryKeys } from '../../queries/queryKeys'
 import {
   booleanLabel,
   compactDateTime,
   moduleName,
   roleOptions,
-  scheduleName,
-  studentUsers,
   toOptions,
-  userName,
 } from '../../admin/adminHelpers'
 import { toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
@@ -36,14 +38,7 @@ export function AdminStudentsPage({
   data: RouteData
   refresh: () => Promise<void>
 }) {
-  const [managedStudentId, setManagedStudentId] = useState<number | null>(null)
-  const students = studentUsers(data.users)
-  const studentOptions = toOptions(students, (user) => user.id, fullName)
-  const scheduleOptions = toOptions(
-    data.schedules,
-    (schedule) => schedule.id,
-    (schedule) => scheduleName(data.schedules, data.subjects, schedule.id),
-  )
+  const [managedStudent, setManagedStudent] = useState<{ id: number; name: string } | null>(null)
   const moduleOptions = toOptions(
     data.modules,
     (module) => module.id,
@@ -61,16 +56,14 @@ export function AdminStudentsPage({
       <QuickStudentSetupPanel api={api} refresh={refresh} />
 
       <StudentModuleAccessPanel
-        onManage={setManagedStudentId}
-        students={students}
+        api={api}
+        onManage={setManagedStudent}
       />
 
       <BulkModuleAccessPanel
         api={api}
         data={data}
         moduleOptions={moduleOptions}
-        refresh={refresh}
-        scheduleOptions={scheduleOptions}
       />
 
       <AdminResourcePanel<User>
@@ -83,6 +76,7 @@ export function AdminStudentsPage({
         items={data.users}
         noun="User"
         onRefresh={refresh}
+        serverSide
         title="User Accounts"
         columns={[
           { header: 'Name', render: (user) => fullName(user) },
@@ -97,14 +91,15 @@ export function AdminStudentsPage({
         endpoint="/accounts/students/"
         fields={profileFields}
         getSearchText={(profile) =>
-          `${profile.student_number} ${userName(data.users, profile.user)}`
+          `${profile.student_number} ${fullName(profile.user_detail ?? null)}`
         }
         items={data.profiles}
         noun="Student profile"
         onRefresh={refresh}
+        serverSide
         title="Student Profiles"
         columns={[
-          { header: 'Student', render: (profile) => userName(data.users, profile.user) },
+          { header: 'Student', render: (profile) => fullName(profile.user_detail ?? null) },
           { header: 'Number', render: (profile) => profile.student_number },
           { header: 'Active', render: (profile) => booleanLabel(profile.is_active) },
         ]}
@@ -113,13 +108,14 @@ export function AdminStudentsPage({
       <AdminResourcePanel<ScheduleStudent>
         api={api}
         endpoint="/subjects/schedule-students/"
-        fields={enrollmentFields(scheduleOptions, studentOptions)}
+        fields={enrollmentFields()}
         getSearchText={(enrollment) =>
           `${enrollment.student_name} ${enrollment.subject_code} ${enrollment.term_name}`
         }
         items={data.enrollments}
         noun="Enrollment"
         onRefresh={refresh}
+        serverSide
         title="Class Enrollments"
         columns={[
           { header: 'Student', render: (enrollment) => enrollment.student_name },
@@ -135,13 +131,14 @@ export function AdminStudentsPage({
       <AdminResourcePanel<ModuleAccess>
         api={api}
         endpoint="/modules/access/"
-        fields={accessFields(moduleOptions, studentOptions)}
+        fields={accessFields(moduleOptions)}
         getSearchText={(grant) =>
           `${grant.student_name} ${grant.module_title} ${grant.status} ${grant.access_type}`
         }
         items={data.moduleAccess}
         noun="Module access"
         onRefresh={refresh}
+        serverSide
         title="Module Access Grants"
         columns={[
           { header: 'Student', render: (grant) => grant.student_name },
@@ -152,16 +149,13 @@ export function AdminStudentsPage({
         ]}
       />
 
-      {managedStudentId ? (
+      {managedStudent ? (
         <ManageStudentModulesDialog
           api={api}
           data={data}
-          onClose={() => setManagedStudentId(null)}
-          refresh={refresh}
-          studentId={managedStudentId}
-          studentName={fullName(
-            students.find((student) => student.id === managedStudentId) ?? null,
-          )}
+          onClose={() => setManagedStudent(null)}
+          studentId={managedStudent.id}
+          studentName={managedStudent.name}
         />
       ) : null}
     </Page>
@@ -169,13 +163,28 @@ export function AdminStudentsPage({
 }
 
 function StudentModuleAccessPanel({
+  api,
   onManage,
-  students,
 }: {
-  onManage: (studentId: number) => void
-  students: User[]
+  api: AuthedRequest
+  onManage: (student: { id: number; name: string }) => void
 }) {
   const [studentId, setStudentId] = useState('')
+  const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [query])
+  const path = `/accounts/students/?pagination=cursor&limit=20&search=${encodeURIComponent(debouncedQuery)}`
+  const studentsQuery = useQuery({
+    queryKey: queryKeys.resource(path),
+    queryFn: ({ signal }) => api<ApiList<StudentProfile>>(path, { signal }),
+    enabled: debouncedQuery.length >= 2,
+    staleTime: 60_000,
+  })
+  const profiles = asArray(studentsQuery.data ?? [])
+  const selectedProfile = profiles.find((profile) => profile.user === Number(studentId))
 
   return (
     <section className="admin-resource section-block">
@@ -185,15 +194,21 @@ function StudentModuleAccessPanel({
       />
       <div className="student-module-access-launcher">
         <label className="admin-field">
-          <span>Student</span>
+          <span>Search student</span>
+          <input
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Name or student number"
+            type="search"
+            value={query}
+          />
           <select
             onChange={(event) => setStudentId(event.target.value)}
             value={studentId}
           >
             <option value="">Select a student</option>
-            {students.map((student) => (
-              <option key={student.id} value={student.id}>
-                {fullName(student)} ({student.username})
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.user}>
+                {fullName(profile.user_detail ?? null)} ({profile.student_number})
               </option>
             ))}
           </select>
@@ -201,7 +216,10 @@ function StudentModuleAccessPanel({
         <button
           className="button button--primary"
           disabled={!studentId}
-          onClick={() => onManage(Number(studentId))}
+          onClick={() => selectedProfile && onManage({
+            id: selectedProfile.user,
+            name: fullName(selectedProfile.user_detail ?? null),
+          })}
           type="button"
         >
           <Icon name="module" />
@@ -307,45 +325,37 @@ function BulkModuleAccessPanel({
   api,
   data,
   moduleOptions,
-  refresh,
-  scheduleOptions,
 }: {
   api: AuthedRequest
   data: RouteData
   moduleOptions: { label: string; value: number | string }[]
-  refresh: () => Promise<void>
-  scheduleOptions: { label: string; value: number | string }[]
 }) {
   const [moduleId, setModuleId] = useState('')
   const [scheduleId, setScheduleId] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [scheduleQuery, setScheduleQuery] = useState('')
+  const [debouncedScheduleQuery, setDebouncedScheduleQuery] = useState('')
   const selectedModule = data.modules.find((module) => module.id === Number(moduleId))
-
-  const students = useMemo(() => {
-    if (!scheduleId) {
-      return []
-    }
-
-    const studentIds = new Set(
-      data.enrollments
-        .filter(
-          (enrollment) =>
-            enrollment.is_active && enrollment.schedule === Number(scheduleId),
-        )
-        .map((enrollment) => enrollment.student),
-    )
-
-    return data.users.filter(
-      (user) => user.role === 'STUDENT' && studentIds.has(user.id),
-    )
-  }, [data.enrollments, data.users, scheduleId])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedScheduleQuery(scheduleQuery.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [scheduleQuery])
+  const schedulesPath = `/subjects/subject-schedules/?limit=20&search=${encodeURIComponent(debouncedScheduleQuery)}`
+  const schedulesQuery = useQuery({
+    queryKey: queryKeys.resource(schedulesPath),
+    queryFn: ({ signal }) => api<ApiList<SubjectSchedule>>(schedulesPath, { signal }),
+    enabled: debouncedScheduleQuery.length >= 2,
+    staleTime: 60_000,
+  })
+  const schedules = asArray(schedulesQuery.data ?? [])
+  const selectedSchedule = schedules.find((schedule) => schedule.id === Number(scheduleId))
 
   async function grantAccess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    if (!selectedModule || !students.length) {
-      setMessage('No enrolled students found for this class.')
+    if (!selectedModule || !scheduleId) {
+      setMessage('Select a module and class schedule.')
       return
     }
 
@@ -353,32 +363,15 @@ function BulkModuleAccessPanel({
     setMessage('')
 
     try {
-      await Promise.all(
-        students.map((student) => {
-          const existing = data.moduleAccess.find(
-            (grant) =>
-              grant.access_type === 'ENROLLED' &&
-              grant.module === selectedModule.id &&
-              grant.student === student.id,
-          )
-          const endpoint = existing
-            ? `/modules/access/${existing.id}/`
-            : '/modules/access/'
-
-          return api(endpoint, {
-            body: JSON.stringify({
-              access_type: 'ENROLLED',
-              is_active: true,
-              module: selectedModule.id,
-              notes: `Activated from ${scheduleName(data.schedules, data.subjects, Number(scheduleId))}`,
-              student: student.id,
-            }),
-            method: existing ? 'PATCH' : 'POST',
-          })
+      const result = await api<{ student_count: number }>('/modules/access/batch-activate/', {
+        body: JSON.stringify({
+          module: selectedModule.id,
+          notes: `Activated from ${selectedSchedule?.subject_code ?? 'class'} ${selectedSchedule?.section ?? ''}`.trim(),
+          schedule: Number(scheduleId),
         }),
-      )
-      setMessage(`${students.length} module access grants saved.`)
-      await refresh()
+        method: 'POST',
+      })
+      setMessage(`${result.student_count} module access grants saved.`)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -389,7 +382,7 @@ function BulkModuleAccessPanel({
   return (
     <section className="admin-resource section-block">
       <SectionHeading
-        subtitle={`${students.length} enrolled student${students.length === 1 ? '' : 's'}`}
+        subtitle="Activate access for every active student in one class"
         title="Bulk Module Access"
       />
       <form className="admin-inline-form" onSubmit={grantAccess}>
@@ -409,16 +402,22 @@ function BulkModuleAccessPanel({
           </select>
         </label>
         <label className="admin-field">
-          <span>Class schedule</span>
+          <span>Search class schedule</span>
+          <input
+            onChange={(event) => setScheduleQuery(event.target.value)}
+            placeholder="Subject, section, or room"
+            type="search"
+            value={scheduleQuery}
+          />
           <select
             onChange={(event) => setScheduleId(event.target.value)}
             required
             value={scheduleId}
           >
             <option value="">Select</option>
-            {scheduleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            {schedules.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {schedule.subject_code} {schedule.section} - {schedule.days}
               </option>
             ))}
           </select>
@@ -465,26 +464,41 @@ const profileFields = [
   },
 ] satisfies AdminField<StudentProfile>[]
 
-function enrollmentFields(
-  scheduleOptions: { label: string; value: number | string }[],
-  studentOptions: { label: string; value: number | string }[],
-) {
+function enrollmentFields() {
   return [
     {
       label: 'Schedule',
       name: 'schedule',
-      options: scheduleOptions,
       parse: Number,
+      remoteOptions: {
+        endpoint: '/subjects/subject-schedules/',
+        map: (item) => {
+          const schedule = item as SubjectSchedule
+          return {
+            label: `${schedule.subject_code} ${schedule.section} - ${schedule.days}`,
+            value: schedule.id,
+          }
+        },
+      },
       required: true,
-      type: 'select',
+      type: 'remote-select',
     },
     {
       label: 'Student',
       name: 'student',
-      options: studentOptions,
       parse: Number,
+      remoteOptions: {
+        endpoint: '/accounts/students/',
+        map: (item) => {
+          const profile = item as StudentProfile
+          return {
+            label: `${fullName(profile.user_detail ?? null)} (${profile.student_number})`,
+            value: profile.user,
+          }
+        },
+      },
       required: true,
-      type: 'select',
+      type: 'remote-select',
     },
     {
       defaultValue: true,
@@ -497,7 +511,6 @@ function enrollmentFields(
 
 function accessFields(
   moduleOptions: { label: string; value: number | string }[],
-  studentOptions: { label: string; value: number | string }[],
 ) {
   return [
     {
@@ -523,10 +536,19 @@ function accessFields(
     {
       label: 'Student',
       name: 'student',
-      options: studentOptions,
       parse: Number,
+      remoteOptions: {
+        endpoint: '/accounts/students/',
+        map: (item) => {
+          const profile = item as StudentProfile
+          return {
+            label: `${fullName(profile.user_detail ?? null)} (${profile.student_number})`,
+            value: profile.user,
+          }
+        },
+      },
       required: true,
-      type: 'select',
+      type: 'remote-select',
     },
     { label: 'Expires at', name: 'expires_at', nullable: true, type: 'datetime-local' },
     { label: 'Notes', name: 'notes', rows: 3, type: 'textarea' },

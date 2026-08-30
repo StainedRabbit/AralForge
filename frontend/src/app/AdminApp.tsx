@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import type { AuthedRequest } from './types'
 import type { StudentProfile, User } from '../types'
-import { MobileHeader, MobileTabbar, Sidebar, type NavItem } from '../components/navigation'
+import { MobileNavigation, Sidebar, type NavItem } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
 import type { WorkspaceResource } from '../queries/useScopedWorkspace'
 import { SkeletonList } from '../components/ui'
@@ -24,9 +24,19 @@ const nav: NavItem[] = [
   { to: '/admin/classes', label: 'Classes', icon: 'calendar' }, { to: '/admin/modules', label: 'Modules', icon: 'module' },
   { to: '/admin/grades', label: 'Grades', icon: 'grade' },
 ]
-const mobile = nav.filter(item => ['/admin','/admin/students','/admin/classes','/admin/grades'].includes(item.to)).map(item => item.to === '/admin' ? { ...item, label: 'Home' } : item)
+const mobile: NavItem[] = [
+  { to: '/admin', label: 'Home', icon: 'dashboard' },
+  { to: '/admin/classes', label: 'Classes', icon: 'calendar', matchPrefixes: ['/admin/classes', '/admin/academic-setup'] },
+  { to: '/admin/modules', label: 'Modules', icon: 'module', matchPrefixes: ['/admin/modules'] },
+  { to: '/admin/grades', label: 'Grades', icon: 'grade', matchPrefixes: ['/admin/grades', '/admin/gradebook', '/admin/submissions'] },
+]
+const mobileMore: NavItem[] = [
+  { to: '/admin/students', label: 'Students', icon: 'users' },
+  { to: '/admin/attendance', label: 'Attendance', icon: 'check' },
+  { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' },
+]
 
-const STUDENTS: WorkspaceResource[] = ['users','profiles','subjects','schedules','enrollments','modules','moduleAccess']
+const STUDENTS: WorkspaceResource[] = ['subjects','modules']
 const CLASSES: WorkspaceResource[] = ['users','profiles','subjects','schoolYears','terms','schedules','enrollments','modules','moduleAccess','attendanceSessions','attendanceRecords','gradeCategories','gradeItems','gradeItemScores','categoryGrades','periodGrades','finalGrades']
 const MODULES: WorkspaceResource[] = ['subjects','modules']
 const EDITOR: WorkspaceResource[] = ['users','profiles','schedules','enrollments','gradeCategories','gradeItems',...MODULES,'moduleTopics','moduleLessons','lessonExamples','lessonAssets','activities','activityQuestions','activityChoices','activityMatchingPairs']
@@ -37,7 +47,7 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
   const scoped = (resources: readonly WorkspaceResource[], render: Parameters<typeof RouteWorkspace>[0]['children']) => <RouteWorkspace api={api} currentUser={currentUser} profile={profile} resources={resources}>{render}</RouteWorkspace>
   return <div className="app-shell">
     <Sidebar badgePath="/admin/grades" currentUser={currentUser} items={nav} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} />
-    <main className="app-main"><MobileHeader currentUser={currentUser} pendingCount={pendingCount} onLogout={onLogout} />
+    <main className="app-main"><MobileNavigation badgePath="/admin/grades" currentUser={currentUser} items={mobile} moreItems={mobileMore} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} />
       <Suspense fallback={<SkeletonList count={4} />}><Routes>
         <Route path="/admin" element={<AdminDashboardPage api={api} currentUser={currentUser} />} />
         <Route path="/admin/students" element={scoped(STUDENTS, data => <AdminStudentsPage api={api} data={data} refresh={data.refresh} />)} />
@@ -59,6 +69,6 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/gradebook" element={<AdminGradebookRoute api={api} currentUser={currentUser} profile={profile} />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes></Suspense>
-    </main><MobileTabbar badgePath="/admin/grades" items={mobile} pendingCount={pendingCount} />
+    </main>
   </div>
 }

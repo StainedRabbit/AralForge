@@ -7,5 +7,7 @@ weasyprint==66.0
 Markdown==3.8.2
 bleach==6.2.0
 gunicorn==26.1.0
+celery[redis]==5.5.3
+redis==5.2.1
 whitenoise[brotli]==6.12.0
 django-storages[s3]==1.14.6

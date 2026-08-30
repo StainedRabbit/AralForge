@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
@@ -18,7 +18,14 @@ import type {
   ScheduleStudent,
   SchoolYearSemester,
   StudentGradeItemScore,
+  StudentProfile,
   SubjectSchedule,
+  User,
+  AttendanceRecord,
+  AttendanceSession,
+  StudentCategoryGrade,
+  PeriodGrade,
+  FinalGrade,
 } from '../../types'
 import { toOptions } from '../../admin/adminHelpers'
 import { formatTime, numeric, toErrorMessage } from '../../utils/format'
@@ -113,6 +120,20 @@ type PrimaryGradeSummary = {
   remarks: string
 }
 
+type ClassWorkspace = {
+  users: User[]
+  profiles: StudentProfile[]
+  enrollments: ScheduleStudent[]
+  attendance_sessions: AttendanceSession[]
+  attendance_records: AttendanceRecord[]
+  grade_categories: GradeCategory[]
+  grade_items: GradeItem[]
+  grade_item_scores: StudentGradeItemScore[]
+  category_grades: StudentCategoryGrade[]
+  period_grades: PeriodGrade[]
+  final_grades: FinalGrade[]
+}
+
 export function AdminClassesPage({
   api,
   data,
@@ -131,9 +152,15 @@ export function AdminClassesPage({
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const [scheduleMessage, setScheduleMessage] = useState('')
   const requestedScheduleId = Number(searchParams.get('schedule'))
-  const requestedWorkspaceSchedule = data.schedules.find(
-    (schedule) => schedule.id === requestedScheduleId,
-  )
+  const requestedScheduleQuery = useQuery({
+    queryKey: ['class-schedule', requestedScheduleId],
+    queryFn: ({ signal }) => api<SubjectSchedule>(
+      `/subjects/subject-schedules/${requestedScheduleId}/`, { signal },
+    ),
+    enabled: Boolean(requestedScheduleId),
+    staleTime: 60_000,
+  })
+  const requestedWorkspaceSchedule = requestedScheduleQuery.data ?? null
   const queryTermId = requestedWorkspaceSchedule
     ? String(requestedWorkspaceSchedule.school_year_semester)
     : selectedTermId
@@ -179,7 +206,7 @@ export function AdminClassesPage({
     ? uniqueSchedules([selectedSchedule!, ...visibleSchedules])
     : visibleSchedules
   const classCount = scheduleListQuery.data?.pages[0]?.count
-    ?? filterSchedules(data.schedules, query, effectiveTermId).length
+    ?? 0
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
 
   const refreshClasses = useCallback(async () => {
@@ -857,13 +884,36 @@ function ClassRoster({
   const [exportingRoster, setExportingRoster] = useState(false)
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
+  const classWorkspaceQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id],
+    queryFn: ({ signal }) => api<ClassWorkspace>(
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/`, { signal },
+    ),
+    enabled: Boolean(selectedSchedule),
+    staleTime: 30_000,
+  })
+  const classWorkspace = classWorkspaceQuery.data
+  const classData: RouteData = classWorkspace ? {
+    ...data,
+    users: classWorkspace.users,
+    profiles: classWorkspace.profiles,
+    enrollments: classWorkspace.enrollments,
+    attendanceSessions: classWorkspace.attendance_sessions,
+    attendanceRecords: classWorkspace.attendance_records,
+    gradeCategories: classWorkspace.grade_categories,
+    gradeItems: classWorkspace.grade_items,
+    gradeItemScores: classWorkspace.grade_item_scores,
+    categoryGrades: classWorkspace.category_grades,
+    periodGrades: classWorkspace.period_grades,
+    finalGrades: classWorkspace.final_grades,
+  } : data
   const localRoster = selectedSchedule
-    ? data.enrollments.filter(
+    ? classData.enrollments.filter(
         (enrollment) => enrollment.schedule === selectedSchedule.id,
       )
     : []
   const normalizedRosterQuery = rosterQuery.trim()
-  const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, data))
+  const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, classData))
   const localFilteredRows = filterRosterRows(localRosterRows, normalizedRosterQuery, rosterStatus)
   const rosterPageQuery = useInfiniteQuery({
     enabled: Boolean(selectedSchedule),
@@ -899,11 +949,11 @@ function ClassRoster({
   const totalCount = firstRosterPage?.total_count ?? localRoster.length
 
   const refreshClassRoster = useCallback(async () => {
-    await refresh()
-    await queryClient.invalidateQueries({
-      queryKey: ['class-roster', selectedSchedule?.id],
-    })
-  }, [queryClient, refresh, selectedSchedule?.id])
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['class-roster', selectedSchedule?.id] }),
+      queryClient.invalidateQueries({ queryKey: ['class-workspace', selectedSchedule?.id] }),
+    ])
+  }, [queryClient, selectedSchedule?.id])
 
   useEffect(() => {
     const target = rosterLoadMoreRef.current
@@ -950,10 +1000,10 @@ function ClassRoster({
   }
 
   const classModules = selectedSchedule
-    ? modulesForSubject(data.modules, selectedSchedule.subject)
+    ? modulesForSubject(classData.modules, selectedSchedule.subject)
     : []
   const selectedClassModule = selectedSchedule
-    ? allModulesForSubject(data.modules, selectedSchedule.subject)[0] ?? null
+    ? allModulesForSubject(classData.modules, selectedSchedule.subject)[0] ?? null
     : null
   const classModuleUrl = selectedSchedule && selectedClassModule
     ? `/admin/modules?subject=${selectedSchedule.subject}`
@@ -1196,7 +1246,7 @@ function ClassRoster({
       {selectedSchedule && isAttendanceOpen ? (
         <ClassAttendanceDialog
           api={api}
-          data={data}
+          data={classData}
           initialTab="take"
           key={selectedSchedule.id}
           refresh={refreshClassRoster}
@@ -1208,7 +1258,7 @@ function ClassRoster({
       {selectedSchedule && isScoresOpen ? (
         <ClassScoresDialog
           api={api}
-          data={data}
+          data={classData}
           key={selectedSchedule.id}
           refresh={refreshClassRoster}
           schedule={selectedSchedule}
@@ -1221,7 +1271,7 @@ function ClassRoster({
 
       {selectedSchedule && gradeRow ? (
         <GradeDetailsModal
-          data={data}
+          data={classData}
           row={gradeRow}
           schedule={selectedSchedule}
           onClose={() => setGradeRow(null)}
@@ -1231,10 +1281,9 @@ function ClassRoster({
       {moduleRow ? (
         <ManageStudentModulesDialog
           api={api}
-          data={data}
+          data={classData}
           defaultSubjectId={selectedSchedule?.subject}
           onClose={() => setModuleRow(null)}
-          refresh={refreshClassRoster}
           studentId={moduleRow.enrollment.student}
           studentName={moduleRow.studentName}
         />
@@ -1666,7 +1715,7 @@ function GradeDetailsModal({
                 <div className="grade-period-block" key={period}>
                   <strong>{gradingPeriodLabels[period]}</strong>
                   <div className="table-wrap">
-                    <table className="admin-table grade-breakdown-table">
+                    <table className="admin-table grade-breakdown-table mobile-card-table">
                       <thead>
                         <tr>
                           <th>Category</th>
@@ -1732,13 +1781,13 @@ function GradeCategoryBreakdownRows({
   if (!itemRows.length) {
     return (
       <tr>
-        <td>
+        <td data-label="Category">
           <strong>{category.name}</strong>
           <span>{category.category} - {formatGradeValue(category.weight)}%</span>
         </td>
-        <td>{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
-        <td>{gradeValue(grade?.transmuted_grade ?? null)}</td>
-        <td>{gradeValue(grade?.weighted_score ?? null)}</td>
+        <td data-label="Raw / Total">{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
+        <td data-label="Transmuted">{gradeValue(grade?.transmuted_grade ?? null)}</td>
+        <td data-label="Weighted / Remarks">{gradeValue(grade?.weighted_score ?? null)}</td>
       </tr>
     )
   }
@@ -1747,23 +1796,23 @@ function GradeCategoryBreakdownRows({
     <>
       {itemRows.map(({ item, score }) => (
         <tr key={item.id}>
-          <td>
+          <td data-label="Category">
             <strong>{item.source_title || item.title}</strong>
             <span>{sourceTypeLabel(item.source_type)} - {category.name}</span>
           </td>
-          <td>{score ? `${formatGradeValue(score.raw_score)} / ${formatGradeValue(score.total_score)}` : '-'}</td>
-          <td>{gradeValue(score?.transmuted_grade ?? null)}</td>
-          <td>{score?.remarks || '-'}</td>
+          <td data-label="Raw / Total">{score ? `${formatGradeValue(score.raw_score)} / ${formatGradeValue(score.total_score)}` : '-'}</td>
+          <td data-label="Transmuted">{gradeValue(score?.transmuted_grade ?? null)}</td>
+          <td data-label="Weighted / Remarks">{score?.remarks || '-'}</td>
         </tr>
       ))}
       <tr className="grade-category-total-row">
-        <td>
+        <td data-label="Category">
           <strong>{category.name} total</strong>
           <span>{category.category} - {formatGradeValue(category.weight)}%</span>
         </td>
-        <td>{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
-        <td>{gradeValue(grade?.transmuted_grade ?? null)}</td>
-        <td>{gradeValue(grade?.weighted_score ?? null)}</td>
+        <td data-label="Raw / Total">{grade ? `${formatGradeValue(grade.raw_score)} / ${formatGradeValue(grade.total_score)}` : '-'}</td>
+        <td data-label="Transmuted">{gradeValue(grade?.transmuted_grade ?? null)}</td>
+        <td data-label="Weighted / Remarks">{gradeValue(grade?.weighted_score ?? null)}</td>
       </tr>
     </>
   )

@@ -52,6 +52,7 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
     subject_code = serializers.CharField(source='subject.code', read_only=True)
     subject_name = serializers.CharField(source='subject.name', read_only=True)
     term_name = serializers.CharField(source='school_year_semester.name', read_only=True)
+    term_is_active = serializers.BooleanField(source='school_year_semester.is_active', read_only=True)
 
     class Meta:
         model = SubjectSchedule
@@ -62,6 +63,7 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             'subject_name',
             'school_year_semester',
             'term_name',
+            'term_is_active',
             'days',
             'start_time',
             'end_time',
@@ -80,6 +82,7 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             'subject_code',
             'subject_name',
             'term_name',
+            'term_is_active',
             'created_by',
             'updated_by',
             'archived_by',
@@ -113,6 +116,8 @@ class ScheduleStudentSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='schedule.subject.name', read_only=True)
     school_year_semester = serializers.IntegerField(source='schedule.school_year_semester_id', read_only=True)
     term_name = serializers.CharField(source='schedule.school_year_semester.name', read_only=True)
+    schedule_is_active = serializers.BooleanField(source='schedule.is_active', read_only=True)
+    term_is_active = serializers.BooleanField(source='schedule.school_year_semester.is_active', read_only=True)
     schedule_display = serializers.SerializerMethodField()
 
     class Meta:
@@ -129,6 +134,8 @@ class ScheduleStudentSerializer(serializers.ModelSerializer):
             'subject_name',
             'school_year_semester',
             'term_name',
+            'schedule_is_active',
+            'term_is_active',
             'added_at',
             'is_active',
             'added_by',

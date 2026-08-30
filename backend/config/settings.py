@@ -194,6 +194,7 @@ INSTALLED_APPS = [
     'coding',
     'gamification',
     'overview',
+    'jobs',
 ]
 
 MIDDLEWARE = [
@@ -234,6 +235,24 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 DATABASES = {'default': database_config(DATABASE_URL, BASE_DIR / 'db.sqlite3')}
+
+REDIS_URL = os.getenv('REDIS_URL', '')
+CACHES = {
+    'default': {
+        'BACKEND': (
+            'django.core.cache.backends.redis.RedisCache'
+            if REDIS_URL else 'django.core.cache.backends.locmem.LocMemCache'
+        ),
+        **({'LOCATION': REDIS_URL} if REDIS_URL else {'LOCATION': 'aralforge-local'}),
+        'TIMEOUT': 300,
+    },
+}
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', REDIS_URL or 'memory://')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', REDIS_URL or 'cache+memory://')
+CELERY_TASK_ALWAYS_EAGER = env_bool('CELERY_TASK_ALWAYS_EAGER', default=not bool(REDIS_URL))
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '900'))
 
 
 # Password validation
@@ -323,7 +342,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'config.pagination.AralForgeLimitOffsetPagination',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.AralForgePagination',
     'DEFAULT_FILTER_BACKENDS': ('config.filters.AralForgeQueryFilterBackend',),
     'PAGE_SIZE': 50,
 }

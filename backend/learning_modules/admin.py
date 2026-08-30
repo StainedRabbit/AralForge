@@ -146,8 +146,8 @@ class ModuleAccessAdmin(admin.ModelAdmin):
 
 @admin.register(ModuleActivity)
 class ModuleActivityAdmin(admin.ModelAdmin):
-    list_display = ('title', 'module', 'topic', 'lesson', 'activity_type', 'order', 'points_possible', 'due_at', 'is_published')
-    list_filter = ('activity_type', 'is_published', 'accepts_text', 'accepts_file', 'topic')
+    list_display = ('title', 'module', 'topic', 'lesson', 'grading_period', 'activity_type', 'order', 'points_possible', 'due_at', 'is_published')
+    list_filter = ('grading_period', 'activity_type', 'is_published', 'accepts_text', 'accepts_file', 'topic')
     search_fields = ('title', 'module__title', 'topic__title', 'lesson__title')
 
 
@@ -184,8 +184,8 @@ class ModuleActivityMatchingPairAdmin(admin.ModelAdmin):
 
 @admin.register(ModuleActivityAttempt)
 class ModuleActivityAttemptAdmin(admin.ModelAdmin):
-    list_display = ('activity', 'student', 'attempt_number', 'score', 'max_score', 'is_submitted', 'started_at')
-    list_filter = ('is_submitted', 'activity__module')
+    list_display = ('activity', 'student', 'attempt_number', 'score', 'max_score', 'status', 'started_at')
+    list_filter = ('status', 'activity__module')
     search_fields = ('activity__title', 'student__username')
 
 

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import type { AuthedRequest, RouteData } from '../app/types'
+import type { AuthedRequest, LearningContextMetadata, RouteData } from '../app/types'
 import { ActivityCard } from '../components/cards'
 import { Icon } from '../components/Icon'
 import { LessonExampleCards } from '../components/LessonExampleCards'
@@ -24,6 +24,20 @@ import {
   hasActiveModuleAccess,
   moduleAccessLabel,
 } from '../utils/student'
+
+function withLearningContext(
+  values: Record<string, string>,
+  context: LearningContextMetadata | null,
+) {
+  return {
+    ...values,
+    ...(context?.context_type === 'CLASS' && context.schedule
+      ? { schedule: String(context.schedule) }
+      : context?.context_type === 'PERSONAL'
+        ? { context: 'PERSONAL' }
+        : {}),
+  }
+}
 
 export function ModuleDetailPage({
   api,
@@ -50,6 +64,14 @@ export function ModuleDetailPage({
   )
   const requestedTopicId = Number(searchParams.get('topic')) || null
   const requestedLessonId = Number(searchParams.get('lesson')) || null
+  const learningContext = data.learningContext
+  const scheduleId = learningContext?.schedule ?? null
+  const contextType = learningContext?.context_type ?? null
+  const contextQuery = contextType === 'CLASS' && scheduleId
+    ? `?schedule=${scheduleId}`
+    : contextType === 'PERSONAL'
+      ? '?context=PERSONAL'
+      : ''
   const selectedLesson =
     publishedLessons.find((lesson) => lesson.id === requestedLessonId) ?? null
   const selectedTopic =
@@ -108,6 +130,8 @@ export function ModuleDetailPage({
     if (
       !selectedLesson ||
       !currentUserId ||
+      !contextType ||
+      !contextQuery ||
       viewedLessonIds.current.has(selectedLesson.id)
     ) {
       return
@@ -124,14 +148,16 @@ export function ModuleDetailPage({
       viewedLessonIds.current.add(selectedLesson.id)
       try {
         if (progress) {
-          await api(`/modules/lesson-progress/${progress.id}/`, {
+          await api(`/modules/lesson-progress/${progress.id}/${contextQuery}`, {
             body: JSON.stringify({}),
             method: 'PATCH',
           })
         } else {
           await api('/modules/lesson-progress/', {
             body: JSON.stringify({
+              context_type: contextType,
               lesson: selectedLesson.id,
+              schedule: scheduleId,
               student: currentUserId,
             }),
             method: 'POST',
@@ -145,10 +171,11 @@ export function ModuleDetailPage({
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [api, currentUserId, data.lessonProgress, refresh, selectedLesson])
+  }, [api, contextQuery, contextType, currentUserId, data.lessonProgress, refresh, scheduleId, selectedLesson])
 
   async function toggleLessonComplete() {
-    if (!selectedLesson || !currentUserId) {
+    if (!selectedLesson || !currentUserId || !contextType || !contextQuery) {
+      setProgressMessage('Choose a class or Personal Study context before updating lesson progress.')
       return
     }
 
@@ -159,7 +186,7 @@ export function ModuleDetailPage({
         ? null
         : new Date().toISOString()
       if (selectedProgress) {
-        await api(`/modules/lesson-progress/${selectedProgress.id}/`, {
+        await api(`/modules/lesson-progress/${selectedProgress.id}/${contextQuery}`, {
           body: JSON.stringify({ completed_at: completedAt }),
           method: 'PATCH',
         })
@@ -167,7 +194,9 @@ export function ModuleDetailPage({
         await api('/modules/lesson-progress/', {
           body: JSON.stringify({
             completed_at: completedAt,
+            context_type: contextType,
             lesson: selectedLesson.id,
+            schedule: scheduleId,
             student: currentUserId,
           }),
           method: 'POST',
@@ -182,18 +211,18 @@ export function ModuleDetailPage({
   }
 
   function openLesson(lesson: ModuleLesson) {
-    setSearchParams({
+    setSearchParams(withLearningContext({
       lesson: String(lesson.id),
       topic: String(lesson.topic),
-    })
+    }, learningContext))
   }
 
   function openTopic(topic: ModuleTopic) {
-    setSearchParams({ topic: String(topic.id) })
+    setSearchParams(withLearningContext({ topic: String(topic.id) }, learningContext))
   }
 
   function openContents() {
-    setSearchParams({})
+    setSearchParams(withLearningContext({}, learningContext))
   }
 
   if (!module) {
@@ -216,6 +245,17 @@ export function ModuleDetailPage({
           description={module.description || 'Learning module'}
         />
         <LockedModuleDetail api={api} module={module} />
+      </Page>
+    )
+  }
+
+  if (!learningContext) {
+    return (
+      <Page>
+        <NotFoundState
+          message="Choose an active class or Personal Study before opening this module."
+          to="/modules"
+        />
       </Page>
     )
   }
@@ -693,44 +733,34 @@ function StudentLessonReader({
     [data.activityAttempts, mainActivity],
   )
   const submittedMainActivityAttempts = mainActivityAttempts.filter(
-    (attempt) => attempt.is_submitted,
+    (attempt) => attempt.status === 'SUBMITTED' || attempt.is_submitted,
   )
-  const mainActivitySubmitted = mainActivityAttempts.some(
-    (attempt) => attempt.is_submitted,
-  )
-  const mainActivityRequirementMet = Boolean(
-    mainActivity && submittedMainActivityAttempts.some((attempt) =>
-      mainActivity.passing_score === null
-        ? true
-        : Number(attempt.score ?? 0) >= Number(mainActivity.passing_score),
-    ),
-  )
-  const mainActivityReviewUnlocked = Boolean(
-    mainActivity &&
-      (submittedMainActivityAttempts.length >= mainActivity.max_attempts ||
-        submittedMainActivityAttempts.some(
-          (attempt) =>
-            mainActivity.passing_score !== null
-              ? Number(attempt.score ?? 0) >= Number(mainActivity.passing_score)
-              : Number(attempt.max_score) > 0 &&
-                Number(attempt.score ?? 0) >= Number(attempt.max_score),
-        )),
-  )
+  const mainActivityState = mainActivity
+    ? data.activityStates.find((state) => state.activity === mainActivity.id) ?? null
+    : null
+  const mainActivitySubmitted = Boolean(mainActivityState?.submitted_count)
+  const mainActivityPassed = Boolean(mainActivityState?.passed)
+  const mainActivityRequirementMet = Boolean(mainActivityState?.requirement_met)
+  const mainActivityReviewUnlocked = Boolean(mainActivityState?.review_unlocked)
   const completionBlocked = Boolean(
     mainActivity && !mainActivityRequirementMet && !completed,
   )
   const challengeSection =
     lessonSections.find((section) => section.title === 'Challenge Task') ?? null
-  const openMainActivityAttempt = mainActivityAttempts.find((attempt) => !attempt.is_submitted)
-  const attemptsRemaining = mainActivity
-    ? Math.max(mainActivity.max_attempts - mainActivityAttempts.length, 0)
-    : 0
-  const bestMainActivityAttempt = submittedMainActivityAttempts
-    .filter((attempt) => attempt.score !== null)
-    .sort((first, second) => Number(second.score ?? 0) - Number(first.score ?? 0))[0] ?? null
+  const openMainActivityAttempt = mainActivityAttempts.find(
+    (attempt) => attempt.id === mainActivityState?.active_attempt_id,
+  )
+  const attemptsRemaining = mainActivityState?.attempts_remaining ?? 0
+  const bestMainActivityAttempt = submittedMainActivityAttempts.find(
+    (attempt) => attempt.id === mainActivityState?.best_attempt_id,
+  ) ?? null
   const mainActivityStatus = mainActivity
-    ? mainActivityReviewUnlocked
-      ? 'Review unlocked'
+    ? mainActivityState?.paper_terminal
+      ? 'Paper submitted'
+      : mainActivityReviewUnlocked
+      ? mainActivity.passing_score !== null && !mainActivityPassed
+        ? 'Attempts completed'
+        : 'Review unlocked'
       : openMainActivityAttempt
         ? 'In progress'
         : mainActivitySubmitted
@@ -925,10 +955,12 @@ function StudentLessonReader({
             <h3>{mainActivityStatus}</h3>
             <p>
               {bestMainActivityAttempt
-                ? `Best score: ${bestMainActivityAttempt.score}/${bestMainActivityAttempt.max_score}. `
+                ? `Best score: ${mainActivityState?.best_percentage}% (${bestMainActivityAttempt.score}/${bestMainActivityAttempt.max_score}). `
                 : ''}
               {mainActivityReviewUnlocked
-                ? 'Review the answers, then continue to the challenge.'
+                ? mainActivity.passing_score !== null && !mainActivityPassed
+                  ? 'All attempts are complete. Review the corrections; the passing score was not reached.'
+                  : 'Review the answers, then try the optional challenge.'
                 : attemptsRemaining > 0
                   ? `${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} remaining.`
                   : 'No attempts remaining.'}
@@ -1027,8 +1059,8 @@ function StudentLessonReader({
                 ? 'You can review this lesson anytime or continue to the next one.'
                 : completionBlocked
                   ? 'Submit the Main Activity first, then come back here to finish the lesson.'
-                  : mainActivityReviewUnlocked && challengeSection
-                    ? 'Challenge is unlocked. Finish the challenge, then mark this lesson complete.'
+                : mainActivityReviewUnlocked && challengeSection
+                    ? 'The optional Challenge is unlocked. Review it or mark this lesson complete when ready.'
                     : 'Mark this lesson complete when you have finished the examples and practice.'}
             </p>
           </div>

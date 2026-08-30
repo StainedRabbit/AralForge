@@ -394,12 +394,38 @@ export function AdminGradebookPage({
     setMessage('')
 
     try {
-      await Promise.all(dirtyKeys.map((key) => {
+      const changes = dirtyKeys.flatMap((key) => {
         const [dirtyItemId, dirtyStudentId] = key.split(':').map(Number)
         const item = scoreItems.find((candidate) => candidate.id === dirtyItemId)
         const enrollment = rows.find((candidate) => candidate.student === dirtyStudentId)
-        return item && enrollment ? saveScoreCell(item, enrollment) : Promise.resolve()
-      }))
+        if (!item || !enrollment) return []
+        const existing = findItemScore(data, item.id, enrollment.student)
+        const draft = scoreDraft[key] ?? {
+          rawScore: existing?.raw_score ?? '',
+          remarks: existing?.remarks ?? '',
+        }
+        if (draft.rawScore.trim() === '') {
+          return existing ? [{
+            grade_item: item.id,
+            operation: 'delete',
+            student: enrollment.student,
+          }] : []
+        }
+        return [{
+          grade_item: item.id,
+          operation: 'upsert',
+          raw_score: draft.rawScore,
+          remarks: draft.remarks,
+          student: enrollment.student,
+        }]
+      })
+
+      if (changes.length) {
+        await api('/grades/item-scores/batch/', {
+          body: JSON.stringify({ changes }),
+          method: 'POST',
+        })
+      }
 
       setScoreDraft((current) => Object.fromEntries(
         Object.entries(current).filter(([key]) => !dirtyKeys.includes(key)),
@@ -411,33 +437,6 @@ export function AdminGradebookPage({
     } finally {
       setSaving(false)
     }
-  }
-
-  function saveScoreCell(item: GradeItem, enrollment: (typeof visibleRoster)[number]) {
-    const key = scoreDraftKey(item.id, enrollment.student)
-    const existing = findItemScore(data, item.id, enrollment.student)
-    const draft = scoreDraft[key] ?? {
-      rawScore: existing?.raw_score ?? '',
-      remarks: existing?.remarks ?? '',
-    }
-
-    if (draft.rawScore.trim() === '') {
-      return existing
-        ? api(`/grades/item-scores/${existing.id}/`, { method: 'DELETE' })
-        : Promise.resolve()
-    }
-
-    const payload = {
-      grade_item: item.id,
-      raw_score: draft.rawScore,
-      remarks: draft.remarks,
-      student: enrollment.student,
-    }
-
-    return api(existing ? `/grades/item-scores/${existing.id}/` : '/grades/item-scores/', {
-      body: JSON.stringify(payload),
-      method: existing ? 'PATCH' : 'POST',
-    })
   }
 
   async function deleteItem(item: GradeItem) {
@@ -892,7 +891,7 @@ export function AdminGradebookPage({
                     </p>
                   ) : null}
                   <div className="table-wrap">
-                    <table className="admin-table gradebook-score-table">
+                    <table className="admin-table gradebook-score-table mobile-card-table mobile-score-cards">
                       <thead>
                         <tr>
                           <th>Student</th>
@@ -956,11 +955,11 @@ export function AdminGradebookPage({
 
                           return (
                             <tr key={enrollment.id}>
-                              <td>
+                              <td data-label="Student">
                                 <strong>{enrollment.student_name}</strong>
                                 <span>{enrollment.student_number}</span>
                               </td>
-                              <td>
+                              <td data-label="Submission">
                                 <span className={`status-badge status-badge--${submissionStatus.toLowerCase()}`}>
                                   {rosterStatusLabel(submissionStatus)}
                                 </span>
@@ -971,7 +970,7 @@ export function AdminGradebookPage({
                                 ) : null}
                               </td>
                               {paperScoreMode ? (
-                                <td>
+                                <td data-label="Paper score">
                                   <div className="paper-score-inline">
                                     <input
                                       aria-label={`Paper score for ${enrollment.student_name}`}
@@ -992,7 +991,7 @@ export function AdminGradebookPage({
                                   </div>
                                 </td>
                               ) : null}
-                              <td>
+                              <td data-label="Score">
                                 <input
                                   className="gradebook-score-input"
                                   max={numeric(selectedItem.points_possible)}
@@ -1012,8 +1011,8 @@ export function AdminGradebookPage({
                                   value={draft.rawScore}
                                 />
                               </td>
-                              <td>{displayScore(score?.transmuted_grade ?? null)}</td>
-                              <td>
+                              <td data-label="Transmuted">{displayScore(score?.transmuted_grade ?? null)}</td>
+                              <td data-label="Remarks">
                                 <input
                                   className="gradebook-remarks-input"
                                   disabled={selectedItem.source_type !== 'MANUAL'}
@@ -1029,7 +1028,7 @@ export function AdminGradebookPage({
                                   value={draft.remarks}
                                 />
                               </td>
-                              <td>
+                              <td data-label="Actions">
                                 <div className="admin-actions admin-actions--compact">
                                   {score?.origin === 'AUTOMATIC' ? (
                                     <button disabled={saving} onClick={() => overrideScore(score.id, selectedItem.points_possible)} type="button">Override</button>
@@ -1428,7 +1427,7 @@ function MatrixScorePanel({
         </div>
       </div>
       <div className="table-wrap">
-        <table className="admin-table gradebook-matrix-table">
+        <table className="admin-table gradebook-matrix-table mobile-card-table mobile-grade-matrix">
           <thead>
             <tr>
               <th>Student</th>
@@ -1453,7 +1452,7 @@ function MatrixScorePanel({
 
               return (
                 <tr key={enrollment.id}>
-                  <td>
+                  <td data-label="Student">
                     <strong>{enrollment.student_name}</strong>
                     <span>{enrollment.student_number}</span>
                   </td>
@@ -1466,7 +1465,7 @@ function MatrixScorePanel({
                     }
 
                     return (
-                      <td key={item.id}>
+                      <td data-label={item.source_title || item.title} key={item.id}>
                         <input
                           className="gradebook-score-input gradebook-score-input--matrix"
                           max={numeric(item.points_possible)}
@@ -1488,12 +1487,12 @@ function MatrixScorePanel({
                       </td>
                     )
                   })}
-                  <td>
+                  <td data-label="Total">
                     {categoryGrade?.completion_status === 'COMPLETE'
                       ? `${numeric(categoryGrade.raw_score).toFixed(2)} / ${numeric(categoryGrade.total_score).toFixed(2)}`
                       : categoryGrade ? `Pending (${categoryGrade.pending_item_count})` : '-'}
                   </td>
-                  <td>
+                  <td data-label="Grade">
                     {categoryGrade?.completion_status === 'COMPLETE'
                       ? `${displayScore(categoryGrade.transmuted_grade)} / ${displayScore(categoryGrade.weighted_score)}`
                       : '-'}

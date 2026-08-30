@@ -17,7 +17,7 @@ async function signIn(page: Page, username: string) {
 }
 
 test('Modern Forge surfaces render across roles and responsive viewports', async ({ page }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(90_000)
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
   const missingAssets: string[] = []
@@ -61,6 +61,10 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-dashboard-desktop-1440x900.png` })
 
+  await page.setViewportSize({ width: 360, height: 800 })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/student-dashboard-mobile-360x800.png` })
+
   await page.goto('/modules')
   await expect(page.getByRole('heading', { name: 'Modules' })).toBeVisible()
   await expect(page.locator('.student-module-browser')).toBeVisible()
@@ -68,15 +72,23 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-modules-tablet-768x1024.png` })
 
-  const databaseSubjectId = await page.evaluate(() => {
+  const personalStudySubjectId = await page.evaluate(() => {
     const subjectSelect = document.querySelector<HTMLSelectElement>('.student-module-control select')
     return Array.from(subjectSelect?.options ?? []).find(
-      (option) => option.textContent?.includes('E2E102 - Database Systems'),
+      (option) => option.textContent?.includes('E2EH1 - Attempt Hydration Fixture'),
     )?.value
   })
-  expect(databaseSubjectId).toBeTruthy()
-  await page.goto(`/modules?subject=${databaseSubjectId}`)
+  expect(personalStudySubjectId).toBeTruthy()
+  await page.goto(`/modules?subject=${personalStudySubjectId}&context=PERSONAL`)
   await expect(page.locator('.student-module-browser')).toBeVisible()
+  const classSelect = page.getByLabel('Class')
+  if (await classSelect.count()) {
+    const classValue = await classSelect.locator('option').evaluateAll((options) =>
+      options.map((option) => (option as HTMLOptionElement).value).find(Boolean),
+    )
+    expect(classValue).toBeTruthy()
+    await classSelect.selectOption(classValue!)
+  }
   const lessonLinks = page.locator('a[href*="lesson="]')
   expect(await lessonLinks.count()).toBeGreaterThan(0)
   const lessonHref = await lessonLinks.first().getAttribute('href')
@@ -87,6 +99,10 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-lesson-desktop-1440x900.png` })
 
+  await page.setViewportSize({ width: 430, height: 932 })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/student-lesson-mobile-430x932.png` })
+
   await page.goto('/modules')
   await expect(page.locator('.student-module-browser')).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
@@ -94,7 +110,9 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await expect(page.locator('.mobile-tabbar')).toBeVisible()
   await page.screenshot({ path: `${screenshotRoot}/student-modules-mobile-390x844.png` })
 
-  await page.locator('button[title="Sign out"]:visible').click()
+  await page.getByRole('button', { name: 'More navigation', exact: true }).click()
+  await page.screenshot({ path: `${screenshotRoot}/student-more-sheet-mobile-390x844.png` })
+  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   await page.setViewportSize({ width: 1440, height: 900 })
   await signIn(page, 'e2e-teacher')
@@ -103,11 +121,56 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-dashboard-desktop-1440x900.png` })
 
+  await page.setViewportSize({ width: 430, height: 932 })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/teacher-dashboard-mobile-430x932.png` })
+  await page.getByRole('button', { name: 'More navigation', exact: true }).click()
+  await page.screenshot({ path: `${screenshotRoot}/teacher-more-sheet-mobile-430x932.png` })
+  await page.keyboard.press('Escape')
+
   await page.goto('/admin/classes')
   await expect(page.getByRole('heading', { name: 'Classes' })).toBeVisible()
   await page.setViewportSize({ width: 768, height: 1024 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-classes-tablet-768x1024.png` })
+
+  await page.locator('.class-list__item').filter({ hasText: 'E2E101' }).click()
+  await expect(page.getByRole('heading', { name: 'Roster' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('h2')).find((heading) => heading.textContent === 'Roster')?.scrollIntoView()
+  })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/teacher-roster-mobile-390x844.png` })
+
+  await page.goto('/admin/modules')
+  await expect(page.getByLabel('Subject')).toBeVisible()
+  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
+  await expect(page.getByRole('heading', { name: 'Resume Topic' })).toBeVisible()
+  await page.setViewportSize({ width: 430, height: 932 })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/teacher-modules-mobile-430x932.png` })
+  await page.locator('summary').filter({ hasText: 'Manage' }).click()
+  const editModule = page.getByRole('link', { name: 'Edit Module' }).first()
+  if (await editModule.count()) {
+    await editModule.click()
+    await expect(page.getByLabel('Title')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save module' })).toBeVisible()
+    const stickyActionsClearNavigation = await page.evaluate(() => {
+      const save = document.querySelector<HTMLElement>('.lesson-editor__actions')
+      const navigation = document.querySelector<HTMLElement>('.mobile-tabbar')
+      return Boolean(save && navigation && save.getBoundingClientRect().bottom <= navigation.getBoundingClientRect().top)
+    })
+    expect(stickyActionsClearNavigation).toBe(true)
+    await assertNoViewportOverflow(page)
+    await page.screenshot({ path: `${screenshotRoot}/teacher-module-editor-mobile-430x932.png` })
+  }
+
+  await page.goto('/admin/gradebook')
+  await expect(page.getByRole('heading', { name: 'Gradebook' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/teacher-gradebook-mobile-390x844.png` })
 
   const brokenImages = await page.locator('img').evaluateAll((images) =>
     images

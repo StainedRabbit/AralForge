@@ -19,6 +19,7 @@ from .serializers import (
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     search_fields = ('username', 'first_name', 'last_name', 'email')
+    cursor_ordering = ('last_name', 'first_name', 'id')
 
     def get_queryset(self):
         if self.request.user.is_admin_teacher:
@@ -114,6 +115,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
     search_fields = ('student_number', 'user__username', 'user__first_name', 'user__last_name')
+    cursor_ordering = ('student_number', 'id')
 
     def get_queryset(self):
         if self.request.user.is_admin_teacher:

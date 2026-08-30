@@ -1,4 +1,6 @@
 import tempfile
+from datetime import time
+from decimal import Decimal
 
 from django.core.files.base import ContentFile
 from django.db import connection
@@ -183,3 +185,188 @@ class TopicPdfOnlyMigrationTests(TransactionTestCase):
         retired_columns = {'pdf_file', 'pdf_generated_at', 'pdf_is_outdated'}
         self.assertTrue(retired_columns.isdisjoint(module_columns))
         self.assertTrue(retired_columns.isdisjoint(lesson_columns))
+
+
+class MainActivityGradingPeriodMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        self.latest_targets = executor.loader.graph.leaf_nodes()
+        old_targets = [
+            ('learning_modules', '0024_remove_coding_activities')
+            if app_label == 'learning_modules'
+            else (app_label, migration_name)
+            for app_label, migration_name in self.latest_targets
+        ]
+        executor.migrate(old_targets)
+        self.old_apps = executor.loader.project_state(old_targets).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.latest_targets)
+        super().tearDown()
+
+    def test_infers_only_an_unambiguous_linked_period(self):
+        Subject = self.old_apps.get_model('subjects', 'Subject')
+        SchoolYear = self.old_apps.get_model('subjects', 'SchoolYear')
+        Term = self.old_apps.get_model('subjects', 'SchoolYearSemester')
+        Schedule = self.old_apps.get_model('subjects', 'SubjectSchedule')
+        Module = self.old_apps.get_model('learning_modules', 'Module')
+        Activity = self.old_apps.get_model('learning_modules', 'ModuleActivity')
+        Category = self.old_apps.get_model('grades', 'GradeCategory')
+        GradeItem = self.old_apps.get_model('grades', 'GradeItem')
+
+        subject = Subject.objects.create(code='PERIOD101', name='Period migration')
+        school_year = SchoolYear.objects.create(start_year=2042, end_year=2043)
+        term = Term.objects.create(school_year=school_year, semester='FIRST')
+        schedule_a = Schedule.objects.create(
+            subject=subject, school_year_semester=term, days='MWF',
+            start_time=time(8), end_time=time(9), section='A',
+        )
+        schedule_b = Schedule.objects.create(
+            subject=subject, school_year_semester=term, days='TTH',
+            start_time=time(9), end_time=time(10), section='B',
+        )
+        prelim = Category.objects.create(
+            subject=subject, grading_period='PRELIM', category='QUIZ',
+            name='Prelim quizzes', weight=Decimal('50.00'),
+        )
+        midterm = Category.objects.create(
+            subject=subject, grading_period='MIDTERM', category='QUIZ',
+            name='Midterm quizzes', weight=Decimal('50.00'),
+        )
+        module = Module.objects.create(title='Period module', slug='period-module', subject=subject)
+        inferred = Activity.objects.create(
+            module=module, title='Inferred activity', instructions='Complete it.',
+            points_possible=Decimal('10.00'),
+        )
+        mixed = Activity.objects.create(
+            module=module, title='Mixed activity', instructions='Complete it.',
+            points_possible=Decimal('10.00'),
+        )
+        unlinked = Activity.objects.create(
+            module=module, title='Unlinked activity', instructions='Complete it.',
+            points_possible=Decimal('10.00'),
+        )
+        for activity, schedule, category in (
+            (inferred, schedule_a, prelim),
+            (mixed, schedule_a, prelim),
+            (mixed, schedule_b, midterm),
+        ):
+            GradeItem.objects.create(
+                schedule=schedule, grade_category=category, title=activity.title,
+                points_possible=Decimal('10.00'), source_type='MODULE_ACTIVITY',
+                module_activity=activity,
+            )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.latest_targets)
+        apps = executor.loader.project_state(self.latest_targets).apps
+        MigratedActivity = apps.get_model('learning_modules', 'ModuleActivity')
+
+        self.assertEqual(MigratedActivity.objects.get(pk=inferred.pk).grading_period, 'PRELIM')
+        self.assertIsNone(MigratedActivity.objects.get(pk=mixed.pk).grading_period)
+        self.assertIsNone(MigratedActivity.objects.get(pk=unlinked.pk).grading_period)
+
+
+class MainActivityHardeningMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        self.latest_targets = executor.loader.graph.leaf_nodes()
+        old_targets = [
+            ('learning_modules', '0026_learning_contexts')
+            if app_label == 'learning_modules'
+            else (app_label, migration_name)
+            for app_label, migration_name in self.latest_targets
+        ]
+        executor.migrate(old_targets)
+        self.old_apps = executor.loader.project_state(old_targets).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.latest_targets)
+        super().tearDown()
+
+    def test_clears_lesson_windows_and_supersedes_duplicate_open_attempts(self):
+        Subject = self.old_apps.get_model('subjects', 'Subject')
+        SchoolYear = self.old_apps.get_model('subjects', 'SchoolYear')
+        Term = self.old_apps.get_model('subjects', 'SchoolYearSemester')
+        Schedule = self.old_apps.get_model('subjects', 'SubjectSchedule')
+        Module = self.old_apps.get_model('learning_modules', 'Module')
+        Topic = self.old_apps.get_model('learning_modules', 'ModuleTopic')
+        Lesson = self.old_apps.get_model('learning_modules', 'ModuleLesson')
+        Activity = self.old_apps.get_model('learning_modules', 'ModuleActivity')
+        Attempt = self.old_apps.get_model('learning_modules', 'ModuleActivityAttempt')
+        Extension = self.old_apps.get_model('learning_modules', 'ModuleActivityExtension')
+
+        teacher = User.objects.create(username='hardening-migration-teacher', role='TEACHER')
+        student = User.objects.create(username='hardening-migration-student', role='STUDENT')
+        subject = Subject.objects.create(code='HARD101', name='Hardening migration')
+        year = SchoolYear.objects.create(start_year=2044, end_year=2045)
+        term = Term.objects.create(school_year=year, semester='FIRST')
+        schedule = Schedule.objects.create(
+            subject=subject,
+            school_year_semester=term,
+            days='MWF',
+            start_time=time(8),
+            end_time=time(9),
+            section='A',
+        )
+        module = Module.objects.create(title='Hardening module', slug='hardening-module', subject=subject)
+        topic = Topic.objects.create(module=module, title='Hardening topic')
+        lesson = Lesson.objects.create(topic=topic, title='Hardening lesson')
+        activity = Activity.objects.create(
+            module=module,
+            topic=topic,
+            lesson=lesson,
+            title='Hardening activity',
+            due_at=timezone.now() + timezone.timedelta(days=1),
+            opens_at=timezone.now() - timezone.timedelta(days=1),
+            allow_late_submissions=True,
+            passing_score=Decimal('5.00'),
+            grading_period='PRELIM',
+        )
+        older = Attempt.objects.create(
+            activity=activity,
+            student_id=student.id,
+            context_type='CLASS',
+            schedule=schedule,
+            attempt_number=1,
+        )
+        newest = Attempt.objects.create(
+            activity=activity,
+            student_id=student.id,
+            context_type='CLASS',
+            schedule=schedule,
+            attempt_number=2,
+        )
+        Extension.objects.create(
+            activity=activity,
+            student_id=student.id,
+            due_at=timezone.now() + timezone.timedelta(days=2),
+            granted_by_id=teacher.id,
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.latest_targets)
+        apps = executor.loader.project_state(self.latest_targets).apps
+        MigratedActivity = apps.get_model('learning_modules', 'ModuleActivity')
+        MigratedAttempt = apps.get_model('learning_modules', 'ModuleActivityAttempt')
+        MigratedExtension = apps.get_model('learning_modules', 'ModuleActivityExtension')
+
+        migrated_activity = MigratedActivity.objects.get(pk=activity.pk)
+        self.assertIsNone(migrated_activity.opens_at)
+        self.assertIsNone(migrated_activity.due_at)
+        self.assertFalse(migrated_activity.allow_late_submissions)
+        self.assertFalse(MigratedExtension.objects.filter(activity_id=activity.pk).exists())
+        self.assertEqual(MigratedAttempt.objects.get(pk=older.pk).status, 'SUPERSEDED')
+        migrated_newest = MigratedAttempt.objects.get(pk=newest.pk)
+        self.assertEqual(migrated_newest.status, 'IN_PROGRESS')
+        self.assertEqual(migrated_newest.passing_score_snapshot, Decimal('5.00'))
+        self.assertNotIn(
+            'is_submitted',
+            {field.name for field in MigratedAttempt._meta.fields},
+        )

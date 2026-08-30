@@ -1,7 +1,7 @@
 import calendar
 
 from django.conf import settings
-from django.core.validators import FileExtensionValidator
+from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q
 from django.db.models.signals import m2m_changed
@@ -299,6 +299,13 @@ class ModuleAccess(models.Model):
         ]
         ordering = ['module__title', 'student__username']
         verbose_name_plural = 'module access grants'
+        indexes = [
+            models.Index(
+                fields=['student', 'module', 'expires_at'],
+                condition=Q(is_active=True, activated_by__isnull=False),
+                name='modaccess_active_student_idx',
+            ),
+        ]
 
     @property
     def status(self):
@@ -550,6 +557,12 @@ class ModuleLessonAsset(models.Model):
 
 
 class ModuleActivity(models.Model):
+    class GradingPeriod(models.TextChoices):
+        PRELIM = 'PRELIM', 'Prelim'
+        MIDTERM = 'MIDTERM', 'Midterm'
+        PREFINAL = 'PREFINAL', 'Prefinal'
+        FINAL = 'FINAL', 'Final'
+
     class ActivityType(models.TextChoices):
         TEXT = 'TEXT', 'Text'
         FILE_UPLOAD = 'FILE_UPLOAD', 'File Upload'
@@ -588,9 +601,19 @@ class ModuleActivity(models.Model):
     allow_late_submissions = models.BooleanField(default=False)
     accepts_text = models.BooleanField(default=True)
     accepts_file = models.BooleanField(default=False)
-    max_attempts = models.PositiveSmallIntegerField(default=3)
+    max_attempts = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1)],
+    )
     passing_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    grading_period = models.CharField(
+        max_length=20,
+        choices=GradingPeriod,
+        null=True,
+        blank=True,
+    )
     is_published = models.BooleanField(default=False)
+    revision = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -608,6 +631,11 @@ class ModuleActivity(models.Model):
             self.activity_type = self.ActivityType.INTERACTIVE
             self.accepts_text = False
             self.accepts_file = False
+            # Lesson Main Activities are governed by class/module access. The
+            # legacy global window cannot represent different linked classes.
+            self.opens_at = None
+            self.due_at = None
+            self.allow_late_submissions = False
         super().save(*args, **kwargs)
         if self.lesson_id:
             mark_lesson_topic_pdf_outdated(self.lesson)
@@ -721,10 +749,21 @@ class ModuleActivityMatchingPair(models.Model):
         return result
 
 
+class LearningContextType(models.TextChoices):
+    CLASS = 'CLASS', 'Class'
+    PERSONAL = 'PERSONAL', 'Personal study'
+    LEGACY = 'LEGACY', 'Legacy history'
+
+
 class ModuleActivityAttempt(models.Model):
     class SubmissionMethod(models.TextChoices):
         ONLINE = 'ONLINE', 'Online'
         PAPER = 'PAPER', 'Paper'
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = 'IN_PROGRESS', 'In progress'
+        SUBMITTED = 'SUBMITTED', 'Submitted'
+        SUPERSEDED = 'SUPERSEDED', 'Superseded'
 
     activity = models.ForeignKey(
         ModuleActivity,
@@ -755,31 +794,122 @@ class ModuleActivityAttempt(models.Model):
         null=True,
         blank=True,
     )
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='module_activity_attempts',
+        null=True,
+        blank=True,
+    )
+    context_type = models.CharField(
+        max_length=20,
+        choices=LearningContextType,
+        default=LearningContextType.LEGACY,
+    )
     attempt_number = models.PositiveSmallIntegerField(default=1)
+    status = models.CharField(
+        max_length=20,
+        choices=Status,
+        default=Status.IN_PROGRESS,
+    )
     score = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
     max_score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
-    is_submitted = models.BooleanField(default=False)
+    activity_revision = models.PositiveIntegerField(default=1)
+    passing_score_snapshot = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     question_snapshot = models.JSONField(default=list, blank=True)
     draft_answers = models.JSONField(default=dict, blank=True)
+    draft_revision = models.PositiveIntegerField(default=0)
+    draft_saved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
+                fields=['activity', 'student', 'schedule', 'attempt_number'],
+                condition=Q(context_type=LearningContextType.CLASS),
+                name='unique_class_activity_attempt_number',
+            ),
+            models.UniqueConstraint(
                 fields=['activity', 'student', 'attempt_number'],
-                name='unique_module_activity_attempt_number',
+                condition=Q(context_type=LearningContextType.PERSONAL),
+                name='unique_personal_activity_attempt_number',
+            ),
+            models.UniqueConstraint(
+                fields=['activity', 'student', 'attempt_number'],
+                condition=Q(context_type=LearningContextType.LEGACY),
+                name='unique_legacy_activity_attempt_number',
             ),
             models.UniqueConstraint(
                 fields=['paper_grade_item', 'student'],
                 condition=Q(paper_grade_item__isnull=False),
                 name='unique_paper_activity_attempt_per_grade_item_student',
             ),
+            models.UniqueConstraint(
+                fields=['activity', 'student', 'schedule'],
+                condition=Q(
+                    context_type=LearningContextType.CLASS,
+                    submission_method='ONLINE',
+                    status='IN_PROGRESS',
+                ),
+                name='unique_open_class_activity_attempt',
+            ),
+            models.UniqueConstraint(
+                fields=['activity', 'student'],
+                condition=Q(
+                    context_type=LearningContextType.PERSONAL,
+                    submission_method='ONLINE',
+                    status='IN_PROGRESS',
+                ),
+                name='unique_open_personal_activity_attempt',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(context_type=LearningContextType.CLASS, schedule__isnull=False)
+                    | Q(
+                        context_type__in=(
+                            LearningContextType.PERSONAL,
+                            LearningContextType.LEGACY,
+                        ),
+                        schedule__isnull=True,
+                    )
+                ),
+                name='activity_attempt_valid_learning_context',
+            ),
         ]
         ordering = ['-started_at']
+        indexes = [
+            models.Index(
+                fields=['activity', 'schedule', 'student'],
+                condition=Q(
+                    context_type='CLASS',
+                    submission_method='ONLINE',
+                    status='SUBMITTED',
+                ),
+                name='attempt_submitted_class_idx',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.student} - {self.activity} attempt {self.attempt_number}'
+
+    @property
+    def is_submitted(self):
+        """Compatibility accessor; status is the only persisted lifecycle field."""
+        return self.status == self.Status.SUBMITTED
+
+    def save(self, *args, **kwargs):
+        if not self.activity_revision and self.activity_id:
+            self.activity_revision = self.activity.revision
+        if self._state.adding and self.activity_id:
+            self.activity_revision = self.activity.revision
+            self.passing_score_snapshot = self.activity.passing_score
+        super().save(*args, **kwargs)
 
 
 class ModuleActivityExtension(models.Model):
@@ -866,14 +996,50 @@ class ModuleProgress(models.Model):
         on_delete=models.CASCADE,
         related_name='module_progress',
     )
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='module_progress',
+        null=True,
+        blank=True,
+    )
+    context_type = models.CharField(
+        max_length=20,
+        choices=LearningContextType,
+        default=LearningContextType.LEGACY,
+    )
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
+                fields=['module', 'student', 'schedule'],
+                condition=Q(context_type=LearningContextType.CLASS),
+                name='unique_class_module_progress',
+            ),
+            models.UniqueConstraint(
                 fields=['module', 'student'],
-                name='unique_module_progress',
+                condition=Q(context_type=LearningContextType.PERSONAL),
+                name='unique_personal_module_progress',
+            ),
+            models.UniqueConstraint(
+                fields=['module', 'student'],
+                condition=Q(context_type=LearningContextType.LEGACY),
+                name='unique_legacy_module_progress',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(context_type=LearningContextType.CLASS, schedule__isnull=False)
+                    | Q(
+                        context_type__in=(
+                            LearningContextType.PERSONAL,
+                            LearningContextType.LEGACY,
+                        ),
+                        schedule__isnull=True,
+                    )
+                ),
+                name='module_progress_valid_learning_context',
             ),
         ]
         ordering = ['-started_at']
@@ -894,14 +1060,50 @@ class ModuleTopicProgress(models.Model):
         on_delete=models.CASCADE,
         related_name='module_topic_progress',
     )
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='module_topic_progress',
+        null=True,
+        blank=True,
+    )
+    context_type = models.CharField(
+        max_length=20,
+        choices=LearningContextType,
+        default=LearningContextType.LEGACY,
+    )
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
+                fields=['topic', 'student', 'schedule'],
+                condition=Q(context_type=LearningContextType.CLASS),
+                name='unique_class_topic_progress',
+            ),
+            models.UniqueConstraint(
                 fields=['topic', 'student'],
-                name='unique_module_topic_progress',
+                condition=Q(context_type=LearningContextType.PERSONAL),
+                name='unique_personal_topic_progress',
+            ),
+            models.UniqueConstraint(
+                fields=['topic', 'student'],
+                condition=Q(context_type=LearningContextType.LEGACY),
+                name='unique_legacy_topic_progress',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(context_type=LearningContextType.CLASS, schedule__isnull=False)
+                    | Q(
+                        context_type__in=(
+                            LearningContextType.PERSONAL,
+                            LearningContextType.LEGACY,
+                        ),
+                        schedule__isnull=True,
+                    )
+                ),
+                name='topic_progress_valid_learning_context',
             ),
         ]
         ordering = ['-started_at']
@@ -922,6 +1124,18 @@ class ModuleLessonProgress(models.Model):
         on_delete=models.CASCADE,
         related_name='module_lesson_progress',
     )
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='module_lesson_progress',
+        null=True,
+        blank=True,
+    )
+    context_type = models.CharField(
+        max_length=20,
+        choices=LearningContextType,
+        default=LearningContextType.LEGACY,
+    )
     started_at = models.DateTimeField(auto_now_add=True)
     last_viewed_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -929,8 +1143,32 @@ class ModuleLessonProgress(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
+                fields=['lesson', 'student', 'schedule'],
+                condition=Q(context_type=LearningContextType.CLASS),
+                name='unique_class_lesson_progress',
+            ),
+            models.UniqueConstraint(
                 fields=['lesson', 'student'],
-                name='unique_module_lesson_progress',
+                condition=Q(context_type=LearningContextType.PERSONAL),
+                name='unique_personal_lesson_progress',
+            ),
+            models.UniqueConstraint(
+                fields=['lesson', 'student'],
+                condition=Q(context_type=LearningContextType.LEGACY),
+                name='unique_legacy_lesson_progress',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(context_type=LearningContextType.CLASS, schedule__isnull=False)
+                    | Q(
+                        context_type__in=(
+                            LearningContextType.PERSONAL,
+                            LearningContextType.LEGACY,
+                        ),
+                        schedule__isnull=True,
+                    )
+                ),
+                name='lesson_progress_valid_learning_context',
             ),
         ]
         ordering = ['-last_viewed_at']
@@ -938,26 +1176,43 @@ class ModuleLessonProgress(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        sync_learning_progress(self.student, self.lesson.topic)
+        sync_learning_progress(
+            self.student,
+            self.lesson.topic,
+            self.context_type,
+            self.schedule,
+        )
 
     def delete(self, *args, **kwargs):
         student = self.student
         topic = self.lesson.topic
+        context_type = self.context_type
+        schedule = self.schedule
         result = super().delete(*args, **kwargs)
-        sync_learning_progress(student, topic)
+        sync_learning_progress(student, topic, context_type, schedule)
         return result
 
     def __str__(self):
         return f'{self.student} - {self.lesson}'
 
 
-def sync_learning_progress(student, topic):
+def learning_context_filter(context_type, schedule):
+    schedule_id = getattr(schedule, 'pk', schedule)
+    return {
+        'context_type': context_type,
+        'schedule_id': schedule_id if context_type == LearningContextType.CLASS else None,
+    }
+
+
+def sync_learning_progress(student, topic, context_type, schedule=None):
+    context = learning_context_filter(context_type, schedule)
     published_lessons = topic.lessons.filter(is_published=True)
     completed_lesson_ids = ModuleLessonProgress.objects.filter(
         student=student,
         lesson__topic=topic,
         lesson__is_published=True,
         completed_at__isnull=False,
+        **context,
     ).values_list('lesson_id', flat=True)
     topic_is_complete = (
         published_lessons.exists()
@@ -966,6 +1221,7 @@ def sync_learning_progress(student, topic):
     topic_progress, _ = ModuleTopicProgress.objects.get_or_create(
         student=student,
         topic=topic,
+        **context,
     )
     topic_completed_at = (
         topic_progress.completed_at or timezone.now()
@@ -976,10 +1232,11 @@ def sync_learning_progress(student, topic):
         topic_progress.completed_at = topic_completed_at
         topic_progress.save(update_fields=['completed_at'])
 
-    sync_module_progress(student, topic.module)
+    sync_module_progress(student, topic.module, context_type, schedule)
 
 
-def sync_module_progress(student, module):
+def sync_module_progress(student, module, context_type, schedule=None):
+    context = learning_context_filter(context_type, schedule)
     published_module_lessons = ModuleLesson.objects.filter(
         topic__module=module,
         topic__is_published=True,
@@ -991,6 +1248,7 @@ def sync_module_progress(student, module):
         lesson__topic__is_published=True,
         lesson__is_published=True,
         completed_at__isnull=False,
+        **context,
     ).values_list('lesson_id', flat=True)
     module_is_complete = (
         published_module_lessons.exists()
@@ -1001,6 +1259,7 @@ def sync_module_progress(student, module):
     module_progress, _ = ModuleProgress.objects.get_or_create(
         student=student,
         module=module,
+        **context,
     )
     module_completed_at = (
         module_progress.completed_at or timezone.now()
@@ -1012,62 +1271,66 @@ def sync_module_progress(student, module):
         module_progress.save(update_fields=['completed_at'])
 
 
-def progress_student_ids_for_topic(topic):
+def progress_contexts_for_topic(topic):
     return set(
         ModuleLessonProgress.objects.filter(
             lesson__topic=topic,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     ) | set(
         ModuleTopicProgress.objects.filter(
             topic=topic,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     ) | set(
         ModuleProgress.objects.filter(
             module=topic.module,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     )
 
 
-def progress_student_ids_for_module(module):
+def progress_contexts_for_module(module):
     return set(
         ModuleLessonProgress.objects.filter(
             lesson__topic__module=module,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     ) | set(
         ModuleTopicProgress.objects.filter(
             topic__module=module,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     ) | set(
         ModuleProgress.objects.filter(
             module=module,
-        ).values_list('student_id', flat=True)
+        ).values_list('student_id', 'context_type', 'schedule_id')
     )
 
 
 def sync_progress_for_topic_students(topic, student_ids=None):
-    student_ids = (
-        progress_student_ids_for_topic(topic)
-        if student_ids is None
-        else set(student_ids)
-    )
+    contexts = progress_contexts_for_topic(topic)
+    if student_ids is not None:
+        student_ids = set(student_ids)
+        contexts = {context for context in contexts if context[0] in student_ids}
     student_model = ModuleLessonProgress._meta.get_field(
         'student',
     ).remote_field.model
-    for student in student_model.objects.filter(id__in=student_ids):
-        sync_learning_progress(student, topic)
+    students = student_model.objects.in_bulk(context[0] for context in contexts)
+    for student_id, context_type, schedule_id in contexts:
+        student = students.get(student_id)
+        if student:
+            sync_learning_progress(student, topic, context_type, schedule_id)
 
 
 def sync_module_progress_for_students(module, student_ids=None):
-    student_ids = (
-        progress_student_ids_for_module(module)
-        if student_ids is None
-        else set(student_ids)
-    )
+    contexts = progress_contexts_for_module(module)
+    if student_ids is not None:
+        student_ids = set(student_ids)
+        contexts = {context for context in contexts if context[0] in student_ids}
     student_model = ModuleLessonProgress._meta.get_field(
         'student',
     ).remote_field.model
-    for student in student_model.objects.filter(id__in=student_ids):
-        sync_module_progress(student, module)
+    students = student_model.objects.in_bulk(context[0] for context in contexts)
+    for student_id, context_type, schedule_id in contexts:
+        student = students.get(student_id)
+        if student:
+            sync_module_progress(student, module, context_type, schedule_id)
 
 
 class ModuleActivitySubmission(models.Model):

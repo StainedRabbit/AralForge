@@ -26,7 +26,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
   await page.getByLabel('Password').fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   await page.evaluate(() => {
     const session = localStorage.getItem('aralforge.session')
@@ -47,7 +47,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
   })
 
   await page.reload()
-  await expect(page.getByRole('heading', { name: /Teacher Console/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   const migrated = await page.evaluate(() => ({
     legacySession: localStorage.getItem('ezoryx.session'),

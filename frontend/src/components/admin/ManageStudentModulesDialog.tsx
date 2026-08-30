@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { Module, ModuleAccess } from '../../types'
+import type { ScheduleStudent } from '../../types'
+import { usePaginatedResource } from '../../queries/useScopedWorkspace'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { moduleSubjectLabel } from '../../utils/student'
 import { Icon } from '../Icon'
@@ -11,7 +13,6 @@ export function ManageStudentModulesDialog({
   data,
   defaultSubjectId,
   onClose,
-  refresh,
   studentId,
   studentName,
 }: {
@@ -19,29 +20,26 @@ export function ManageStudentModulesDialog({
   data: RouteData
   defaultSubjectId?: number
   onClose: () => void
-  refresh: () => Promise<void>
   studentId: number
   studentName: string
 }) {
+  const enrollmentsQuery = usePaginatedResource<ScheduleStudent>(
+    api,
+    `/subjects/schedule-students/?student=${studentId}`,
+  )
+  const grantsQuery = usePaginatedResource<ModuleAccess>(
+    api,
+    `/modules/access/?student=${studentId}`,
+  )
+  const studentEnrollments = useMemo(() => enrollmentsQuery.data ?? [], [enrollmentsQuery.data])
+  const storedGrants = useMemo(() => grantsQuery.data ?? [], [grantsQuery.data])
   const enrolledSubjectIds = useMemo(
-    () => {
-      const activeScheduleIds = new Set(
-        data.schedules
-          .filter((schedule) => schedule.is_active)
-          .map((schedule) => schedule.id),
-      )
-      return new Set(
-        data.enrollments
-          .filter(
-            (enrollment) =>
-              enrollment.student === studentId &&
-              enrollment.is_active &&
-              activeScheduleIds.has(enrollment.schedule),
-          )
-          .map((enrollment) => enrollment.subject),
-      )
-    },
-    [data.enrollments, data.schedules, studentId],
+    () => new Set(
+      studentEnrollments
+        .filter((enrollment) => enrollment.student === studentId && enrollment.is_active)
+        .map((enrollment) => enrollment.subject),
+    ),
+    [studentEnrollments, studentId],
   )
   const defaultModule = data.modules.find(
     (module) =>
@@ -60,14 +58,14 @@ export function ManageStudentModulesDialog({
   const grants = useMemo(
     () => studentModuleGrants(
       [
-        ...data.moduleAccess.filter(
+        ...storedGrants.filter(
           (grant) => !grantUpdates.some((saved) => saved.id === grant.id),
         ),
         ...grantUpdates,
       ],
       studentId,
     ),
-    [data.moduleAccess, grantUpdates, studentId],
+    [grantUpdates, storedGrants, studentId],
   )
   const enrolledModules = data.modules.filter(
     (module) =>
@@ -117,7 +115,7 @@ export function ManageStudentModulesDialog({
       )
       setGrantUpdates((current) => upsertGrant(current, saved))
       setMessage('Module access activated.')
-      await refresh()
+      await grantsQuery.refetch()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -135,7 +133,7 @@ export function ManageStudentModulesDialog({
       })
       setGrantUpdates((current) => upsertGrant(current, saved))
       setMessage('Module access revoked.')
-      await refresh()
+      await grantsQuery.refetch()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {

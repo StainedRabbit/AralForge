@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
-import { EmptyState, Page, PageHeader, SectionHeading } from '../../components/ui'
+import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList } from '../../components/ui'
+import { queryKeys } from '../../queries/queryKeys'
 import type { Module } from '../../types'
 import { toErrorMessage } from '../../utils/format'
 import { subjectName } from '../../utils/modules'
@@ -32,12 +34,19 @@ export function AdminModuleEditorPage({
   const navigate = useNavigate()
   const { moduleId } = useParams()
   const [searchParams] = useSearchParams()
-  const editingModule = data.modules.find((module) => module.id === Number(moduleId))
+  const numericModuleId = Number(moduleId)
+  const moduleQuery = useQuery({
+    queryKey: queryKeys.resource(`/modules/modules/${numericModuleId}/`),
+    queryFn: ({ signal }) => api<Module>(`/modules/modules/${numericModuleId}/`, { signal }),
+    enabled: Boolean(moduleId && numericModuleId),
+    staleTime: 60_000,
+  })
+  const editingModule = moduleQuery.data
+    ?? data.modules.find((module) => module.id === numericModuleId)
   const selectedSubjectId = searchParams.get('subject')
   const isEditing = Boolean(moduleId)
-  const [draft, setDraft] = useState<ModuleDraft>(() =>
-    createModuleDraft(editingModule, selectedSubjectId),
-  )
+  const [draftOverride, setDraftOverride] = useState<ModuleDraft | null>(null)
+  const draft = draftOverride ?? createModuleDraft(editingModule, selectedSubjectId)
   const [message, setMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -48,6 +57,10 @@ export function AdminModuleEditorPage({
     })),
     [data.subjects],
   )
+
+  if (isEditing && moduleQuery.isPending) {
+    return <Page><SkeletonList count={4} /></Page>
+  }
 
   if (isEditing && !editingModule) {
     return (
@@ -94,14 +107,17 @@ export function AdminModuleEditorPage({
     field: TField,
     value: ModuleDraft[TField],
   ) {
-    setDraft((current) => ({
-      ...current,
+    setDraftOverride((current) => {
+      const base = current ?? createModuleDraft(editingModule, selectedSubjectId)
+      return ({
+      ...base,
       [field]: value,
       slug:
-        field === 'title' && (!current.slug || current.slug === slugify(current.title))
+        field === 'title' && (!base.slug || base.slug === slugify(base.title))
           ? slugify(String(value))
-          : current.slug,
-    }))
+          : base.slug,
+      })
+    })
   }
 
   async function deleteModule() {

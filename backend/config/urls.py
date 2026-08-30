@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/grades/', include('grades.urls')),
     path('api/gamification/', include('gamification.urls')),
     path('api/overview/', include('overview.urls')),
+    path('api/jobs/', include('jobs.urls')),
 ]
 
 if settings.DEBUG:

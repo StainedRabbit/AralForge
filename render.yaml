@@ -6,9 +6,10 @@ services:
     branch: main
     region: singapore
     plan: starter
+    numInstances: 2
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --workers 3 --timeout 120 config.wsgi:application
+    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --worker-class gthread --workers 3 --threads 4 --timeout 120 config.wsgi:application
     preDeployCommand: python manage.py migrate --noinput
     healthCheckPath: /api/health/
     autoDeployTrigger: checksPass
@@ -39,6 +40,10 @@ services:
         value: "60"
       - key: API_SLOW_REQUEST_MS
         value: "750"
+      - key: API_DB_TIMING_ENABLED
+        value: "True"
+      - key: REDIS_URL
+        sync: false
 
   - type: web
     name: aralforge-api-production
@@ -46,9 +51,10 @@ services:
     branch: production
     region: singapore
     plan: starter
+    numInstances: 2
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --workers 3 --timeout 120 config.wsgi:application
+    dockerCommand: gunicorn --bind 0.0.0.0:$PORT --worker-class gthread --workers 3 --threads 4 --timeout 120 config.wsgi:application
     preDeployCommand: python manage.py migrate --noinput
     healthCheckPath: /api/health/
     autoDeployTrigger: checksPass
@@ -79,3 +85,79 @@ services:
         value: "60"
       - key: API_SLOW_REQUEST_MS
         value: "750"
+      - key: API_DB_TIMING_ENABLED
+        value: "False"
+      - key: REDIS_URL
+        sync: false
+
+  - type: worker
+    name: aralforge-worker-staging
+    runtime: docker
+    branch: main
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A config worker --loglevel=info --concurrency=2
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: SUPABASE_S3_REGION
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: aralforge-media-staging
+      - key: REDIS_URL
+        sync: false
+
+  - type: worker
+    name: aralforge-worker-production
+    runtime: docker
+    branch: production
+    region: singapore
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A config worker --loglevel=info --concurrency=2
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: SUPABASE_S3_REGION
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: aralforge-media-production
+      - key: REDIS_URL
+        sync: false

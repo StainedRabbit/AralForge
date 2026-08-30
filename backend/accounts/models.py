@@ -11,6 +11,12 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
     must_change_password = models.BooleanField(default=False)
 
+    class Meta(AbstractUser.Meta):
+        indexes = [
+            models.Index(fields=['role', 'is_active'], name='user_role_active_idx'),
+            models.Index(fields=['last_name', 'first_name', 'id'], name='user_name_order_idx'),
+        ]
+
     @property
     def is_admin_teacher(self):
         return self.role in {self.Role.ADMIN, self.Role.TEACHER} or self.is_superuser

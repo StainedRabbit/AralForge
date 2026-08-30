@@ -14,6 +14,7 @@ import type {
   ModuleActivity,
   ModuleActivityAnswer,
   ModuleActivityAttempt,
+  MainActivityState,
   ModuleActivityMatchingPair,
   ModuleActivityQuestion,
   ModuleActivityQuestionChoice,
@@ -45,6 +46,12 @@ export type AuthedRequest = <T>(
   options?: RequestOptions,
 ) => Promise<T>
 
+export type LearningContextMetadata = {
+  context_type: 'CLASS' | 'PERSONAL'
+  schedule: number | null
+  label: string
+}
+
 export type RouteData = {
   users: User[]
   currentUser: User | null
@@ -61,12 +68,15 @@ export type RouteData = {
   lessonAssets: ModuleLessonAsset[]
   lessonExamples: ModuleLessonExample[]
   lessonProgress: ModuleLessonProgress[]
+  learningContext: LearningContextMetadata | null
+  legacyHistoryCounts: Record<number, number>
   moduleAccess: ModuleAccess[]
   activities: ModuleActivity[]
   activityQuestions: ModuleActivityQuestion[]
   activityChoices: ModuleActivityQuestionChoice[]
   activityMatchingPairs: ModuleActivityMatchingPair[]
   activityAttempts: ModuleActivityAttempt[]
+  activityStates: MainActivityState[]
   activityAnswers: ModuleActivityAnswer[]
   submissions: ModuleActivitySubmission[]
   progress: ModuleProgress[]

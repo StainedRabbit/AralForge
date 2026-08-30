@@ -8,7 +8,7 @@ from learning_modules.models import (
 from subjects.models import ScheduleStudent, Subject
 
 from .models import GradeCategory, GradeItem, GradeItemSourceType, GradingTemplate, SubjectGradingPolicy
-from .source_sync import clear_automatic_scores, sync_items
+from .source_sync import clear_automatic_scores, sync_activity_attempt_target, sync_items
 
 
 @receiver(post_save, sender=Subject)
@@ -24,12 +24,44 @@ def apply_default_grading_template(sender, instance, created, **kwargs):
         SubjectGradingPolicy.objects.get_or_create(subject=instance)
 
 
-def recompute_subject_students(subject):
+RECOMPUTE_INLINE_LIMIT = 250
+
+
+def recompute_subject_students_now(subject, job=None):
     from .services import recompute_all_for_student
 
-    for schedule in subject.schedules.all():
-        for enrollment in schedule.students.filter(is_active=True).select_related('student'):
+    processed = 0
+    schedules = subject.schedules.all().prefetch_related('grade_items__grade_category')
+    for schedule in schedules:
+        enrollments = schedule.students.filter(is_active=True).select_related('student').iterator(chunk_size=200)
+        for enrollment in enrollments:
             recompute_all_for_student(enrollment.student, schedule)
+            processed += 1
+            if job and processed % 100 == 0:
+                job.progress = processed
+                job.save(update_fields=('progress',))
+    return processed
+
+
+def recompute_subject_students(subject):
+    enrollment_count = ScheduleStudent.objects.filter(
+        schedule__subject=subject,
+        schedule__is_active=True,
+        is_active=True,
+    ).count()
+    if enrollment_count <= RECOMPUTE_INLINE_LIMIT:
+        return recompute_subject_students_now(subject)
+
+    from jobs.models import BackgroundJob
+    from jobs.tasks import enqueue, recalculate_subject_grades
+
+    return enqueue(
+        recalculate_subject_grades,
+        job_type=BackgroundJob.Type.GRADE_RECALCULATION,
+        payload={'subject_id': subject.id},
+        total=enrollment_count,
+        idempotency_key=f'grade-recalculation:subject:{subject.id}',
+    )
 
 
 @receiver(post_save, sender=SubjectGradingPolicy)
@@ -60,8 +92,13 @@ def _items_for_source(source_type, field, source_id):
 
 @receiver(post_save, sender=ModuleActivityAttempt)
 @receiver(post_delete, sender=ModuleActivityAttempt)
-def sync_interactive_activity_scores(sender, instance, **kwargs):
-    sync_items(_items_for_source(GradeItemSourceType.MODULE_ACTIVITY, 'module_activity_id', instance.activity_id))
+def sync_interactive_activity_scores(sender, instance, update_fields=None, **kwargs):
+    grading_fields = {'score', 'max_score', 'submitted_at', 'status'}
+    if update_fields is not None and not grading_fields.intersection(update_fields):
+        return
+    if instance.status != ModuleActivityAttempt.Status.SUBMITTED:
+        return
+    sync_activity_attempt_target(instance)
 
 
 @receiver(post_save, sender=ModuleActivitySubmission)

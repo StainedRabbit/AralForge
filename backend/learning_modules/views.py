@@ -1,15 +1,17 @@
 from decimal import Decimal, InvalidOperation
+import json
 
 from django.http import FileResponse
 from django.db import transaction
-from django.db.models import Max, Prefetch
+from django.db.models import Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
+from accounts.models import User
 from accounts.serializers import UserSerializer
 from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
-from grades.models import GradeCategory, GradeItem
+from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
 from subjects.models import ScheduleStudent, Subject, SubjectSchedule
 from subjects.serializers import (
@@ -24,7 +26,6 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
-    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -33,10 +34,12 @@ from .models import (
     ModuleLessonAsset,
     ModuleLessonExample,
     ModuleLessonProgress,
+    LearningContextType,
     ModuleProgress,
     ModuleTopic,
     ModuleTopicProgress,
     active_module_access_filter,
+    add_calendar_months,
     module_enrollment_filter,
     user_has_module_access,
     user_has_module_class_access,
@@ -47,7 +50,6 @@ from .serializers import (
     ModuleActivityAnswerSerializer,
     ModuleActivityAttemptSerializer,
     ModuleActivityAttemptSummarySerializer,
-    ModuleActivityExtensionSerializer,
     ModuleActivityMatchingPairSerializer,
     ModuleActivityQuestionChoiceSerializer,
     ModuleActivityQuestionSerializer,
@@ -61,6 +63,7 @@ from .serializers import (
     ModuleLessonProgressSerializer,
     ModuleProgressSerializer,
     ModuleSerializer,
+    ModuleSummarySerializer,
     ModuleTopicProgressSerializer,
     ModuleTopicSerializer,
 )
@@ -70,7 +73,24 @@ from .services.activity_snapshots import (
     normalize_draft_answers,
     validate_activity_window,
 )
-from .services.pdf_generation import generate_topic_pdf
+from .services.activity_state import (
+    activity_states_for_attempts,
+    evaluate_main_activity_state,
+)
+from .services.learning_context import (
+    learning_context_query,
+    request_learning_context,
+    resolve_learning_context,
+)
+
+
+def bounded_int(value, default=0, maximum=None):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    number = max(number, 0)
+    return min(number, maximum) if maximum is not None else number
 
 
 def serialize_main_activity_editor_workspace(activity, request):
@@ -82,9 +102,16 @@ def serialize_main_activity_editor_workspace(activity, request):
             'matching_pairs': [],
             'linked_class_count': 0,
         }
-    questions = list(
-        activity.questions.prefetch_related('choices', 'matching_pairs').order_by('order', 'id'),
-    )
+    questions = list(activity.questions.prefetch_related(
+        Prefetch(
+            'choices',
+            queryset=ModuleActivityQuestionChoice.objects.order_by('order', 'id'),
+        ),
+        Prefetch(
+            'matching_pairs',
+            queryset=ModuleActivityMatchingPair.objects.order_by('order', 'id'),
+        ),
+    ).order_by('order', 'id'))
     choices = [choice for question in questions for choice in question.choices.all()]
     matching_pairs = [
         pair for question in questions for pair in question.matching_pairs.all()
@@ -112,6 +139,113 @@ def serialize_main_activity_editor_workspace(activity, request):
             schedule__isnull=False,
         ).values('schedule_id').distinct().count(),
     }
+
+
+def serialize_attempt_with_state(attempt, request, *, created=False):
+    context_attempts = ModuleActivityAttempt.objects.filter(
+        activity=attempt.activity,
+        student=attempt.student,
+        context_type=attempt.context_type,
+        schedule=attempt.schedule,
+    ).select_related('activity')
+    return {
+        'attempt': ModuleActivityAttemptSerializer(
+            attempt,
+            context={'request': request},
+        ).data,
+        'state': evaluate_main_activity_state(attempt.activity, context_attempts),
+        'created': created,
+    }
+
+
+def reject_non_atomic_lesson_activity_edit(activity):
+    """Keep lesson Main Activity revisions behind the atomic editor contract."""
+    if activity and activity.lesson_id:
+        raise serializers.ValidationError({
+            'detail': (
+                'Lesson Main Activities must be edited through the atomic-save endpoint.'
+            ),
+        })
+
+
+def prepare_period_reassignments(activity, target_period, raw_reassignments):
+    if not activity or target_period == activity.grading_period:
+        return []
+
+    linked_items = list(
+        GradeItem.objects.select_for_update(of=('self',)).filter(
+            module_activity=activity,
+            schedule__isnull=False,
+            schedule__is_active=True,
+            schedule__school_year_semester__is_active=True,
+        ).select_related('schedule', 'grade_category')
+    )
+    if not linked_items:
+        return []
+
+    linked_schedule_ids = [item.schedule_id for item in linked_items]
+    if len(linked_schedule_ids) != len(set(linked_schedule_ids)):
+        raise serializers.ValidationError({
+            'period_reassignments': 'Resolve duplicate class links before changing the grading period.',
+        })
+    if not isinstance(raw_reassignments, list):
+        raise serializers.ValidationError({
+            'period_reassignments': 'Choose a replacement Quiz category for every linked class.',
+        })
+
+    parsed = {}
+    row_errors = {}
+    for index, row in enumerate(raw_reassignments):
+        if not isinstance(row, dict):
+            row_errors[index] = {'detail': 'Each replacement must be an object.'}
+            continue
+        try:
+            schedule_id = int(row.get('schedule'))
+            category_id = int(row.get('grade_category'))
+        except (TypeError, ValueError):
+            row_errors[index] = {'detail': 'A valid class and Quiz category are required.'}
+            continue
+        if schedule_id in parsed:
+            row_errors[index] = {'schedule': 'Each linked class may appear only once.'}
+            continue
+        parsed[schedule_id] = category_id
+
+    expected = set(linked_schedule_ids)
+    provided = set(parsed)
+    if provided != expected:
+        missing = sorted(expected - provided)
+        unexpected = sorted(provided - expected)
+        detail = []
+        if missing:
+            detail.append(f'Missing linked classes: {missing}.')
+        if unexpected:
+            detail.append(f'Unexpected classes: {unexpected}.')
+        row_errors['detail'] = ' '.join(detail)
+
+    categories = {
+        category.id: category
+        for category in GradeCategory.objects.select_related('subject').filter(pk__in=parsed.values())
+    }
+    prepared = []
+    for item in linked_items:
+        category = categories.get(parsed.get(item.schedule_id))
+        errors = {}
+        if not category:
+            errors['grade_category'] = 'This grade category does not exist.'
+        elif category.category != GradeCategoryChoices.QUIZ:
+            errors['grade_category'] = 'Select an existing Quiz category.'
+        elif category.grading_period != target_period:
+            errors['grade_category'] = 'The Quiz category must use the new activity grading period.'
+        elif category.subject_id != item.schedule.subject_id:
+            errors['grade_category'] = 'This Quiz category does not belong to the linked class subject.'
+        if errors:
+            row_errors[item.schedule_id] = errors
+        elif category:
+            prepared.append((item, category))
+
+    if row_errors:
+        raise serializers.ValidationError({'period_reassignments': row_errors})
+    return prepared
 
 
 def validate_atomic_question(item, index, enforce_readiness=False):
@@ -200,10 +334,24 @@ class ModuleViewSet(viewsets.ModelViewSet):
     search_fields = ('title', 'description', 'slug')
 
     def get_queryset(self):
-        queryset = Module.objects.select_related('subject').prefetch_related(
-            'subjects',
+        published_topics = Prefetch(
             'topics',
+            queryset=ModuleTopic.objects.filter(is_published=True).order_by('order', 'id'),
+            to_attr='_published_topics',
         )
+        prefetches = ['subjects', published_topics]
+        if self.request.user.is_authenticated and not self.request.user.is_admin_teacher:
+            prefetches.append(Prefetch(
+                'access_grants',
+                queryset=ModuleAccess.objects.filter(
+                    student=self.request.user,
+                    is_active=True,
+                    activated_by__isnull=False,
+                    expires_at__gt=timezone.now(),
+                ).select_related('activated_by').order_by('-updated_at'),
+                to_attr='_current_user_grants',
+            ))
+        queryset = Module.objects.select_related('subject').prefetch_related(*prefetches)
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -214,6 +362,11 @@ class ModuleViewSet(viewsets.ModelViewSet):
             module_enrollment_filter(self.request.user)
             | active_module_access_filter(self.request.user),
         ).distinct()
+
+    def get_serializer_class(self):
+        if self.action == 'list' and self.request.query_params.get('view') == 'summary':
+            return ModuleSummarySerializer
+        return ModuleSerializer
 
     @decorators.action(
         detail=True,
@@ -238,6 +391,7 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 'lesson_progress': [],
                 'activities': [],
                 'activity_attempts': [],
+                'activity_states': [],
                 'subjects': SubjectSerializer(
                     subjects,
                     many=True,
@@ -251,20 +405,38 @@ class ModuleViewSet(viewsets.ModelViewSet):
         if not request.user.is_admin_teacher:
             topics = topics.filter(is_published=True)
             lessons = lessons.filter(is_published=True, topic__is_published=True)
-            activities = activities.filter(is_published=True)
-            activities = activities.prefetch_related(Prefetch(
-                'extensions',
-                queryset=ModuleActivityExtension.objects.filter(student=request.user),
-            ))
+            activities = activities.filter(is_published=True).filter(
+                Q(lesson__isnull=True)
+                | Q(lesson__is_published=True, lesson__topic__is_published=True)
+            )
+        activities = list(activities)
         examples = ModuleLessonExample.objects.filter(lesson__in=lessons)
-        lesson_progress = ModuleLessonProgress.objects.filter(
-            lesson__in=lessons, student=request.user,
-        ) if not request.user.is_admin_teacher else ModuleLessonProgress.objects.none()
-        attempts = ModuleActivityAttempt.objects.filter(
-            activity__in=activities, student=request.user,
-        ).defer(
-            'question_snapshot', 'draft_answers',
-        ) if not request.user.is_admin_teacher else ModuleActivityAttempt.objects.none()
+        legacy_history_counts = {}
+        if not request.user.is_admin_teacher:
+            context_type, schedule = request_learning_context(request, module)
+            context_filter = learning_context_query(context_type, schedule)
+            lesson_progress = ModuleLessonProgress.objects.filter(
+                lesson__in=lessons,
+                student=request.user,
+                **context_filter,
+            )
+            attempts = list(ModuleActivityAttempt.objects.filter(
+                activity__in=activities,
+                student=request.user,
+                **context_filter,
+            ).defer('question_snapshot', 'draft_answers'))
+            legacy_rows = ModuleActivityAttempt.objects.filter(
+                activity__in=activities,
+                student=request.user,
+                context_type=LearningContextType.LEGACY,
+            ).values('activity_id').annotate(count=Count('id'))
+            legacy_history_counts = {
+                str(row['activity_id']): row['count']
+                for row in legacy_rows
+            }
+        else:
+            lesson_progress = ModuleLessonProgress.objects.none()
+            attempts = []
         return response.Response({
             'module': ModuleSerializer(module, context=context).data,
             'topics': ModuleTopicSerializer(topics, many=True, context=context).data,
@@ -281,6 +453,23 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 subjects,
                 many=True, context=context,
             ).data,
+            'activity_states': (
+                activity_states_for_attempts(activities, attempts)
+                if not request.user.is_admin_teacher
+                else []
+            ),
+            'learning_context': {
+                'context_type': context_type if not request.user.is_admin_teacher else None,
+                'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
+                'label': (
+                    f'{schedule.subject.code} {schedule.section}'.strip()
+                    if not request.user.is_admin_teacher and schedule
+                    else 'Personal Study'
+                    if not request.user.is_admin_teacher
+                    else 'Teacher preview'
+                ),
+            },
+            'legacy_history_counts': legacy_history_counts,
         })
 
     @decorators.action(
@@ -304,25 +493,91 @@ class ModuleViewSet(viewsets.ModelViewSet):
             module=module,
             is_published=True,
         )
-        active_enrollments = ScheduleStudent.objects.filter(
+        enrollment_scope = ScheduleStudent.objects.filter(
             is_active=True,
             schedule__is_active=True,
             schedule__subject_id__in=subject_ids,
             student__role='STUDENT',
-        ).select_related('student', 'schedule', 'schedule__subject')
-        grant_student_ids = ModuleAccess.objects.filter(
-            module=module,
-            student__role='STUDENT',
-        ).values_list('student_id', flat=True)
-        student_ids = set(
-            active_enrollments.values_list('student_id', flat=True),
-        ) | set(grant_student_ids)
-        students = active_enrollments.model._meta.get_field(
-            'student',
-        ).remote_field.model.objects.filter(
-            id__in=student_ids,
-        ).order_by('last_name', 'first_name', 'username')
+        )
+        schedule_id = request.query_params.get('schedule', '').strip()
+        if schedule_id.isdigit():
+            enrollment_scope = enrollment_scope.filter(schedule_id=int(schedule_id))
 
+        now = timezone.now()
+        grants_for_student = ModuleAccess.objects.filter(
+            module=module,
+            student_id=OuterRef('pk'),
+        )
+        active_grants_for_student = grants_for_student.filter(
+            is_active=True,
+            activated_by__isnull=False,
+            expires_at__gt=now,
+        )
+        expired_grants_for_student = grants_for_student.filter(
+            is_active=True,
+            activated_by__isnull=False,
+            expires_at__lte=now,
+        )
+        inactive_grants_for_student = grants_for_student.filter(is_active=False)
+        latest_activation = grants_for_student.order_by(
+            '-updated_at', '-activated_at', '-id',
+        ).values('activated_at')[:1]
+
+        students = User.objects.filter(role=User.Role.STUDENT).annotate(
+            _has_enrollment=Exists(enrollment_scope.filter(student_id=OuterRef('pk'))),
+            _has_grant=Exists(grants_for_student),
+            _has_active_grant=Exists(active_grants_for_student),
+            _has_expired_grant=Exists(expired_grants_for_student),
+            _has_inactive_grant=Exists(inactive_grants_for_student),
+            _latest_activation=Subquery(latest_activation),
+        )
+        if schedule_id.isdigit():
+            students = students.filter(_has_enrollment=True)
+        else:
+            students = students.filter(Q(_has_enrollment=True) | Q(_has_grant=True))
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            students = students.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(username__icontains=search)
+                | Q(email__icontains=search)
+                | Q(student_profile__student_number__icontains=search)
+            )
+        access_filter = request.query_params.get('access_status', '').strip().upper()
+        if access_filter == 'ACTIVE':
+            students = students.filter(_has_active_grant=True)
+        elif access_filter == 'EXPIRED':
+            students = students.filter(_has_active_grant=False, _has_expired_grant=True)
+        elif access_filter == 'REVOKED':
+            students = students.filter(
+                _has_active_grant=False,
+                _has_expired_grant=False,
+                _has_inactive_grant=True,
+            )
+        elif access_filter == 'LOCKED':
+            students = students.filter(_has_grant=False)
+        elif access_filter == 'AVAILED':
+            students = students.filter(_has_grant=True)
+
+        students = students.order_by(
+            F('_latest_activation').desc(nulls_last=True),
+            'last_name',
+            'first_name',
+            'username',
+            'id',
+        )
+        count = students.count()
+        limit_param = request.query_params.get('limit')
+        limit = bounded_int(limit_param, default=count, maximum=100) if limit_param is not None else count
+        offset = bounded_int(request.query_params.get('offset'), default=0)
+        page_students = list(students[offset:offset + limit])
+        page_student_ids = [student.id for student in page_students]
+
+        active_enrollments = enrollment_scope.filter(
+            student_id__in=page_student_ids,
+        ).select_related('student', 'schedule', 'schedule__subject').order_by('schedule_id', 'id')
         enrollment_by_student = {}
         for enrollment in active_enrollments:
             enrollment_by_student.setdefault(enrollment.student_id, enrollment)
@@ -330,27 +585,30 @@ class ModuleViewSet(viewsets.ModelViewSet):
         lesson_ids = list(published_lessons.values_list('id', flat=True))
         activity_ids = list(published_activities.values_list('id', flat=True))
         now = timezone.now()
+        grants_by_student = {}
+        for grant in ModuleAccess.objects.filter(
+            module=module,
+            student_id__in=page_student_ids,
+        ).order_by('student_id', '-updated_at', '-activated_at'):
+            grants_by_student.setdefault(grant.student_id, []).append(grant)
+        progress_by_student = {}
+        for progress in ModuleLessonProgress.objects.filter(
+            lesson_id__in=lesson_ids,
+            student_id__in=page_student_ids,
+        ).select_related('lesson').order_by('student_id', '-last_viewed_at'):
+            progress_by_student.setdefault(progress.student_id, []).append(progress)
+        submissions_by_student = {}
+        for submission in ModuleActivitySubmission.objects.filter(
+            activity_id__in=activity_ids,
+            student_id__in=page_student_ids,
+        ):
+            submissions_by_student.setdefault(submission.student_id, []).append(submission)
         rows = []
 
-        for student in students:
-            grants = list(
-                ModuleAccess.objects.filter(
-                    module=module,
-                    student=student,
-                ).order_by('-updated_at', '-activated_at'),
-            )
-            lesson_progress = list(
-                ModuleLessonProgress.objects.filter(
-                    lesson_id__in=lesson_ids,
-                    student=student,
-                ).select_related('lesson').order_by('-last_viewed_at'),
-            )
-            submissions = list(
-                ModuleActivitySubmission.objects.filter(
-                    activity_id__in=activity_ids,
-                    student=student,
-                ),
-            )
+        for student in page_students:
+            grants = grants_by_student.get(student.id, [])
+            lesson_progress = progress_by_student.get(student.id, [])
+            submissions = submissions_by_student.get(student.id, [])
             latest_grant = grants[0] if grants else None
             completed_count = sum(
                 1 for progress in lesson_progress if progress.completed_at
@@ -409,29 +667,34 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 },
             })
 
+        all_student_ids = students.values_list('id', flat=True)
+        completed_student_count = 0
+        if lesson_ids:
+            completed_student_count = ModuleLessonProgress.objects.filter(
+                lesson_id__in=lesson_ids,
+                student_id__in=all_student_ids,
+                completed_at__isnull=False,
+            ).values('student_id').annotate(
+                completed=Count('lesson_id', distinct=True),
+            ).filter(completed=len(lesson_ids)).count()
         summary = {
             'module': module.id,
             'module_title': module.title,
-            'total_students': len(rows),
+            'total_students': count,
             'total_lessons': len(lesson_ids),
             'total_activities': len(activity_ids),
-            'active_access_count': sum(
-                1 for row in rows if row['access_status'] == 'ACTIVE'
-            ),
-            'locked_count': sum(
-                1 for row in rows if row['access_status'] == 'LOCKED'
-            ),
-            'completed_count': sum(
-                1
-                for row in rows
-                if row['lesson_progress']['total_count']
-                and row['lesson_progress']['completed_count']
-                == row['lesson_progress']['total_count']
-            ),
-            'ungraded_submission_count': sum(
-                row['activity_submissions']['ungraded_count']
-                for row in rows
-            ),
+            'active_access_count': students.filter(_has_active_grant=True).count(),
+            'locked_count': students.filter(_has_grant=False).count(),
+            'completed_count': completed_student_count,
+            'ungraded_submission_count': ModuleActivitySubmission.objects.filter(
+                activity_id__in=activity_ids,
+                student_id__in=all_student_ids,
+                graded_at__isnull=True,
+                score__isnull=True,
+            ).count(),
+            'count': count,
+            'next': offset + limit if offset + limit < count else None,
+            'previous': max(offset - limit, 0) if offset > 0 else None,
             'students': rows,
         }
         return response.Response(summary)
@@ -446,11 +709,40 @@ def pdf_file_response(instance, missing_message):
     )
 
 
+def enqueue_topic_pdf(topic, owner):
+    from jobs.models import BackgroundJob
+    from jobs.tasks import enqueue, generate_topic_pdf_job
+
+    return enqueue(
+        generate_topic_pdf_job,
+        job_type=BackgroundJob.Type.PDF_GENERATION,
+        owner=owner,
+        payload={'topic_id': topic.id},
+        total=1,
+        idempotency_key=f'topic-pdf:{topic.id}',
+    )
+
+
 def module_subject_ids(module):
     subject_ids = set(module.subjects.values_list('id', flat=True))
     if module.subject_id:
         subject_ids.add(module.subject_id)
     return subject_ids
+
+
+def filter_requested_learning_context(queryset, request):
+    schedule_id = request.query_params.get('schedule')
+    context_type = request.query_params.get('context')
+    if schedule_id:
+        return queryset.filter(
+            context_type=LearningContextType.CLASS,
+            schedule_id=schedule_id,
+        )
+    if context_type == LearningContextType.PERSONAL:
+        return queryset.filter(context_type=LearningContextType.PERSONAL)
+    if context_type == LearningContextType.LEGACY:
+        return queryset.filter(context_type=LearningContextType.LEGACY)
+    return queryset
 
 
 def progress_percent(value, total):
@@ -515,6 +807,70 @@ class ModuleAccessViewSet(viewsets.ModelViewSet):
             **({'activated_by': self.request.user} if next_active else {}),
         )
 
+    @decorators.action(detail=False, methods=['post'], url_path='batch-activate')
+    @transaction.atomic
+    def batch_activate(self, request):
+        if not request.user.is_admin_teacher:
+            self.permission_denied(request)
+        module = get_object_or_404(Module, pk=request.data.get('module'))
+        schedule = get_object_or_404(
+            SubjectSchedule.objects.select_related('subject'),
+            pk=request.data.get('schedule'),
+        )
+        if schedule.subject_id not in module_subject_ids(module):
+            raise serializers.ValidationError({
+                'module': 'This module is not assigned to the selected class subject.',
+            })
+        student_ids = list(ScheduleStudent.objects.filter(
+            schedule=schedule,
+            is_active=True,
+            student__role=User.Role.STUDENT,
+        ).values_list('student_id', flat=True))
+        existing = {
+            grant.student_id: grant
+            for grant in ModuleAccess.objects.select_for_update().filter(
+                module=module,
+                student_id__in=student_ids,
+                access_type=ModuleAccess.AccessType.ENROLLED,
+            )
+        }
+        expires_at = add_calendar_months(timezone.now(), 5)
+        updated_at = timezone.now()
+        notes = str(request.data.get('notes') or '')[:500]
+        creates = []
+        updates = []
+        for student_id in student_ids:
+            grant = existing.get(student_id)
+            if grant:
+                grant.is_active = True
+                grant.activated_by = request.user
+                grant.expires_at = expires_at
+                grant.notes = notes
+                grant.updated_at = updated_at
+                updates.append(grant)
+            else:
+                creates.append(ModuleAccess(
+                    module=module,
+                    student_id=student_id,
+                    access_type=ModuleAccess.AccessType.ENROLLED,
+                    is_active=True,
+                    activated_by=request.user,
+                    expires_at=expires_at,
+                    notes=notes,
+                ))
+        if creates:
+            ModuleAccess.objects.bulk_create(creates, batch_size=500)
+        if updates:
+            ModuleAccess.objects.bulk_update(
+                updates, ('is_active', 'activated_by', 'expires_at', 'notes', 'updated_at'),
+                batch_size=500,
+            )
+        return response.Response({
+            'created_count': len(creates),
+            'updated_count': len(updates),
+            'student_count': len(student_ids),
+        })
+
 
 class ModuleTopicViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleTopicSerializer
@@ -558,13 +914,12 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
         ):
             raise PermissionDenied('This topic PDF is not available for your account.')
         if not topic.pdf_file and topic.is_published:
-            try:
-                topic = generate_topic_pdf(topic)
-            except Exception as error:
-                return response.Response(
-                    {'detail': f'The topic PDF could not be generated: {error}'},
-                    status=503,
-                )
+            job = enqueue_topic_pdf(topic, request.user)
+            return response.Response({
+                'detail': 'The topic PDF is being generated.',
+                'job': str(job.id),
+                'status': job.status,
+            }, status=status.HTTP_202_ACCEPTED)
         return pdf_file_response(topic, 'This topic does not have a PDF.')
 
     @decorators.action(
@@ -578,17 +933,12 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
             self.permission_denied(request)
 
         topic = self.get_object()
-        try:
-            topic = generate_topic_pdf(topic)
-        except Exception as error:
-            return response.Response(
-                {'detail': f'The topic PDF could not be generated: {error}'},
-                status=503,
-            )
-
-        return response.Response(
-            self.get_serializer(topic).data,
-        )
+        job = enqueue_topic_pdf(topic, request.user)
+        return response.Response({
+            'detail': 'The topic PDF is being generated.',
+            'job': str(job.id),
+            'status': job.status,
+        }, status=status.HTTP_202_ACCEPTED)
 
 
 class ModuleLessonViewSet(viewsets.ModelViewSet):
@@ -755,11 +1105,39 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             is_published=True,
             module__is_published=True,
         ).filter(
+            Q(lesson__isnull=True)
+            | Q(lesson__is_published=True, lesson__topic__is_published=True)
+        ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
-        ).distinct().prefetch_related(Prefetch(
-            'extensions',
-            queryset=ModuleActivityExtension.objects.filter(student=self.request.user),
-        ))
+        ).distinct()
+
+    def create(self, request, *args, **kwargs):
+        if request.data.get('lesson') not in (None, ''):
+            raise serializers.ValidationError({
+                'detail': (
+                    'Lesson Main Activities must be created through the atomic-save endpoint.'
+                ),
+            })
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        activity = self.get_object()
+        reject_non_atomic_lesson_activity_edit(activity)
+        if request.data.get('lesson') not in (None, ''):
+            raise serializers.ValidationError({
+                'detail': (
+                    'Lesson Main Activities must be edited through the atomic-save endpoint.'
+                ),
+            })
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object())
+        return super().destroy(request, *args, **kwargs)
 
     @decorators.action(detail=False, methods=['put'], url_path='atomic-save')
     @transaction.atomic
@@ -778,6 +1156,24 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             activity = ModuleActivity.objects.select_for_update().filter(pk=activity_id).first()
             if not activity:
                 raise serializers.ValidationError({'id': 'Main Activity was not found.'})
+            if 'expected_revision' not in payload:
+                raise serializers.ValidationError({
+                    'expected_revision': 'Provide the activity revision being edited.',
+                })
+            try:
+                expected_revision = int(payload.get('expected_revision'))
+            except (TypeError, ValueError) as error:
+                raise serializers.ValidationError({
+                    'expected_revision': 'Provide a valid activity revision.',
+                }) from error
+            if expected_revision != activity.revision:
+                return response.Response(
+                    {
+                        'detail': 'This Main Activity was changed in another editor.',
+                        'current_revision': activity.revision,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         is_published = bool(payload.get('is_published', False))
         prepared_questions = []
@@ -801,7 +1197,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
                 'module', 'topic', 'lesson', 'title', 'instructions',
                 'activity_type', 'order', 'opens_at', 'due_at', 'allow_late_submissions',
                 'max_attempts', 'passing_score', 'accepts_text', 'accepts_file',
-                'is_published',
+                'grading_period', 'is_published',
             )
             if key in payload
         }
@@ -812,7 +1208,29 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             partial=bool(activity),
         )
         activity_serializer.is_valid(raise_exception=True)
+        target_period = activity_serializer.validated_data.get(
+            'grading_period',
+            getattr(activity, 'grading_period', None),
+        )
+        period_reassignments = prepare_period_reassignments(
+            activity,
+            target_period,
+            payload.get('period_reassignments'),
+        )
         activity = activity_serializer.save()
+        if activity_id:
+            ModuleActivity.objects.filter(pk=activity.pk).update(revision=F('revision') + 1)
+            activity.refresh_from_db(fields=['revision'])
+
+        for item, category in period_reassignments:
+            item_serializer = GradeItemSerializer(
+                item,
+                data={'grade_category': category.id},
+                partial=True,
+                context={'request': request},
+            )
+            item_serializer.is_valid(raise_exception=True)
+            item_serializer.save()
 
         retained_ids = []
         for item in prepared_questions:
@@ -858,9 +1276,11 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         subject_ids = module_subject_ids(activity.module)
         schedules = list(
             SubjectSchedule.objects.filter(
-                subject_id__in=subject_ids,
-                is_active=True,
-            ).select_related('subject', 'school_year_semester', 'school_year_semester__school_year'),
+                Q(subject_id__in=subject_ids, is_active=True)
+                | Q(grade_items__module_activity=activity),
+            ).distinct().select_related(
+                'subject', 'school_year_semester', 'school_year_semester__school_year',
+            ),
         )
         enrollments = list(
             ScheduleStudent.objects.filter(
@@ -890,7 +1310,6 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             'grade_category',
             'module_activity',
         )
-        extensions = activity.extensions.select_related('student').all()
         context = {'request': request}
         return response.Response({
             'users': UserSerializer(students, many=True, context=context).data,
@@ -898,71 +1317,159 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
             'grade_categories': GradeCategorySerializer(categories, many=True, context=context).data,
             'grade_items': GradeItemSerializer(items, many=True, context=context).data,
-            'extensions': ModuleActivityExtensionSerializer(extensions, many=True).data,
             'linked_class_count': len({item.schedule_id for item in items}),
         })
 
-    @decorators.action(detail=True, methods=['get', 'put', 'delete'], url_path='extensions')
-    def extensions(self, request, pk=None):
-        if not request.user.is_admin_teacher:
-            raise PermissionDenied('Only teachers can manage activity extensions.')
-        activity = self.get_object()
-        if request.method == 'GET':
-            extensions = activity.extensions.select_related('student').all()
-            return response.Response(ModuleActivityExtensionSerializer(extensions, many=True).data)
+    @decorators.action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path='start-attempt',
+    )
+    @transaction.atomic
+    def start_attempt(self, request, pk=None):
+        if request.user.is_admin_teacher:
+            raise PermissionDenied('Teacher preview does not create student attempts.')
 
-        student_id = request.data.get('student')
-        if not student_id:
-            raise serializers.ValidationError({'student': 'Select a student.'})
-        if request.method == 'DELETE':
-            activity.extensions.filter(student_id=student_id).delete()
-            return response.Response(status=status.HTTP_204_NO_CONTENT)
+        activity = ModuleActivity.objects.select_for_update(of=('self',)).select_related(
+            'module', 'lesson', 'lesson__topic',
+        ).get(pk=self.get_object().pk)
+        if (
+            not activity.is_published
+            or activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE
+            or not activity.lesson_id
+            or not activity.lesson.is_published
+            or not activity.lesson.topic.is_published
+            or not activity.module.is_published
+            or not user_has_module_access(request.user, activity.module)
+        ):
+            raise PermissionDenied('This activity is not available.')
 
-        entry = ModuleActivityExtensionSerializer(data=request.data)
-        entry.is_valid(raise_exception=True)
-        subject_ids = set(activity.module.subjects.values_list('id', flat=True))
-        if activity.module.subject_id:
-            subject_ids.add(activity.module.subject_id)
-        if not ScheduleStudent.objects.filter(
-            student_id=student_id,
-            schedule__subject_id__in=subject_ids,
-            schedule__is_active=True,
-            is_active=True,
-        ).exists():
-            raise serializers.ValidationError({
-                'student': 'This student is not actively enrolled in a class for this module.',
-            })
-        if activity.due_at and entry.validated_data['due_at'] <= activity.due_at:
-            raise serializers.ValidationError({
-                'due_at': 'An extension must be later than the activity due date.',
-            })
-        extension, _ = ModuleActivityExtension.objects.update_or_create(
-            activity=activity,
-            student_id=student_id,
-            defaults={'due_at': entry.validated_data['due_at'], 'granted_by': request.user},
+        context_type, schedule = resolve_learning_context(
+            request.user,
+            activity.module,
+            schedule=request.data.get('schedule') or request.query_params.get('schedule'),
+            context_type=(
+                request.data.get('context_type')
+                or request.query_params.get('context')
+            ),
         )
-        return response.Response(ModuleActivityExtensionSerializer(extension).data)
+        context_filter = learning_context_query(context_type, schedule)
+        attempts = ModuleActivityAttempt.objects.select_for_update().filter(
+            activity=activity,
+            student=request.user,
+            **context_filter,
+        )
+        paper = attempts.filter(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        ).first()
+        if paper:
+            return response.Response(
+                {
+                    'detail': 'A paper submission is already the final record for this activity.',
+                    'state': evaluate_main_activity_state(activity, attempts),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        existing = attempts.filter(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            status=ModuleActivityAttempt.Status.IN_PROGRESS,
+        ).first()
+        if existing:
+            ensure_attempt_snapshot(existing)
+            return response.Response(
+                serialize_attempt_with_state(existing, request, created=False),
+            )
+        state = evaluate_main_activity_state(activity, attempts)
+        if not state['can_start_attempt']:
+            raise serializers.ValidationError({
+                'detail': 'You have reached the maximum number of attempts.',
+            })
+        validate_activity_window(activity, request.user)
+        attempt_number = attempts.aggregate(maximum=Max('attempt_number'))['maximum'] or 0
+        attempt = ModuleActivityAttempt.objects.create(
+            activity=activity,
+            student=request.user,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            context_type=context_type,
+            schedule=schedule,
+            attempt_number=attempt_number + 1,
+            activity_revision=activity.revision,
+            passing_score_snapshot=activity.passing_score,
+        )
+        ensure_attempt_snapshot(attempt)
+        return response.Response(
+            serialize_attempt_with_state(attempt, request, created=True),
+            status=status.HTTP_201_CREATED,
+        )
 
     @decorators.action(detail=True, methods=['get'])
     def workspace(self, request, pk=None):
         activity = self.get_object()
         questions = ModuleActivityQuestion.objects.filter(activity=activity).prefetch_related(
-            'choices', 'matching_pairs',
+            Prefetch(
+                'choices',
+                queryset=ModuleActivityQuestionChoice.objects.order_by('order', 'id'),
+            ),
+            Prefetch(
+                'matching_pairs',
+                queryset=ModuleActivityMatchingPair.objects.order_by('order', 'id'),
+            ),
         )
         if not request.user.is_admin_teacher:
             questions = questions.filter(is_published=True)
         attempts = ModuleActivityAttempt.objects.filter(activity=activity)
         submissions = ModuleActivitySubmission.objects.filter(activity=activity)
         if not request.user.is_admin_teacher:
-            attempts = attempts.filter(student=request.user)
+            context_type, schedule = request_learning_context(request, activity.module)
+            attempts = attempts.filter(
+                student=request.user,
+                **learning_context_query(context_type, schedule),
+            )
             submissions = submissions.filter(student=request.user)
+        attempts = list(attempts)
         context = {'request': request}
         return response.Response({
             'activity': ModuleActivitySerializer(activity, context=context).data,
             'module': ModuleSerializer(activity.module, context=context).data,
             'questions': ModuleActivityQuestionSerializer(questions, many=True, context=context).data,
-            'attempts': ModuleActivityAttemptSerializer(attempts, many=True, context=context).data,
+            'attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
             'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,
+            'learning_context': {
+                'context_type': context_type if not request.user.is_admin_teacher else None,
+                'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
+            },
+            'activity_state': (
+                evaluate_main_activity_state(activity, attempts)
+                if not request.user.is_admin_teacher
+                else None
+            ),
+            'legacy_history_count': ModuleActivityAttempt.objects.filter(
+                activity=activity,
+                student=request.user,
+                context_type=LearningContextType.LEGACY,
+            ).count() if not request.user.is_admin_teacher else 0,
+        })
+
+    @decorators.action(detail=True, methods=['get'], url_path='legacy-history')
+    def legacy_history(self, request, pk=None):
+        if request.user.is_admin_teacher:
+            raise serializers.ValidationError({
+                'detail': 'Use the teacher gradebook to review student history.',
+            })
+        activity = self.get_object()
+        attempts = ModuleActivityAttempt.objects.filter(
+            activity=activity,
+            student=request.user,
+            context_type=LearningContextType.LEGACY,
+        ).defer('question_snapshot', 'draft_answers')
+        return response.Response({
+            'attempts': ModuleActivityAttemptSummarySerializer(
+                attempts,
+                many=True,
+                context={'request': request},
+            ).data,
         })
 
 
@@ -976,7 +1483,16 @@ class ModuleActivityQuestionViewSet(viewsets.ModelViewSet):
             'activity__module',
             'activity__lesson',
             'activity__lesson__topic',
-        ).prefetch_related('choices', 'matching_pairs')
+        ).prefetch_related(
+            Prefetch(
+                'choices',
+                queryset=ModuleActivityQuestionChoice.objects.order_by('order', 'id'),
+            ),
+            Prefetch(
+                'matching_pairs',
+                queryset=ModuleActivityMatchingPair.objects.order_by('order', 'id'),
+            ),
+        )
 
         if self.request.user.is_admin_teacher:
             return queryset
@@ -991,6 +1507,27 @@ class ModuleActivityQuestionViewSet(viewsets.ModelViewSet):
         ).filter(
             active_module_access_filter(self.request.user, prefix='activity__module__'),
         ).distinct()
+
+    def create(self, request, *args, **kwargs):
+        activity = ModuleActivity.objects.filter(pk=request.data.get('activity')).first()
+        reject_non_atomic_lesson_activity_edit(activity)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().activity)
+        target_activity = ModuleActivity.objects.filter(
+            pk=request.data.get('activity'),
+        ).first()
+        reject_non_atomic_lesson_activity_edit(target_activity)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().activity)
+        return super().destroy(request, *args, **kwargs)
 
 
 class ModuleActivityQuestionChoiceViewSet(viewsets.ModelViewSet):
@@ -1021,6 +1558,31 @@ class ModuleActivityQuestionChoiceViewSet(viewsets.ModelViewSet):
             ),
         ).distinct()
 
+    def create(self, request, *args, **kwargs):
+        question = ModuleActivityQuestion.objects.select_related('activity').filter(
+            pk=request.data.get('question'),
+        ).first()
+        reject_non_atomic_lesson_activity_edit(question.activity if question else None)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().question.activity)
+        target_question = ModuleActivityQuestion.objects.select_related('activity').filter(
+            pk=request.data.get('question'),
+        ).first()
+        reject_non_atomic_lesson_activity_edit(
+            target_question.activity if target_question else None
+        )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().question.activity)
+        return super().destroy(request, *args, **kwargs)
+
 
 class ModuleActivityMatchingPairViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivityMatchingPairSerializer
@@ -1050,13 +1612,38 @@ class ModuleActivityMatchingPairViewSet(viewsets.ModelViewSet):
             ),
         ).distinct()
 
+    def create(self, request, *args, **kwargs):
+        question = ModuleActivityQuestion.objects.select_related('activity').filter(
+            pk=request.data.get('question'),
+        ).first()
+        reject_non_atomic_lesson_activity_edit(question.activity if question else None)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().question.activity)
+        target_question = ModuleActivityQuestion.objects.select_related('activity').filter(
+            pk=request.data.get('question'),
+        ).first()
+        reject_non_atomic_lesson_activity_edit(
+            target_question.activity if target_question else None
+        )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        reject_non_atomic_lesson_activity_edit(self.get_object().question.activity)
+        return super().destroy(request, *args, **kwargs)
+
 
 class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
     serializer_class = ModuleActivityAttemptSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
-        if self.action == 'list' and self.request.query_params.get('view') == 'summary':
+        if self.action == 'list':
             return ModuleActivityAttemptSummarySerializer
         return ModuleActivityAttemptSerializer
 
@@ -1070,18 +1657,29 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
             'paper_grade_item',
         )
 
-        if self.action == 'list' and self.request.query_params.get('view') == 'summary':
+        if self.action == 'list':
             queryset = queryset.defer('question_snapshot', 'draft_answers')
 
         if self.request.user.is_admin_teacher:
             return queryset
-
-        return queryset.filter(student=self.request.user).filter(
+        queryset = queryset.filter(student=self.request.user).filter(
             active_module_access_filter(
                 self.request.user,
                 prefix='activity__module__',
             ),
         ).distinct()
+        requested_context = self.request.query_params.get('context')
+        schedule_id = self.request.query_params.get('schedule')
+        if requested_context == LearningContextType.LEGACY:
+            return queryset.filter(context_type=LearningContextType.LEGACY)
+        if schedule_id:
+            return queryset.filter(
+                context_type=LearningContextType.CLASS,
+                schedule_id=schedule_id,
+            )
+        if requested_context == LearningContextType.PERSONAL:
+            return queryset.filter(context_type=LearningContextType.PERSONAL)
+        return queryset.none()
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
@@ -1093,16 +1691,46 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
         )
         ensure_attempt_snapshot(attempt)
 
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied(
+                'Start online attempts through the activity start-attempt action.'
+            )
+        return super().create(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
-        attempt = self.get_object()
-        if not request.user.is_admin_teacher and attempt.is_submitted:
-            raise PermissionDenied('Submitted attempts cannot be deleted by students.')
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Student attempts cannot be deleted.')
         return super().destroy(request, *args, **kwargs)
 
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Student attempts cannot be edited directly.')
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Student attempts cannot be edited directly.')
+        return super().partial_update(request, *args, **kwargs)
+
+    def get_locked_attempt(self):
+        visible_attempt = self.get_object()
+        return ModuleActivityAttempt.objects.select_for_update(
+            of=('self',),
+        ).select_related(
+            'activity',
+            'activity__module',
+            'activity__lesson',
+            'student',
+            'recorded_by',
+            'paper_grade_item',
+        ).get(pk=visible_attempt.pk)
+
     @decorators.action(detail=True, methods=['post'])
+    @transaction.atomic
     def submit(self, request, pk=None):
-        attempt = self.get_object()
-        if not request.user.is_admin_teacher and attempt.student_id != request.user.id:
+        attempt = self.get_locked_attempt()
+        if request.user.is_admin_teacher or attempt.student_id != request.user.id:
             raise PermissionDenied('Students can only submit their own attempts.')
         if (
             attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.ONLINE
@@ -1110,38 +1738,82 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                 activity=attempt.activity,
                 student=attempt.student,
                 submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
-                is_submitted=True,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                context_type=attempt.context_type,
+                schedule=attempt.schedule,
             ).exclude(pk=attempt.pk).exists()
         ):
             raise PermissionDenied(
                 'A paper submission has already been recorded for this activity.'
             )
-        if attempt.is_submitted:
-            serializer = self.get_serializer(attempt)
-            return response.Response(serializer.data)
+        if attempt.status == ModuleActivityAttempt.Status.SUPERSEDED:
+            raise serializers.ValidationError({'detail': 'This attempt was superseded.'})
+        expected_revision = request.data.get('draft_revision')
+        try:
+            expected_revision = int(expected_revision)
+        except (TypeError, ValueError):
+            return response.Response(
+                {'detail': 'Provide the expected draft revision.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if expected_revision != attempt.draft_revision:
+            return response.Response(
+                {
+                    'detail': 'Saved answers changed in another session. Reload before submitting.',
+                    'current_revision': attempt.draft_revision,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if attempt.status == ModuleActivityAttempt.Status.SUBMITTED:
+            return response.Response(serialize_attempt_with_state(attempt, request))
 
         validate_activity_window(attempt.activity, attempt.student)
-
         attempt = submit_activity_attempt(attempt)
-        serializer = self.get_serializer(attempt)
-        return response.Response(serializer.data)
+        return response.Response(serialize_attempt_with_state(attempt, request))
 
-    @decorators.action(detail=True, methods=['put'], url_path='draft')
+    @decorators.action(detail=True, methods=['patch', 'put'], url_path='draft')
     @transaction.atomic
     def save_draft(self, request, pk=None):
-        attempt = self.get_object()
-        if not request.user.is_admin_teacher and attempt.student_id != request.user.id:
+        attempt = self.get_locked_attempt()
+        if request.user.is_admin_teacher or attempt.student_id != request.user.id:
             raise PermissionDenied('Students can only save their own answers.')
-        if attempt.is_submitted:
+        if attempt.status != ModuleActivityAttempt.Status.IN_PROGRESS:
             raise serializers.ValidationError({'detail': 'Submitted attempts cannot be edited.'})
+        if len(json.dumps(request.data, default=str).encode('utf-8')) > 262_144:
+            raise serializers.ValidationError({'detail': 'Draft payload is too large.'})
+        base_revision = request.data.get('base_revision')
+        try:
+            base_revision = int(base_revision)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({
+                'base_revision': 'Provide the current draft revision.',
+            })
+        if base_revision != attempt.draft_revision:
+            return response.Response(
+                {
+                    'detail': 'Saved answers changed in another session.',
+                    'current_revision': attempt.draft_revision,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         validate_activity_window(attempt.activity, attempt.student)
         ensure_attempt_snapshot(attempt)
         answers = request.data.get('answers')
         if not isinstance(answers, dict):
             raise serializers.ValidationError({'answers': 'Answers must be an object keyed by question.'})
-        attempt.draft_answers = normalize_draft_answers(attempt.question_snapshot, answers)
-        attempt.save(update_fields=['draft_answers'])
-        return response.Response(self.get_serializer(attempt).data)
+        existing = attempt.draft_answers if request.method == 'PATCH' else {}
+        attempt.draft_answers = normalize_draft_answers(
+            attempt.question_snapshot,
+            answers,
+            existing=existing,
+        )
+        attempt.draft_revision += 1
+        attempt.draft_saved_at = timezone.now()
+        attempt.save(update_fields=['draft_answers', 'draft_revision', 'draft_saved_at'])
+        return response.Response({
+            'draft_revision': attempt.draft_revision,
+            'saved_at': attempt.draft_saved_at,
+        })
 
     @decorators.action(detail=False, methods=['post'], url_path='paper-scores')
     @transaction.atomic
@@ -1166,7 +1838,7 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                 attempt.score = row['score']
                 attempt.max_score = item.points_possible
                 attempt.recorded_by = request.user
-                attempt.is_submitted = True
+                attempt.status = ModuleActivityAttempt.Status.SUBMITTED
                 if not attempt.submitted_at:
                     attempt.submitted_at = timezone.now()
                 attempt.answers.all().delete()
@@ -1174,7 +1846,7 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                     'score',
                     'max_score',
                     'recorded_by',
-                    'is_submitted',
+                    'status',
                     'submitted_at',
                 ])
                 updated_count += 1
@@ -1182,10 +1854,14 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                 last_attempt = ModuleActivityAttempt.objects.filter(
                     activity=activity,
                     student=student,
+                    context_type=LearningContextType.CLASS,
+                    schedule=item.schedule,
                 ).aggregate(maximum=Max('attempt_number'))['maximum'] or 0
                 attempt = ModuleActivityAttempt.objects.create(
                     activity=activity,
                     student=student,
+                    schedule=item.schedule,
+                    context_type=LearningContextType.CLASS,
                     attempt_number=last_attempt + 1,
                     submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
                     recorded_by=request.user,
@@ -1193,9 +1869,17 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                     score=row['score'],
                     max_score=item.points_possible,
                     submitted_at=timezone.now(),
-                    is_submitted=True,
+                    status=ModuleActivityAttempt.Status.SUBMITTED,
                 )
                 created_count += 1
+            ModuleActivityAttempt.objects.filter(
+                activity=activity,
+                student=student,
+                context_type=LearningContextType.CLASS,
+                schedule=item.schedule,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                status=ModuleActivityAttempt.Status.IN_PROGRESS,
+            ).update(status=ModuleActivityAttempt.Status.SUPERSEDED)
             attempts.append(attempt)
 
         return response.Response({
@@ -1229,14 +1913,14 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
         attempt.score = entry.validated_data['score']
         attempt.max_score = attempt.paper_grade_item.points_possible
         attempt.recorded_by = request.user
-        attempt.is_submitted = True
+        attempt.status = ModuleActivityAttempt.Status.SUBMITTED
         if not attempt.submitted_at:
             attempt.submitted_at = timezone.now()
         attempt.save(update_fields=[
             'score',
             'max_score',
             'recorded_by',
-            'is_submitted',
+            'status',
             'submitted_at',
         ])
         return response.Response(self.get_serializer(attempt).data)
@@ -1266,7 +1950,29 @@ class ModuleActivityAnswerViewSet(viewsets.ModelViewSet):
             ),
         ).distinct()
 
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied(
+                'Save student answers through the revisioned draft endpoint.'
+            )
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied(
+                'Save student answers through the revisioned draft endpoint.'
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied(
+                'Save student answers through the revisioned draft endpoint.'
+            )
         answer = self.get_object()
         if answer.attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.PAPER:
             raise PermissionDenied(
@@ -1378,11 +2084,12 @@ class ModuleProgressViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(
+        queryset = queryset.filter(
             student=self.request.user,
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
-        ).distinct()
+        ).exclude(context_type=LearningContextType.LEGACY).distinct()
+        return filter_requested_learning_context(queryset, self.request)
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
@@ -1403,14 +2110,15 @@ class ModuleTopicProgressViewSet(viewsets.ModelViewSet):
         if self.request.user.is_admin_teacher:
             return queryset
 
-        return queryset.filter(
+        queryset = queryset.filter(
             student=self.request.user,
         ).filter(
             active_module_access_filter(
                 self.request.user,
                 prefix='topic__module__',
             ),
-        ).distinct()
+        ).exclude(context_type=LearningContextType.LEGACY).distinct()
+        return filter_requested_learning_context(queryset, self.request)
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
@@ -1430,14 +2138,15 @@ class ModuleLessonProgressViewSet(viewsets.ModelViewSet):
         )
         if self.request.user.is_admin_teacher:
             return queryset
-        return queryset.filter(
+        queryset = queryset.filter(
             student=self.request.user,
         ).filter(
             active_module_access_filter(
                 self.request.user,
                 prefix='lesson__topic__module__',
             ),
-        ).distinct()
+        ).exclude(context_type=LearningContextType.LEGACY).distinct()
+        return filter_requested_learning_context(queryset, self.request)
 
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
