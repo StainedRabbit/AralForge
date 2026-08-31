@@ -188,6 +188,7 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
 
   await page.goto('/admin/gradebook')
   await expect(page.getByRole('heading', { name: 'Gradebook' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
   await page.setViewportSize({ width: 390, height: 844 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-gradebook-mobile-390x844.png` })

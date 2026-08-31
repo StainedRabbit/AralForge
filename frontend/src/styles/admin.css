@@ -1854,6 +1854,13 @@ a.teacher-recent-item:focus-visible {
   gap: 14px;
 }
 
+.gradebook-workspace,
+.gradebook-panel,
+.gradebook-item-list {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
 .gradebook-controls {
   display: grid;
   grid-template-columns: minmax(240px, 1.4fr) repeat(3, minmax(170px, 1fr));
@@ -5830,7 +5837,6 @@ a.teacher-recent-item:focus-visible {
 
   .admin-resource__grid,
   .classes-setup__grid,
-  .gradebook-grid,
   .attendance-workspace,
   .attendance-setup__grid,
   .module-workspace-topbar,
@@ -5886,6 +5892,10 @@ a.teacher-recent-item:focus-visible {
 
   .grade-class-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .gradebook-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .grade-class-card__header {

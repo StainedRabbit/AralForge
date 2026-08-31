@@ -1413,6 +1413,7 @@
 
 .student-lesson-reader {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   min-width: 0;
   gap: 14px;
@@ -1484,6 +1485,7 @@
 
 .student-lesson-material {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 32px;
   max-width: none;
   scroll-padding-top: 96px;
@@ -1914,6 +1916,8 @@
 
 .student-topic-work {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 1.25rem;
 }
 
@@ -1938,7 +1942,16 @@
 
 .student-topic-work__group {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.75rem;
+}
+
+.student-topic-work__header,
+.student-topic-work .activity-list,
+.student-topic-work .activity-card {
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media (max-width: 640px) {
