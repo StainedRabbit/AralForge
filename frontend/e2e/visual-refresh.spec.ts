@@ -7,7 +7,27 @@ async function assertNoViewportOverflow(page: Page) {
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
   }))
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1)
+  const overflowElements = dimensions.scrollWidth > dimensions.clientWidth + 1
+    ? await page.evaluate(() => {
+      const clientWidth = document.documentElement.clientWidth
+      return Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .map((element) => {
+          const bounds = element.getBoundingClientRect()
+          return {
+            element: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${Array.from(element.classList).map((name) => `.${name}`).join('')}`,
+            left: Math.round(bounds.left),
+            right: Math.round(bounds.right),
+            scrollWidth: element.scrollWidth,
+          }
+        })
+        .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
+        .slice(0, 12)
+    })
+    : []
+  expect(
+    dimensions.scrollWidth,
+    `Viewport overflow: ${JSON.stringify(overflowElements, null, 2)}`,
+  ).toBeLessThanOrEqual(dimensions.clientWidth + 1)
 }
 
 async function signIn(page: Page, username: string) {

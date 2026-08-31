@@ -1413,8 +1413,15 @@
 
 .student-lesson-reader {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: 14px;
   padding-bottom: 96px;
+}
+
+.student-lesson-reader > *,
+.student-lesson-material > * {
+  min-width: 0;
 }
 
 .student-reading-position {

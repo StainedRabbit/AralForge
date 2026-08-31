@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, connections
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
@@ -3910,7 +3910,11 @@ class MainActivityPostgresConcurrencyTests(TransactionTestCase):
             try:
                 return call(client, index)
             finally:
-                close_old_connections()
+                # Worker threads own separate database connections. They must be
+                # closed explicitly: close_old_connections() keeps healthy
+                # persistent connections alive and can make PostgreSQL refuse to
+                # drop the test database during suite teardown.
+                connections.close_all()
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             return list(executor.map(run, range(2)))
