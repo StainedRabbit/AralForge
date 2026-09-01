@@ -3,8 +3,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.http import HttpResponse
+from django.test import RequestFactory
 from django.test import SimpleTestCase, override_settings
 
+from config.middleware import RequestTimingMiddleware
 from config.settings import append_unique, env_origin_list, env_regex_list, load_env_file
 
 
@@ -89,3 +92,57 @@ class HealthCheckTests(SimpleTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {'status': 'unavailable'})
         mocked_cursor.assert_called_once_with()
+
+
+class RequestTimingMiddlewareTests(SimpleTestCase):
+    def setUp(self):
+        self.request_factory = RequestFactory()
+
+    @patch.dict(
+        os.environ,
+        {'API_DB_TIMING_ENABLED': 'false', 'API_SLOW_REQUEST_MS': '750'},
+    )
+    @patch('config.middleware.logger.warning')
+    @patch('config.middleware.perf_counter', side_effect=[10.0, 11.0])
+    def test_slow_summary_request_is_identifiable_without_database_timing(
+        self,
+        _mocked_clock,
+        mocked_warning,
+    ):
+        middleware = RequestTimingMiddleware(lambda _request: HttpResponse('ok'))
+        request = self.request_factory.get(
+            '/api/modules/modules/?view=summary&limit=100',
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Server-Timing'], 'app;dur=1000.0')
+        warning_args = mocked_warning.call_args.args
+        self.assertIn('view=%s', warning_args[0])
+        self.assertEqual(warning_args[3], 'summary')
+        self.assertEqual(warning_args[6:10], (-1.0, -1.0, -1.0, -1))
+
+    @patch.dict(
+        os.environ,
+        {'API_DB_TIMING_ENABLED': 'true', 'API_SLOW_REQUEST_MS': '750'},
+    )
+    @patch('config.middleware.logger.warning')
+    @patch('config.middleware.perf_counter', side_effect=[20.0, 21.0])
+    def test_database_timing_is_exposed_in_headers_and_slow_log(
+        self,
+        _mocked_clock,
+        mocked_warning,
+    ):
+        middleware = RequestTimingMiddleware(lambda _request: HttpResponse('ok'))
+        request = self.request_factory.get('/api/modules/modules/')
+
+        response = middleware(request)
+
+        self.assertEqual(
+            response['Server-Timing'],
+            'app;dur=1000.0, db;dur=0.0;desc="0 queries"',
+        )
+        warning_args = mocked_warning.call_args.args
+        self.assertEqual(warning_args[3], 'default')
+        self.assertEqual(warning_args[6:10], (0.0, 0.0, 1000.0, 0))

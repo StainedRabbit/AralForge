@@ -18,6 +18,8 @@ Railway requires these values for each environment:
 - `CORS_ALLOWED_ORIGINS` (only the exact frontend origins)
 - `CORS_ALLOWED_ORIGIN_REGEXES` (leave empty unless a reviewed, narrowly scoped pattern is required)
 - `CSRF_TRUSTED_ORIGINS` (the exact HTTPS origins)
+- `API_SLOW_REQUEST_MS=750`
+- `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
 - `SUPABASE_S3_ENDPOINT` (the existing compatibility name for the Cloudflare R2 S3 endpoint)
 - `SUPABASE_S3_REGION`
 - `SUPABASE_S3_ACCESS_KEY_ID`
@@ -123,17 +125,64 @@ Encrypt the backup directory with the organization-approved encryption tool befo
 - Uploaded files remain available after a Railway redeploy; unsigned private bucket URLs fail.
 - Lesson and module PDFs render remote images and download correctly.
 - The browser E2E suite passes against the release code.
-- The authenticated benchmark completes with no errors and read p95 below 500 ms:
+- The authenticated benchmark completes with no errors, read p50 at or below
+  500 ms, and read p95 at or below 750 ms:
 
   ```powershell
   python scripts/benchmark_api.py `
     --base-url https://staging-api.example.com/api/ `
     --username load-test-teacher `
-    --password "replace-me" `
     --requests 100 `
     --concurrency 10 `
-    --p95-budget-ms 500
+    --p50-budget-ms 500 `
+    --p95-budget-ms 750
   ```
+
+  Set `ARALFORGE_BENCHMARK_PASSWORD` in the invoking process instead of placing
+  the password in shell history.
+
+## Slow API investigation
+
+For repeated `Slow API request` warnings, keep `API_SLOW_REQUEST_MS=750` and
+temporarily set `API_DB_TIMING_ENABLED=True` on the affected Railway API
+service. Redeploy, then run a warmed, sequential check of the compact module
+list:
+
+```powershell
+$env:ARALFORGE_BENCHMARK_PASSWORD = Read-Host 'Benchmark account password'
+python scripts/benchmark_api.py `
+  --base-url https://<railway-host>/api/ `
+  --username load-test-teacher `
+  --path 'modules/modules/?view=summary&limit=100' `
+  --warmup 2 `
+  --requests 20 `
+  --concurrency 1 `
+  --p50-budget-ms 500 `
+  --p95-budget-ms 750 `
+  --query-budget 8 `
+  --require-db-timing
+Remove-Item Env:ARALFORGE_BENCHMARK_PASSWORD
+```
+
+The slow-request log identifies `view=summary` versus `view=default` and reports
+database duration, database share, non-database duration, and query count. Use
+Railway metrics and HTTP logs at the same timestamps:
+
+- Database share above 70%: verify database connection/region latency, then
+  inspect slow queries and indexes.
+- More than eight queries for the compact module list: treat it as an N+1
+  regression.
+- Low database share with high application duration: inspect serializer work
+  and Railway CPU saturation.
+- Low Railway upstream duration with high total duration: inspect edge/network
+  routing.
+
+This deployment uses Supabase PostgreSQL, so `postgres.railway.internal` is not
+a valid database hostname. Keep the Railway API and Supabase project in nearby
+regions and use the reviewed Supabase connection endpoint. A
+`*.railway.internal` hostname applies only to a database service in the same
+Railway project and environment. After collecting the sample, restore
+`API_DB_TIMING_ENABLED=False` and redeploy.
 
 ## Production promotion and rollback
 
