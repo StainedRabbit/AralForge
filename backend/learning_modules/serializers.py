@@ -134,6 +134,64 @@ class DownloadableModuleTopicSerializer(serializers.ModelSerializer):
         return bool(obj.pdf_file)
 
 
+class PresentationModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
+        fields = ('id', 'title', 'subject')
+
+
+class PresentationModuleTopicSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleTopic
+        fields = (
+            'id',
+            'module',
+            'title',
+            'order',
+            'overview',
+            'competency_text',
+            'essential_question',
+            'enduring_understanding',
+            'performance_task',
+            'success_criteria',
+        )
+
+
+class PresentationModuleLessonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleLesson
+        fields = (
+            'id',
+            'topic',
+            'title',
+            'order',
+            'learning_targets',
+            'objectives',
+            'before_you_start',
+            'short_discussion',
+            'overview',
+            'lets_practice',
+            'challenge_task',
+            'is_published',
+        )
+
+
+class PresentationLessonExampleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleLessonExample
+        fields = (
+            'id',
+            'lesson',
+            'order',
+            'title',
+            'image',
+            'alt_text',
+            'body',
+            'common_mistake',
+            'is_published',
+        )
+
+
 class ModuleSerializer(serializers.ModelSerializer):
     is_accessible = serializers.SerializerMethodField()
     access_status = serializers.SerializerMethodField()

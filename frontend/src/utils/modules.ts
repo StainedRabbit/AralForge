@@ -115,13 +115,17 @@ export function modulesForSubject(modules: Module[], subjectId: number | null) {
     .sort((first, second) => first.title.localeCompare(second.title))
 }
 
-export function topicsForModule(topics: ModuleTopic[], moduleId: number | null) {
+export function topicsForModule<
+  T extends Pick<ModuleTopic, 'id' | 'module' | 'order'>,
+>(topics: T[], moduleId: number | null) {
   return topics
     .filter((topic) => !moduleId || topic.module === moduleId)
     .sort((first, second) => first.order - second.order || first.id - second.id)
 }
 
-export function lessonsForTopic(lessons: ModuleLesson[], topicId: number | null) {
+export function lessonsForTopic<
+  T extends Pick<ModuleLesson, 'id' | 'topic' | 'order'>,
+>(lessons: T[], topicId: number | null) {
   return lessons
     .filter((lesson) => !topicId || lesson.topic === topicId)
     .sort((first, second) => first.order - second.order || first.id - second.id)

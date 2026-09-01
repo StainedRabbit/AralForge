@@ -68,6 +68,10 @@ from .serializers import (
     ModuleSummarySerializer,
     ModuleTopicProgressSerializer,
     ModuleTopicSerializer,
+    PresentationLessonExampleSerializer,
+    PresentationModuleLessonSerializer,
+    PresentationModuleSerializer,
+    PresentationModuleTopicSerializer,
 )
 from .services.activity_grading import submit_activity_attempt
 from .services.activity_snapshots import (
@@ -369,6 +373,79 @@ class ModuleViewSet(viewsets.ModelViewSet):
         if self.action == 'list' and self.request.query_params.get('view') == 'summary':
             return ModuleSummarySerializer
         return ModuleSerializer
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[IsAdminTeacher],
+        url_path='presentation-workspace',
+    )
+    def presentation_workspace(self, request, pk=None):
+        module = get_object_or_404(
+            Module.objects.only('id', 'title', 'subject_id'),
+            pk=pk,
+        )
+        topics = ModuleTopic.objects.filter(module_id=module.id).only(
+            'id',
+            'module_id',
+            'title',
+            'order',
+            'overview',
+            'competency_text',
+            'essential_question',
+            'enduring_understanding',
+            'performance_task',
+            'success_criteria',
+        ).order_by('order', 'id')
+        lessons = ModuleLesson.objects.filter(topic__module_id=module.id).only(
+            'id',
+            'topic_id',
+            'title',
+            'order',
+            'learning_targets',
+            'objectives',
+            'before_you_start',
+            'short_discussion',
+            'overview',
+            'lets_practice',
+            'challenge_task',
+            'is_published',
+        ).order_by('topic_id', 'order', 'id')
+        examples = ModuleLessonExample.objects.filter(
+            lesson__topic__module_id=module.id,
+        ).only(
+            'id',
+            'lesson_id',
+            'order',
+            'title',
+            'image',
+            'alt_text',
+            'body',
+            'common_mistake',
+            'is_published',
+        ).order_by('lesson_id', 'order', 'id')
+        context = {'request': request}
+        return response.Response({
+            'module': PresentationModuleSerializer(
+                module,
+                context=context,
+            ).data,
+            'topics': PresentationModuleTopicSerializer(
+                topics,
+                many=True,
+                context=context,
+            ).data,
+            'lessons': PresentationModuleLessonSerializer(
+                lessons,
+                many=True,
+                context=context,
+            ).data,
+            'lesson_examples': PresentationLessonExampleSerializer(
+                examples,
+                many=True,
+                context=context,
+            ).data,
+        })
 
     @decorators.action(
         detail=True,
@@ -1045,10 +1122,10 @@ class ModuleLessonExampleViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminTeacherOrReadOnly]
 
     def get_queryset(self):
-        queryset = ModuleLessonExample.objects.select_related(
-            'lesson',
-            'lesson__topic',
-            'lesson__topic__module',
+        queryset = ModuleLessonExample.objects.order_by(
+            'lesson_id',
+            'order',
+            'id',
         )
 
         if self.request.user.is_admin_teacher:

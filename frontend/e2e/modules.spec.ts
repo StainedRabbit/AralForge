@@ -108,6 +108,104 @@ test('selects valid start, resume, continue, and review lesson targets', () => {
   expect(getLessonResumeTarget(lessons, [], { ...options, isAccessible: false })).toBeNull()
 })
 
+test('loads presentation using only the module-scoped workspace endpoint', async ({ page }) => {
+  await page.goto('/admin')
+  await page.getByLabel('Student number').fill('e2e-teacher')
+  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL(/\/admin(?:\/)?$/)
+
+  await page.getByRole('link', { name: 'Modules', exact: true }).click()
+  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
+  const presentLink = page.getByRole('link', { name: 'Present', exact: true }).first()
+  await expect(presentLink).toBeVisible()
+  const presentHref = await presentLink.getAttribute('href')
+  expect(presentHref).toBeTruthy()
+  const presentUrl = new URL(presentHref!, 'http://127.0.0.1:4173')
+  const moduleId = Number(presentUrl.pathname.match(/modules\/(\d+)\/present/)?.[1])
+  const topicId = Number(presentUrl.searchParams.get('topic'))
+  expect(moduleId).toBeGreaterThan(0)
+  expect(topicId).toBeGreaterThan(0)
+
+  await page.route(
+    `**/api/modules/modules/${moduleId}/presentation-workspace/`,
+    async (route) => route.fulfill({
+      contentType: 'application/json',
+      status: 200,
+      body: JSON.stringify({
+        module: { id: moduleId, subject: null, title: 'Scoped Presentation Module' },
+        topics: [{
+          id: topicId,
+          module: moduleId,
+          title: 'Scoped Presentation Topic',
+          order: 1,
+          overview: 'Scoped topic overview',
+          competency_text: '',
+          essential_question: '',
+          enduring_understanding: '',
+          performance_task: '',
+          success_criteria: '',
+        }],
+        lessons: [{
+          id: 2001,
+          topic: topicId,
+          title: 'Scoped Presentation Lesson',
+          order: 1,
+          learning_targets: 'Understand scoped API loading.',
+          objectives: '',
+          before_you_start: '',
+          short_discussion: '',
+          overview: '',
+          lets_practice: '',
+          challenge_task: '',
+          is_published: true,
+        }],
+        lesson_examples: [{
+          id: 3001,
+          lesson: 2001,
+          order: 1,
+          title: 'Scoped API Example',
+          image: 'http://127.0.0.1:8001/media/presentation-example.svg',
+          alt_text: 'Scoped presentation diagram',
+          body: 'This example came from the compact workspace.',
+          common_mistake: '',
+          is_published: true,
+        }],
+      }),
+    }),
+  )
+  await page.route('**/media/presentation-example.svg', async (route) => {
+    await route.fulfill({
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"></svg>',
+      contentType: 'image/svg+xml',
+      status: 200,
+    })
+  })
+
+  await page.waitForLoadState('networkidle')
+  const moduleApiPaths: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/modules/')) {
+      moduleApiPaths.push(url.pathname)
+    }
+  })
+  await presentLink.click()
+
+  await expect(page.getByText('Scoped Presentation Module / Scoped Presentation Topic')).toBeVisible()
+  await page.getByRole('button', { name: 'Topic Introduction' }).click()
+  await page.getByRole('menuitem', { name: /Scoped Presentation Lesson/ }).click()
+  await page.getByRole('button', { name: 'Open section list' }).click()
+  await page.getByRole('button', { name: "Let's Look at Examples" }).click()
+  await expect(page.getByRole('heading', { name: "Let's Look at Examples" })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Scoped API Example' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Scoped presentation diagram' })).toBeVisible()
+  expect(moduleApiPaths.length).toBeGreaterThan(0)
+  expect(new Set(moduleApiPaths)).toEqual(new Set([
+    `/api/modules/modules/${moduleId}/presentation-workspace/`,
+  ]))
+})
+
 test('downloads and imports topic outline Markdown variants', async ({ page }) => {
   await openModuleWorkspace(page)
   let dialog = await openOutlineImporter(page)

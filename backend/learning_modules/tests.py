@@ -11,6 +11,7 @@ from django.db import close_old_connections, connection, connections
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.test import APIClient, APITestCase
 
 
@@ -1989,6 +1990,165 @@ class ModuleLessonExampleApiTests(APITestCase):
         ids = {item['id'] for item in result_rows(response)}
         self.assertIn(example.id, ids)
         self.assertEqual(len(ids), 1)
+
+    def test_lesson_filtered_list_uses_a_lean_bounded_query(self):
+        self.lesson.short_discussion = 'Large lesson content. ' * 500
+        self.lesson.save()
+        expected = ModuleLessonExample.objects.create(
+            lesson=self.lesson,
+            order=1,
+            title='First example',
+            is_published=True,
+        )
+        second = ModuleLessonExample.objects.create(
+            lesson=self.lesson,
+            order=2,
+            title='Second example',
+            is_published=True,
+        )
+        access_token = RefreshToken.for_user(self.teacher).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f'/api/modules/lesson-examples/?lesson={self.lesson.id}&limit=100',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        rows = result_rows(response)
+        self.assertEqual([row['id'] for row in rows], [expected.id, second.id])
+        self.assertLessEqual(len(queries), 3)
+        row_queries = [
+            query['sql']
+            for query in queries
+            if 'learning_modules_modulelessonexample' in query['sql']
+            and 'COUNT(' not in query['sql'].upper()
+        ]
+        self.assertEqual(len(row_queries), 1)
+        self.assertNotIn(
+            'JOIN "learning_modules_modulelesson"',
+            row_queries[0],
+        )
+        self.assertNotIn(
+            'JOIN "learning_modules_moduletopic"',
+            row_queries[0],
+        )
+        self.assertNotIn(
+            'JOIN "learning_modules_module"',
+            row_queries[0],
+        )
+
+    def test_teacher_presentation_workspace_is_compact_scoped_and_bounded(self):
+        self.topic.overview = 'Topic overview'
+        self.topic.competency_text = 'Presentation competency'
+        self.topic.save()
+        self.lesson.learning_targets = 'Presentation target'
+        self.lesson.short_discussion = 'Presentation discussion'
+        self.lesson.save()
+        visible = ModuleLessonExample.objects.create(
+            lesson=self.lesson,
+            order=2,
+            title='Visible presentation example',
+            body='Visible example body',
+            is_published=True,
+        )
+        draft = ModuleLessonExample.objects.create(
+            lesson=self.lesson,
+            order=1,
+            title='Draft presentation example',
+            is_published=False,
+        )
+        ModuleLessonExample.objects.bulk_create([
+            ModuleLessonExample(
+                lesson=self.lesson,
+                order=index + 3,
+                title=f'Scale example {index:03d}',
+            )
+            for index in range(100)
+        ])
+        other_subject = Subject.objects.create(
+            code='OTHERPDF',
+            name='Other presentation subject',
+        )
+        other_module = Module.objects.create(
+            title='Other presentation module',
+            slug='other-presentation-module',
+            subject=other_subject,
+        )
+        other_topic = ModuleTopic.objects.create(
+            module=other_module,
+            title='Other presentation topic',
+        )
+        other_lesson = ModuleLesson.objects.create(
+            topic=other_topic,
+            title='Other presentation lesson',
+        )
+        other_example = ModuleLessonExample.objects.create(
+            lesson=other_lesson,
+            title='Other presentation example',
+        )
+        access_token = RefreshToken.for_user(self.teacher).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f'/api/modules/modules/{self.module.id}/presentation-workspace/',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(queries), 5)
+        self.assertEqual(
+            set(response.data),
+            {'module', 'topics', 'lessons', 'lesson_examples'},
+        )
+        self.assertEqual(
+            set(response.data['module']),
+            {'id', 'title', 'subject'},
+        )
+        self.assertEqual(
+            set(response.data['topics'][0]),
+            {
+                'id', 'module', 'title', 'order', 'overview',
+                'competency_text', 'essential_question',
+                'enduring_understanding', 'performance_task',
+                'success_criteria',
+            },
+        )
+        self.assertEqual(
+            set(response.data['lessons'][0]),
+            {
+                'id', 'topic', 'title', 'order', 'learning_targets',
+                'objectives', 'before_you_start', 'short_discussion',
+                'overview', 'lets_practice', 'challenge_task', 'is_published',
+            },
+        )
+        self.assertEqual(
+            set(response.data['lesson_examples'][0]),
+            {
+                'id', 'lesson', 'order', 'title', 'image', 'alt_text',
+                'body', 'common_mistake', 'is_published',
+            },
+        )
+        example_ids = [row['id'] for row in response.data['lesson_examples']]
+        self.assertEqual(example_ids[:2], [draft.id, visible.id])
+        self.assertNotIn(other_example.id, example_ids)
+        self.assertEqual(
+            {row['module'] for row in response.data['topics']},
+            {self.module.id},
+        )
+        self.assertEqual(
+            {row['topic'] for row in response.data['lessons']},
+            {self.topic.id},
+        )
+
+    def test_student_cannot_open_teacher_presentation_workspace(self):
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/presentation-workspace/',
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_student_cannot_create_lesson_example(self):
         self.client.force_authenticate(self.student)

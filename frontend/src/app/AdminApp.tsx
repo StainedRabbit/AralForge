@@ -1,11 +1,13 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
-import type { AuthedRequest } from './types'
+import { useQuery } from '@tanstack/react-query'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import type { AuthedRequest, PresentationWorkspace } from './types'
 import type { StudentProfile, User } from '../types'
 import { MobileNavigation, Sidebar, type NavItem } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
 import type { WorkspaceResource } from '../queries/useScopedWorkspace'
-import { SkeletonList } from '../components/ui'
+import { Page, SkeletonList, StatusBanner } from '../components/ui'
+import { queryKeys } from '../queries/queryKeys'
 const AdminAttendancePage = lazy(() => import('../pages/admin/AdminAttendancePage').then(module => ({ default: module.AdminAttendancePage })))
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage').then(module => ({ default: module.AdminDashboardPage })))
 const AdminGradebookRoute = lazy(() => import('../pages/admin/AdminGradebookRoute').then(module => ({ default: module.AdminGradebookRoute })))
@@ -41,7 +43,6 @@ const CLASSES: WorkspaceResource[] = ['subjects','schoolYears','terms','modules'
 const MODULES: WorkspaceResource[] = ['subjects','modules']
 const MODULE_EDITOR: WorkspaceResource[] = MODULES
 const TOPIC_EDITOR: WorkspaceResource[] = [...MODULES,'moduleTopics']
-const PRESENTATION: WorkspaceResource[] = ['modules','moduleTopics','moduleLessons','lessonExamples']
 const LESSON_EDITOR: WorkspaceResource[] = []
 const ATTENDANCE: WorkspaceResource[] = ['users','subjects','terms','schedules','enrollments','attendanceSessions','attendanceRecords']
 
@@ -62,7 +63,7 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
         <Route path="/admin/modules/:moduleId/topics/:topicId/edit" element={scoped(TOPIC_EDITOR, data => <AdminTopicEditorPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/modules/:moduleId/topics/:topicId/lessons/new" element={scoped(LESSON_EDITOR, data => <AdminLessonEditorPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/modules/:moduleId/topics/:topicId/lessons/:lessonId/edit" element={scoped(LESSON_EDITOR, data => <AdminLessonEditorPage api={api} data={data} refresh={data.refresh} />)} />
-        <Route path="/admin/modules/:moduleId/present" element={scoped(PRESENTATION, data => <LessonPresentationPage data={data} />)} />
+        <Route path="/admin/modules/:moduleId/present" element={<PresentationWorkspaceRoute api={api} />} />
         <Route path="/admin/modules/:moduleId/progress" element={scoped(['modules'], data => <ModuleProgressPage api={api} data={data} />)} />
         <Route path="/admin/submissions/:submissionId" element={<AdminSubmissionReviewPage api={api} />} />
         <Route path="/admin/assessments/*" element={<Navigate replace to="/admin/gradebook" />} />
@@ -73,4 +74,32 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: 
       </Routes></Suspense>
     </main>
   </div>
+}
+
+function PresentationWorkspaceRoute({ api }: { api: AuthedRequest }) {
+  const { moduleId } = useParams()
+  const numericModuleId = Number(moduleId)
+  const path = `/modules/modules/${numericModuleId}/presentation-workspace/`
+  const query = useQuery({
+    queryKey: queryKeys.resource(path),
+    queryFn: ({ signal }) => api<PresentationWorkspace>(path, { signal }),
+    enabled: Number.isInteger(numericModuleId) && numericModuleId > 0,
+    staleTime: 60_000,
+  })
+
+  if (query.isPending) {
+    return <Page><SkeletonList count={4} /></Page>
+  }
+  if (!query.data || query.error) {
+    return (
+      <Page>
+        <StatusBanner
+          tone="warning"
+          title="Presentation could not load"
+          message="Retry this module presentation request."
+        />
+      </Page>
+    )
+  }
+  return <LessonPresentationPage data={query.data} />
 }

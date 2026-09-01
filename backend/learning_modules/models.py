@@ -504,6 +504,12 @@ class ModuleLessonExample(models.Model):
 
     class Meta:
         ordering = ['lesson', 'order', 'id']
+        indexes = [
+            models.Index(
+                fields=['lesson', 'order', 'id'],
+                name='lessonex_lesson_order_idx',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.lesson}: {self.title}'

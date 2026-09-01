@@ -52,6 +52,58 @@ export type LearningContextMetadata = {
   label: string
 }
 
+export type PresentationModule = Pick<Module, 'id' | 'title' | 'subject'>
+
+export type PresentationModuleTopic = Pick<
+  ModuleTopic,
+  | 'id'
+  | 'module'
+  | 'title'
+  | 'order'
+  | 'overview'
+  | 'competency_text'
+  | 'essential_question'
+  | 'enduring_understanding'
+  | 'performance_task'
+  | 'success_criteria'
+>
+
+export type PresentationModuleLesson = Pick<
+  ModuleLesson,
+  | 'id'
+  | 'topic'
+  | 'title'
+  | 'order'
+  | 'learning_targets'
+  | 'objectives'
+  | 'before_you_start'
+  | 'short_discussion'
+  | 'overview'
+  | 'lets_practice'
+  | 'challenge_task'
+  | 'is_published'
+>
+
+export type PresentationLessonExample = Pick<
+  ModuleLessonExample,
+  | 'id'
+  | 'lesson'
+  | 'order'
+  | 'title'
+  | 'image'
+  | 'alt_text'
+  | 'body'
+  | 'common_mistake'
+  | 'is_published'
+>
+
+export type PresentationWorkspace = {
+  module: PresentationModule
+  topics: PresentationModuleTopic[]
+  lessons: PresentationModuleLesson[]
+  lesson_examples: PresentationLessonExample[]
+}
+
 export type RouteData = {
   users: User[]
   currentUser: User | null

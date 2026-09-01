@@ -2,11 +2,23 @@ import type { ModuleLessonExample } from '../types'
 import { resolveMediaUrl } from '../utils/format'
 import { RichLessonText, ZoomableLessonImage } from './RichLessonText'
 
+type LessonExampleCardData = Pick<
+  ModuleLessonExample,
+  | 'id'
+  | 'order'
+  | 'title'
+  | 'image'
+  | 'alt_text'
+  | 'body'
+  | 'common_mistake'
+  | 'is_published'
+>
+
 export function LessonExampleCards({
   examples,
   variant = 'default',
 }: {
-  examples: ModuleLessonExample[]
+  examples: LessonExampleCardData[]
   variant?: 'default' | 'presentation'
 }) {
   const visibleExamples = examples

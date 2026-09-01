@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import type { RouteData } from '../../app/types'
+import type {
+  PresentationModuleLesson,
+  PresentationModuleTopic,
+  PresentationWorkspace,
+} from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { LessonExampleCards } from '../../components/LessonExampleCards'
 import { RichLessonText } from '../../components/RichLessonText'
 import { EmptyState } from '../../components/ui'
-import type { ModuleLesson, ModuleTopic } from '../../types'
 import {
   lessonSectionId,
   lessonsForTopic,
@@ -26,19 +29,19 @@ type PresentationTextSize = 'default' | 'large' | 'small'
 const TEXT_SIZE_KEY = 'aralforge:presentation-text-size'
 const LEGACY_TEXT_SIZE_KEY = 'ezoryx:presentation-text-size'
 
-export function LessonPresentationPage({ data }: { data: RouteData }) {
+export function LessonPresentationPage({ data }: { data: PresentationWorkspace }) {
   const { moduleId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const shellRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLElement | null>(null)
   const hideTimerRef = useRef<number | null>(null)
-  const module = data.modules.find((item) => item.id === Number(moduleId))
-  const topics = module ? topicsForModule(data.moduleTopics, module.id) : []
+  const module = data.module.id === Number(moduleId) ? data.module : null
+  const topics = module ? topicsForModule(data.topics, module.id) : []
   const requestedTopicId = Number(searchParams.get('topic')) || null
   const selectedTopic =
     topics.find((topic) => topic.id === requestedTopicId) ?? topics[0] ?? null
   const topicLessons = selectedTopic
-    ? lessonsForTopic(data.moduleLessons, selectedTopic.id)
+    ? lessonsForTopic(data.lessons, selectedTopic.id)
         .filter((lesson) => lesson.is_published)
     : []
   const requestedLessonId = Number(searchParams.get('lesson')) || null
@@ -46,7 +49,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
     ? topicLessons.find((lesson) => lesson.id === requestedLessonId) ?? null
     : null
   const sections = selectedLesson
-    ? buildPresentationSections(selectedLesson, data.lessonExamples.filter((example) => example.lesson === selectedLesson.id))
+    ? buildPresentationSections(selectedLesson, data.lesson_examples.filter((example) => example.lesson === selectedLesson.id))
     : selectedTopic
       ? buildTopicIntroductionSections(selectedTopic)
       : []
@@ -109,7 +112,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
     revealControls()
   }
 
-  function selectLesson(lesson: ModuleLesson) {
+  function selectLesson(lesson: PresentationModuleLesson) {
     if (!selectedTopic) {
       return
     }
@@ -139,7 +142,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
       direction,
       sectionIndex,
       sections,
-      lessonExamples: data.lessonExamples,
+      lessonExamples: data.lesson_examples,
       selectedLesson,
       selectedTopic,
       setSearchParams,
@@ -250,14 +253,14 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
 
   useEffect(() => {
     const keyboardTopicLessons = selectedTopic
-      ? lessonsForTopic(data.moduleLessons, selectedTopic.id).filter(
+      ? lessonsForTopic(data.lessons, selectedTopic.id).filter(
           (lesson) => lesson.is_published,
         )
       : []
     const keyboardSections = selectedLesson
       ? buildPresentationSections(
           selectedLesson,
-          data.lessonExamples.filter((example) => example.lesson === selectedLesson.id),
+          data.lesson_examples.filter((example) => example.lesson === selectedLesson.id),
         )
       : selectedTopic
         ? buildTopicIntroductionSections(selectedTopic)
@@ -325,7 +328,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
           direction: 1,
           sectionIndex,
           sections: keyboardSections,
-          lessonExamples: data.lessonExamples,
+          lessonExamples: data.lesson_examples,
           selectedLesson,
           selectedTopic,
           setSearchParams,
@@ -339,7 +342,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
           direction: -1,
           sectionIndex,
           sections: keyboardSections,
-          lessonExamples: data.lessonExamples,
+          lessonExamples: data.lesson_examples,
           selectedLesson,
           selectedTopic,
           setSearchParams,
@@ -373,11 +376,11 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
   }, [
     blankScreen,
     controlsPinned,
-    data.lessonExamples,
+    data.lesson_examples,
     lessonMenuOpen,
     sectionDrawerOpen,
     sectionIndex,
-    data.moduleLessons,
+    data.lessons,
     selectedLesson,
     selectedTopic,
     setSearchParams,
@@ -635,7 +638,7 @@ export function LessonPresentationPage({ data }: { data: RouteData }) {
 }
 
 function buildPresentationSections(
-  lesson: ModuleLesson,
+  lesson: PresentationModuleLesson,
   examples = [] as { lesson: number }[],
 ): PresentationSection[] {
   const lessonSections = [
@@ -661,7 +664,9 @@ function buildPresentationSections(
   return lessonSections
 }
 
-function buildTopicIntroductionSections(topic: ModuleTopic): PresentationSection[] {
+function buildTopicIntroductionSections(
+  topic: PresentationModuleTopic,
+): PresentationSection[] {
   return [
     ['Topic Overview', topic.overview],
     ['Learning Competencies', topic.competency_text],
@@ -683,11 +688,11 @@ function PresentationContent({
   data,
   section,
 }: {
-  data: RouteData
+  data: PresentationWorkspace
   section: PresentationSection
 }) {
   const examples = section.lessonId
-    ? data.lessonExamples.filter((example) => example.lesson === section.lessonId)
+    ? data.lesson_examples.filter((example) => example.lesson === section.lessonId)
     : []
 
   return (
@@ -781,10 +786,10 @@ function updatePresentationStep({
   sectionIndex: number
   sections: PresentationSection[]
   lessonExamples: { lesson: number }[]
-  selectedLesson: ModuleLesson | null
-  selectedTopic: ModuleTopic | null
+  selectedLesson: PresentationModuleLesson | null
+  selectedTopic: PresentationModuleTopic | null
   setSearchParams: ReturnType<typeof useSearchParams>[1]
-  topicLessons: ModuleLesson[]
+  topicLessons: PresentationModuleLesson[]
 }) {
   if (!selectedTopic) {
     return
