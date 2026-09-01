@@ -2206,6 +2206,43 @@ class PrintablePdfApiTests(APITestCase):
         self.assertNotIn('hidden explanation', html)
         self.assertNotIn('25 pts', html)
 
+    def test_topic_pdf_uses_compact_layout_and_student_information_fields(self):
+        from learning_modules.services.pdf_generation import generate_topic_pdf
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                with patch(
+                    'learning_modules.services.pdf_generation.render_pdf',
+                    return_value=b'%PDF-1.4 generated topic',
+                ) as render_pdf:
+                    generate_topic_pdf(self.topic)
+
+        html = render_pdf.call_args.args[0]
+        self.assertIn('class="student-details"', html)
+        self.assertIn('class="student-detail student-detail--name"', html)
+        self.assertIn('class="student-detail student-detail--year"', html)
+        self.assertIn('class="student-detail student-detail--schedule"', html)
+        self.assertIn('>Name:</span>', html)
+        self.assertIn('>Year:</span>', html)
+        self.assertIn('>Schedule:</span>', html)
+        self.assertLess(html.index('>Name:</span>'), html.index('Generated '))
+        self.assertRegex(
+            html,
+            r'\.section\s*\{\s*break-inside:\s*auto;',
+        )
+        self.assertRegex(
+            html,
+            r'\.example,\s*\.activity\s*\{[^}]*break-inside:\s*auto;',
+        )
+        self.assertRegex(
+            html,
+            r'h1,\s*h2,\s*h3,\s*h4\s*\{\s*break-after:\s*avoid;',
+        )
+        self.assertRegex(
+            html,
+            r'figure\s*\{\s*break-inside:\s*avoid;',
+        )
+
     def test_main_activity_question_change_invalidates_topic_pdf(self):
         activity = ModuleActivity.objects.create(
             module=self.module,

@@ -6,7 +6,7 @@
   <style>
     @page {
       size: A4;
-      margin: 18mm 16mm 20mm;
+      margin: 13mm 12mm 16mm;
       @bottom-center {
         color: #64748b;
         content: "Page " counter(page) " of " counter(pages);
@@ -21,8 +21,11 @@
     body {
       color: #1e293b;
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 11pt;
-      line-height: 1.45;
+      font-size: 10.5pt;
+      line-height: 1.35;
+      margin: 0;
+      orphans: 3;
+      widows: 3;
     }
 
     h1,
@@ -35,29 +38,37 @@
 
     h1 {
       color: #0b1f3a;
-      font-size: 24pt;
+      font-size: 21pt;
       line-height: 1.15;
-      margin-top: 6mm;
+      margin-top: 3mm;
     }
 
     h2 {
       border-bottom: 1px solid #e2e8f0;
       color: #0b1f3a;
-      font-size: 16pt;
-      margin: 11mm 0 4mm;
-      padding-bottom: 2mm;
+      font-size: 15pt;
+      margin: 6mm 0 2.5mm;
+      padding-bottom: 1.5mm;
     }
 
     h3 {
       color: #0b1f3a;
-      font-size: 13pt;
-      margin: 6mm 0 2mm;
+      font-size: 12.5pt;
+      margin: 4mm 0 1.5mm;
     }
 
     h4 {
       color: #1e293b;
       font-size: 11pt;
-      margin: 4mm 0 1.5mm;
+      margin: 3mm 0 1mm;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      break-after: avoid;
+      page-break-after: avoid;
     }
 
     p,
@@ -66,7 +77,7 @@
     figure,
     pre,
     table {
-      margin: 0 0 3.5mm;
+      margin: 0 0 2.5mm;
     }
 
     ul,
@@ -111,7 +122,7 @@
       display: block;
       height: auto;
       margin: 12px auto;
-      max-height: 225mm;
+      max-height: 190mm;
       max-width: 100%;
       object-fit: contain;
       page-break-inside: avoid;
@@ -146,8 +157,10 @@
     .cover {
       border-bottom: 3px solid #e86a17;
       background: #faf8f3;
-      margin-bottom: 8mm;
-      padding: 6mm 7mm 7mm;
+      break-inside: avoid;
+      margin-bottom: 5mm;
+      padding: 4mm 5mm 5mm;
+      page-break-inside: avoid;
     }
 
     .eyebrow {
@@ -161,18 +174,61 @@
     .generated {
       color: #64748b;
       font-size: 9pt;
-      margin-top: 3mm;
+      margin-top: 2.5mm;
+    }
+
+    .student-details {
+      display: flex;
+      gap: 4mm;
+      margin-top: 4mm;
+      width: 100%;
+    }
+
+    .student-detail {
+      align-items: baseline;
+      display: flex;
+      flex: 1;
+      gap: 2mm;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .student-detail--name {
+      flex: 1.7;
+    }
+
+    .student-detail--year {
+      flex: 0.8;
+    }
+
+    .student-detail--schedule {
+      flex: 1.2;
+    }
+
+    .student-detail__label {
+      font-size: 9.5pt;
+      font-weight: 700;
+    }
+
+    .student-detail__line {
+      border-bottom: 1px solid #64748b;
+      flex: 1;
+      height: 5mm;
+      min-width: 12mm;
     }
 
     .section {
-      break-inside: avoid;
-      margin-bottom: 5mm;
+      break-inside: auto;
+      margin-bottom: 3mm;
+      page-break-inside: auto;
     }
 
     .lesson {
       border-top: 1px solid #e2e8f0;
-      margin-top: 7mm;
-      padding-top: 4mm;
+      break-inside: auto;
+      margin-top: 5mm;
+      page-break-inside: auto;
+      padding-top: 3mm;
     }
 
     .lesson-meta,
@@ -189,8 +245,9 @@
       background: #faf8f3;
       border: 1px solid #e2e8f0;
       border-radius: 3mm;
-      break-inside: avoid;
+      break-inside: auto;
       margin: 3mm 0;
+      page-break-inside: auto;
       padding: 3mm;
     }
 
@@ -292,6 +349,20 @@
   <header class="cover">
     {% if context_label %}<p class="eyebrow">{{ context_label }}</p>{% endif %}
     <h1>{{ title }}</h1>
+    <div class="student-details" aria-label="Student information">
+      <div class="student-detail student-detail--name">
+        <span class="student-detail__label">Name:</span>
+        <span class="student-detail__line"></span>
+      </div>
+      <div class="student-detail student-detail--year">
+        <span class="student-detail__label">Year:</span>
+        <span class="student-detail__line"></span>
+      </div>
+      <div class="student-detail student-detail--schedule">
+        <span class="student-detail__label">Schedule:</span>
+        <span class="student-detail__line"></span>
+      </div>
+    </div>
     <p class="generated">Generated {{ generated_at|date:"M j, Y g:i A" }}</p>
   </header>
 

@@ -370,3 +370,66 @@ class MainActivityHardeningMigrationTests(TransactionTestCase):
             'is_submitted',
             {field.name for field in MigratedAttempt._meta.fields},
         )
+
+
+class MarkTopicPdfsOutdatedMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        self.latest_targets = executor.loader.graph.leaf_nodes()
+        old_targets = [
+            ('learning_modules', '0029_performance_indexes')
+            if app_label == 'learning_modules'
+            else (app_label, migration_name)
+            for app_label, migration_name in self.latest_targets
+        ]
+        executor.migrate(old_targets)
+        self.old_apps = executor.loader.project_state(old_targets).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.latest_targets)
+        super().tearDown()
+
+    def test_marks_only_existing_current_topic_pdfs_outdated(self):
+        Subject = self.old_apps.get_model('subjects', 'Subject')
+        Module = self.old_apps.get_model('learning_modules', 'Module')
+        Topic = self.old_apps.get_model('learning_modules', 'ModuleTopic')
+
+        subject = Subject.objects.create(code='PDFMIG', name='PDF migration')
+        module = Module.objects.create(
+            title='PDF migration module',
+            slug='pdf-migration-module',
+            subject=subject,
+        )
+        current_pdf = Topic.objects.create(
+            module=module,
+            title='Current PDF',
+            pdf_file='module_topic_pdfs/current.pdf',
+            pdf_generated_at=timezone.now(),
+            pdf_is_outdated=False,
+        )
+        already_outdated_pdf = Topic.objects.create(
+            module=module,
+            title='Already outdated PDF',
+            pdf_file='module_topic_pdfs/outdated.pdf',
+            pdf_generated_at=timezone.now(),
+            pdf_is_outdated=True,
+        )
+        missing_pdf = Topic.objects.create(
+            module=module,
+            title='Missing PDF',
+            pdf_is_outdated=False,
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.latest_targets)
+        apps = executor.loader.project_state(self.latest_targets).apps
+        MigratedTopic = apps.get_model('learning_modules', 'ModuleTopic')
+
+        self.assertTrue(MigratedTopic.objects.get(pk=current_pdf.pk).pdf_is_outdated)
+        self.assertTrue(
+            MigratedTopic.objects.get(pk=already_outdated_pdf.pk).pdf_is_outdated,
+        )
+        self.assertFalse(MigratedTopic.objects.get(pk=missing_pdf.pk).pdf_is_outdated)
