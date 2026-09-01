@@ -721,7 +721,8 @@ test('supports keyboard row actions and safe roster removal', async ({ page }) =
   await expect(jamieRow).toHaveCount(0)
 })
 
-test('searches, selects, and reactivates students with the streamlined picker', async ({ page }) => {
+test('searches, selects, and reactivates students with the streamlined picker', async ({ page }, testInfo) => {
+  const importedStudentNumber = `E2E-NEW-${String(testInfo.retry + 1).padStart(2, '0')}`
   await openClasses(page)
   await selectClass(page, 'E2E101')
   await page.getByRole('button', { name: 'Add students' }).click()
@@ -783,13 +784,19 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await dialog.getByTitle('Close').click()
   await expect(page.getByRole('row').filter({ hasText: 'Jamie Santos' })).toBeVisible()
 
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.locator('.class-list__item')
+    .filter({ hasText: 'E2E102' })
+    .filter({ hasText: 'E2E-B' })
+    .click()
+  await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
   await page.getByRole('button', { name: 'Add students' }).click()
   const importDialog = page.getByRole('dialog', { name: 'Add students' })
   await importDialog.getByRole('tab', { name: 'Import CSV' }).click()
   await importDialog.getByLabel('Student list CSV').setInputFiles({
     name: 'new-student.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from("\uFEFFStudent Number,Last Name,First Name,Middle Name,Email,Section\r\nE2E-NEW-01,young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n"),
+    buffer: Buffer.from(`\uFEFFStudent Number,Last Name,First Name,Middle Name,Email,Section\r\n${importedStudentNumber},young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n`),
   })
   await expect(importDialog.getByLabel('Roster import preview')).toContainText('Create account')
   await expect(importDialog.getByLabel('Roster import preview')).toContainText('Robin Mae Ann-Marie Young')
@@ -806,9 +813,10 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await expect(importDialog.getByRole('button', { name: 'Download credentials again' })).toBeVisible()
   await importDialog.getByTitle('Close').click()
 
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'More navigation', exact: true }).click()
   await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
-  await page.getByLabel('Student number').fill('E2E-NEW-01')
+  await page.getByLabel('Student number').fill(importedStudentNumber)
   await page.getByLabel('Password').fill(temporaryPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: 'Create your password' })).toBeVisible()
@@ -845,7 +853,9 @@ test('archives and restores a class without deleting it', async ({ page }) => {
   await expect(page.locator('.class-form')).toContainText('Status: Active')
 })
 
-test('creates subjects and manages terms without leaving Schedule Setup', async ({ page }) => {
+test('creates subjects and manages terms without leaving Schedule Setup', async ({ page }, testInfo) => {
+  const createdSubjectCode = `E2E${103 + testInfo.retry}`
+  const createdSchoolYear = 2032 + testInfo.retry
   await openClasses(page)
   await startNewSchedule(page)
 
@@ -874,14 +884,19 @@ test('creates subjects and manages terms without leaving Schedule Setup', async 
   await dialog.getByLabel('Code').fill('E2E101')
   await dialog.getByLabel('Name').fill('Computer Networks')
   await dialog.getByLabel('Description').fill('Created from Schedule Setup.')
+  const duplicateSubjectResponse = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/subjects/subjects/'
+  ))
   await dialog.getByRole('button', { name: 'Create subject', exact: true }).click()
+  expect((await duplicateSubjectResponse).status()).toBe(400)
   await expect(dialog.getByRole('alert')).toBeVisible()
   await expect(dialog.getByLabel('Code')).toHaveValue('E2E101')
   await expect(dialog.getByLabel('Name')).toHaveValue('Computer Networks')
-  await dialog.getByLabel('Code').fill('E2E103')
+  await dialog.getByLabel('Code').fill(createdSubjectCode)
   await dialog.getByRole('button', { name: 'Create subject', exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(subjectSelect.locator('option:checked')).toHaveText('E2E103 Computer Networks')
+  await expect(subjectSelect.locator('option:checked')).toHaveText(`${createdSubjectCode} Computer Networks`)
   await expect(form.getByLabel('Section')).toHaveValue('UNSAVED-DRAFT')
   await expect(createSubjectButton).toBeFocused()
 
@@ -889,15 +904,15 @@ test('creates subjects and manages terms without leaving Schedule Setup', async 
   dialog = page.getByRole('dialog', { name: 'Manage terms' })
   await expect(dialog.getByLabel('School year')).toBeFocused()
   await dialog.getByRole('button', { name: 'New school year' }).click()
-  await dialog.getByLabel('Start year').fill('2032')
-  await expect(dialog.getByLabel('End year')).toHaveValue('2033')
+  await dialog.getByLabel('Start year').fill(String(createdSchoolYear))
+  await expect(dialog.getByLabel('End year')).toHaveValue(String(createdSchoolYear + 1))
   await dialog.getByRole('button', { name: 'Create school year' }).click()
-  await expect(dialog).toContainText('2032-2033 created and selected.')
+  await expect(dialog).toContainText(`${createdSchoolYear}-${createdSchoolYear + 1} created and selected.`)
   await expect(dialog.getByLabel('School year')).toHaveValue(/\d+/)
   await dialog.getByLabel('Semester', { exact: true }).selectOption('SUMMER')
   await dialog.getByRole('button', { name: 'Create term' }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(termSelect.locator('option:checked')).toHaveText('Summer 2032-2033')
+  await expect(termSelect.locator('option:checked')).toHaveText(`Summer ${createdSchoolYear}-${createdSchoolYear + 1}`)
   await expect(form.getByLabel('Section')).toHaveValue('UNSAVED-DRAFT')
   await expect(manageTermsButton).toBeFocused()
 
