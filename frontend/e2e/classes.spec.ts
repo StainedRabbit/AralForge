@@ -117,24 +117,56 @@ test('persists class selection and keeps class links scoped', async ({ page }, t
   await expect(attendanceDialog.getByRole('heading', { name: 'Santos, Jamie' })).toBeVisible()
   await attendanceDialog.getByRole('button', { name: 'Previous' }).click()
   await expect(attendanceDialog.getByRole('heading', { name: 'Rivera, Alex' })).toBeVisible()
+  let releaseFailedMark = () => undefined
+  const failedMarkGate = new Promise<void>((resolve) => { releaseFailedMark = resolve })
+  let failedMarkRequests = 0
   await page.route('**/api/attendance/sessions/*/mark/', async route => {
+    failedMarkRequests += 1
+    await failedMarkGate
     await route.fulfill({
       body: JSON.stringify({ detail: 'Temporary mark failure.' }),
       contentType: 'application/json',
       status: 500,
     })
-  }, { times: 1 })
+  })
   await attendanceDialog.getByRole('button', { name: 'Present', exact: true }).click()
+  await expect(attendanceDialog.getByRole('heading', { name: 'Santos, Jamie' })).toBeVisible()
+  await expect(attendanceDialog.getByRole('button', { name: 'Mark remaining Present' })).toBeDisabled()
+  await attendanceDialog.getByRole('button', { name: 'Absent', exact: true }).click()
+  await expect(attendanceDialog.getByRole('heading', { name: 'All 2 students are marked' })).toBeVisible()
+  await expect(attendanceDialog.getByText('Saving 2 marks...')).toBeVisible()
+  await expect(attendanceDialog.getByRole('button', { name: 'Finish' })).toBeDisabled()
+  await expect(attendanceDialog.getByRole('button', { name: 'History', exact: true })).toBeDisabled()
+  await expect(attendanceDialog.getByRole('button', { name: 'Close', exact: true })).toBeDisabled()
+  await expect.poll(() => failedMarkRequests).toBe(1)
+  releaseFailedMark()
   await expect(attendanceDialog).toContainText('Temporary mark failure.')
   await expect(attendanceDialog.getByRole('heading', { name: 'Rivera, Alex' })).toBeVisible()
   await page.unroute('**/api/attendance/sessions/*/mark/')
+
+  let releaseFirstSavedMark = () => undefined
+  const firstSavedMarkGate = new Promise<void>((resolve) => { releaseFirstSavedMark = resolve })
+  const savedMarkStatuses: string[] = []
+  await page.route('**/api/attendance/sessions/*/mark/', async route => {
+    const payload = route.request().postDataJSON() as { status: string }
+    savedMarkStatuses.push(payload.status)
+    if (savedMarkStatuses.length === 1) await firstSavedMarkGate
+    await route.continue()
+  })
   await attendanceDialog.getByRole('button', { name: 'Present', exact: true }).click()
   const secondStudentName = attendanceDialog.getByRole('heading', { name: 'Santos, Jamie' })
   await expect(secondStudentName).toBeVisible()
   await expect(secondStudentName).toBeFocused()
+  await attendanceDialog.getByRole('button', { name: 'Absent', exact: true }).click()
+  await expect(attendanceDialog.getByRole('heading', { name: 'All 2 students are marked' })).toBeVisible()
+  await expect(attendanceDialog.getByText('Saving 2 marks...')).toBeVisible()
+  await expect.poll(() => savedMarkStatuses).toEqual(['PRESENT'])
+  releaseFirstSavedMark()
+  await expect.poll(() => savedMarkStatuses).toEqual(['PRESENT', 'ABSENT'])
+  await expect(attendanceDialog.getByText(/Saving \d+ marks?\.\.\./)).toHaveCount(0)
+  await expect(attendanceDialog.getByRole('button', { name: 'Finish' })).toBeEnabled()
+  await page.unroute('**/api/attendance/sessions/*/mark/')
   await attendanceDialog.getByRole('button', { name: 'Undo last' }).click()
-  await expect(attendanceDialog.getByRole('heading', { name: 'Rivera, Alex' })).toBeVisible()
-  await page.keyboard.press('1')
   await expect(secondStudentName).toBeVisible()
   await attendanceDialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(attendanceDialog).toBeHidden()

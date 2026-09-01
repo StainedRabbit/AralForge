@@ -1,10 +1,12 @@
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
+from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
+from subjects.models import ScheduleStudent
 
 from .models import AttendanceRecord, AttendanceSession
 from .serializers import (
@@ -41,6 +43,23 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
                 subject__schedules__is_active=True,
             ),
         ).distinct()
+
+    def get_write_session(self, pk, student_id=None):
+        queryset = AttendanceSession.objects.only('id', 'points_possible', 'schedule_id')
+        if student_id is not None:
+            snapshot = AttendanceSession.roster_students.through.objects.filter(
+                attendancesession_id=OuterRef('pk'),
+            )
+            queryset = queryset.annotate(
+                snapshot_has_student=Exists(snapshot.filter(user_id=student_id)),
+                snapshot_has_students=Exists(snapshot),
+            )
+        session = get_object_or_404(
+            queryset,
+            pk=pk,
+        )
+        self.check_object_permissions(self.request, session)
+        return session
 
     @action(detail=False, methods=['post'], url_path='start')
     def start_session(self, request):
@@ -79,7 +98,7 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['put'], url_path='roster')
     def save_roster(self, request, pk=None):
-        session = self.get_object()
+        session = self.get_write_session(pk)
 
         if not session.schedule_id:
             return Response(
@@ -136,7 +155,11 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['put', 'delete'], url_path='mark')
     def mark_student(self, request, pk=None):
-        session = self.get_object()
+        try:
+            student_id_hint = int(request.data.get('student'))
+        except (TypeError, ValueError):
+            student_id_hint = None
+        session = self.get_write_session(pk, student_id_hint)
 
         if not session.schedule_id:
             return Response(
@@ -152,7 +175,7 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
                     {'detail': 'Choose a student.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            if student_id not in session_student_ids(session):
+            if not session_has_student(session, student_id):
                 return Response(
                     {'detail': 'The student is not part of this attendance roster.'},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -163,7 +186,7 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
         serializer = AttendanceRosterRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         submitted = serializer.validated_data
-        if submitted['student'] not in session_student_ids(session):
+        if not session_has_student(session, submitted['student']):
             return Response(
                 {'detail': 'The student is not part of this attendance roster.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -218,9 +241,44 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
 
 
 def session_student_ids(session):
-    snapshot_ids = set(session.roster_students.values_list('id', flat=True))
+    snapshot_ids = set(
+        session_roster_memberships(session).values_list('user_id', flat=True),
+    )
     if snapshot_ids:
         return snapshot_ids
     return set(
-        session.schedule.students.filter(is_active=True).values_list('student_id', flat=True),
+        ScheduleStudent.objects.filter(
+            is_active=True,
+            schedule_id=session.schedule_id,
+        ).values_list('student_id', flat=True),
+    )
+
+
+def session_has_student(session, student_id):
+    if hasattr(session, 'snapshot_has_student'):
+        if session.snapshot_has_student:
+            return True
+        if session.snapshot_has_students:
+            return False
+        return ScheduleStudent.objects.filter(
+            is_active=True,
+            schedule_id=session.schedule_id,
+            student_id=student_id,
+        ).exists()
+
+    snapshot = session_roster_memberships(session)
+    if snapshot.filter(user_id=student_id).exists():
+        return True
+    if snapshot.exists():
+        return False
+    return ScheduleStudent.objects.filter(
+        is_active=True,
+        schedule_id=session.schedule_id,
+        student_id=student_id,
+    ).exists()
+
+
+def session_roster_memberships(session):
+    return AttendanceSession.roster_students.through.objects.filter(
+        attendancesession_id=session.id,
     )

@@ -10,6 +10,10 @@ import { summarizeAttendance } from './attendanceHelpers'
 type AttendanceStatus = AttendanceRecord['status']
 type AttendanceDraft = { remarks: string; status: AttendanceStatus | '' }
 type AttendanceChange = { index: number; previous: AttendanceDraft; studentId: number }
+type AttendanceMarkOperation = AttendanceChange & {
+  next: AttendanceDraft
+  sessionId: number
+}
 type AttendanceStartResponse = { created: boolean; records: AttendanceRecord[]; session: AttendanceSession }
 export type AttendanceDialogTab = 'history' | 'take'
 
@@ -38,8 +42,9 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   const [excuseOpen, setExcuseOpen] = useState(false)
   const [excuseReason, setExcuseReason] = useState('')
   const [excuseError, setExcuseError] = useState('')
-  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pendingMarkCount, setPendingMarkCount] = useState(0)
+  const [closeRequested, setCloseRequested] = useState(false)
   const [message, setMessage] = useState('')
   const [sessionDate, setSessionDate] = useState(todayInputValue)
   const [lastChange, setLastChange] = useState<AttendanceChange | null>(null)
@@ -48,6 +53,11 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   const [reviewMode, setReviewMode] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const studentNameRef = useRef<HTMLHeadingElement>(null)
+  const dirtyRef = useRef(false)
+  const markQueueRef = useRef<AttendanceMarkOperation[]>([])
+  const processingMarksRef = useRef(false)
+  const closeRequestedRef = useRef(false)
+  const confirmedLastChangeRef = useRef<AttendanceChange | null>(null)
   const currentRoster = useMemo(() => getScheduleStudents(data, schedule.id), [data, schedule.id])
   const students = useMemo(
     () => activeSession ? getSessionStudents(data, activeSession) : currentRoster,
@@ -97,8 +107,9 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       setDrafts(nextDrafts)
       setCurrentIndex(firstUnmarked >= 0 ? firstUnmarked : 0)
       setShowSummary(firstUnmarked < 0)
-      setDirty(result.created)
+      dirtyRef.current = result.created
       setLastChange(null)
+      confirmedLastChangeRef.current = null
       setReviewMode(false)
       setFutureDateOpen(false)
       setMessage(result.created ? 'Attendance session started.' : 'Existing session loaded with the latest saved marks.')
@@ -109,50 +120,99 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
     }
   }
 
-  async function markCurrentStudent(status: AttendanceStatus, remarks = '') {
-    if (!activeSession || !currentStudent) return
+  function finishClose() {
+    closeRequestedRef.current = false
+    setCloseRequested(false)
+    onClose()
+    if (dirtyRef.current) void refresh().catch(() => undefined)
+  }
+
+  async function processMarkQueue() {
+    if (processingMarksRef.current) return
+    processingMarksRef.current = true
+
+    while (markQueueRef.current.length) {
+      const operation = markQueueRef.current[0]
+      try {
+        await api<AttendanceRecord>(`/attendance/sessions/${operation.sessionId}/mark/`, {
+          body: JSON.stringify({
+            remarks: operation.next.remarks,
+            status: operation.next.status,
+            student: operation.studentId,
+          }),
+          method: 'PUT',
+        })
+        markQueueRef.current.shift()
+        confirmedLastChangeRef.current = {
+          index: operation.index,
+          previous: operation.previous,
+          studentId: operation.studentId,
+        }
+        setPendingMarkCount(markQueueRef.current.length)
+      } catch (caughtError) {
+        const rollbackOperations = [...markQueueRef.current]
+        markQueueRef.current = []
+        processingMarksRef.current = false
+        closeRequestedRef.current = false
+        setCloseRequested(false)
+        setPendingMarkCount(0)
+        setDrafts((current) => {
+          const rolledBack = { ...current }
+          for (const queued of rollbackOperations.reverse()) {
+            rolledBack[queued.studentId] = queued.previous
+          }
+          return rolledBack
+        })
+        setCurrentIndex(operation.index)
+        setShowSummary(false)
+        setReviewMode(false)
+        setLastChange(confirmedLastChangeRef.current)
+        setMessage(toErrorMessage(caughtError))
+        return
+      }
+    }
+
+    processingMarksRef.current = false
+    setLastChange(confirmedLastChangeRef.current)
+    if (closeRequestedRef.current) finishClose()
+  }
+
+  function markCurrentStudent(status: AttendanceStatus, remarks = '') {
+    if (!activeSession || !currentStudent || saving || closeRequested) return
     const previousDraft = drafts[currentStudent.id] ?? { remarks: '', status: '' }
     const changedIndex = currentIndex
-    setSaving(true)
-    setMessage('')
-    try {
-      const record = await api<AttendanceRecord>(`/attendance/sessions/${activeSession.id}/mark/`, {
-        body: JSON.stringify({ remarks, status, student: currentStudent.id }),
-        method: 'PUT',
-      })
-      const nextDrafts = {
-        ...drafts,
-        [currentStudent.id]: { remarks: record.remarks, status: record.status },
-      }
-      const nextIndex = findNextUnmarked(students, nextDrafts, currentIndex)
-      setDrafts(nextDrafts)
-      setDirty(true)
-      setLastChange({ index: changedIndex, previous: previousDraft, studentId: currentStudent.id })
-      setExcuseOpen(false)
-      setExcuseError('')
+    const nextDraft = { remarks, status }
+    const nextDrafts = { ...drafts, [currentStudent.id]: nextDraft }
+    const nextIndex = findNextUnmarked(students, nextDrafts, currentIndex)
 
-      if (nextIndex < 0) {
-        setShowSummary(true)
-        setMessage('Attendance complete. Every student is marked.')
-        try {
-          await refresh()
-          setDirty(false)
-        } catch {
-          setMessage('Attendance was saved, but class data could not refresh. Try again before closing.')
-        }
-      } else {
-        setCurrentIndex(nextIndex)
-        setMessage(`${studentDisplayName(currentStudent)} marked ${statusLabel(status).toLowerCase()}.`)
-      }
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
+    setMessage('')
+    setDrafts(nextDrafts)
+    dirtyRef.current = true
+    setExcuseOpen(false)
+    setExcuseError('')
+
+    markQueueRef.current.push({
+      index: changedIndex,
+      next: nextDraft,
+      previous: previousDraft,
+      sessionId: activeSession.id,
+      studentId: currentStudent.id,
+    })
+    setPendingMarkCount(markQueueRef.current.length)
+
+    if (nextIndex < 0) {
+      setShowSummary(true)
+      setMessage('Attendance complete. Every student is marked.')
+    } else {
+      setCurrentIndex(nextIndex)
+      setMessage(`${studentDisplayName(currentStudent)} marked ${statusLabel(status).toLowerCase()}.`)
     }
+
+    void processMarkQueue()
   }
 
   async function undoLastMark() {
-    if (!activeSession || !lastChange || saving) return
+    if (!activeSession || !lastChange || saving || pendingMarkCount) return
     setSaving(true)
     setMessage('')
     try {
@@ -176,7 +236,8 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       setShowSummary(false)
       setReviewMode(false)
       setLastChange(null)
-      setDirty(true)
+      confirmedLastChangeRef.current = null
+      dirtyRef.current = true
       setMessage('Last attendance mark undone.')
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
@@ -186,7 +247,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   }
 
   async function markRemainingPresent() {
-    if (!activeSession || !unmarkedCount || saving) return
+    if (!activeSession || !unmarkedCount || saving || pendingMarkCount) return
     setSaving(true)
     setMessage('')
     try {
@@ -208,11 +269,10 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       ])))
       setBulkPresentOpen(false)
       setLastChange(null)
+      confirmedLastChangeRef.current = null
       setShowSummary(true)
-      setDirty(true)
+      dirtyRef.current = true
       setMessage(`${unmarkedCount} remaining student${unmarkedCount === 1 ? '' : 's'} marked present.`)
-      await refresh()
-      setDirty(false)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -221,7 +281,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   }
 
   function chooseStatus(status: AttendanceStatus) {
-    if (!currentStudent || saving) return
+    if (!currentStudent || saving || closeRequested) return
     if (status === 'EXCUSED') {
       setExcuseReason(currentDraft?.status === 'EXCUSED' ? currentDraft.remarks : '')
       setExcuseError('')
@@ -267,13 +327,13 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   }
 
   async function synchronizeWorkspace() {
-    if (!dirty) return
+    if (!dirtyRef.current) return
     await refresh()
-    setDirty(false)
+    dirtyRef.current = false
   }
 
   async function openHistory() {
-    if (saving) return
+    if (saving || pendingMarkCount) return
     setSaving(true)
     setMessage('')
     try {
@@ -286,16 +346,14 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
     }
   }
 
-  async function closeDialog() {
+  function closeDialog() {
     if (saving) return
-    setSaving(true)
-    try {
-      await synchronizeWorkspace()
-    } catch {
-      // Individual marks are already persisted; closing must remain available.
-    } finally {
-      onClose()
+    if (pendingMarkCount) {
+      closeRequestedRef.current = true
+      setCloseRequested(true)
+      return
     }
+    finishClose()
   }
 
   useEffect(() => {
@@ -345,7 +403,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
       const target = event.target as HTMLElement
       if (target.matches('input, textarea, select, [contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
-      if (!activeSession || showSummary || excuseOpen || saving) return
+      if (!activeSession || showSummary || excuseOpen || saving || closeRequested) return
 
       const shortcutStatus: Record<string, AttendanceStatus> = {
         '1': 'PRESENT',
@@ -375,19 +433,19 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
   return (
     <div aria-labelledby="class-attendance-title" aria-modal="true" className="attendance-modal" role="dialog">
-      <button aria-label="Close attendance" className="attendance-modal__backdrop" disabled={saving} onClick={() => void closeDialog()} type="button" />
+      <button aria-label="Close attendance" className="attendance-modal__backdrop" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => closeDialog()} type="button" />
       <div className="attendance-modal__panel attendance-modal__panel--wide class-attendance-dialog" ref={panelRef} tabIndex={-1}>
         <div className="attendance-modal__header">
           <div>
             <strong id="class-attendance-title">Class attendance</strong>
             <span>{schedule.subject_code} {schedule.section || 'No section'} - {schedule.term_name}</span>
           </div>
-          <button aria-label="Close" className="icon-button" disabled={saving} onClick={() => void closeDialog()} title="Close" type="button"><Icon name="close" /></button>
+          <button aria-label="Close" className="icon-button" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => closeDialog()} title="Close" type="button"><Icon name="close" /></button>
         </div>
 
         <div aria-label="Attendance views" className="class-attendance-dialog__tabs" role="tablist">
           <button aria-selected={tab === 'take'} className={tab === 'take' ? 'active' : ''} disabled={saving} onClick={() => setTab('take')} role="tab" type="button">Take attendance</button>
-          <button aria-selected={tab === 'history'} className={tab === 'history' ? 'active' : ''} disabled={saving} onClick={() => void openHistory()} role="tab" type="button">History</button>
+          <button aria-selected={tab === 'history'} className={tab === 'history' ? 'active' : ''} disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => void openHistory()} role="tab" type="button">History</button>
         </div>
 
         {tab === 'take' ? <div className="attendance-roll-call">
@@ -421,13 +479,19 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
             onHistory={() => void openHistory()}
             onReview={() => { setCurrentIndex(0); setReviewMode(true); setShowSummary(false); setMessage('Reviewing attendance from the first student.') }}
             onUndo={lastChange ? () => void undoLastMark() : undefined}
+            closeRequested={closeRequested}
+            pendingMarkCount={pendingMarkCount}
             saving={saving}
             summary={summary}
             total={students.length}
           /> : currentStudent ? <div className="attendance-roll-call__runner">
             <div className="attendance-roll-call__progress">
               <div><strong>{currentIndex + 1} of {students.length}</strong><span>{formatDate(activeSession.date)}</span></div>
-              <div><span>{markedCount} marked</span>{lastChange ? <button className="button button--secondary button--compact" disabled={saving} onClick={() => void undoLastMark()} type="button">Undo last</button> : null}</div>
+              <div>
+                <span>{markedCount} marked</span>
+                {pendingMarkCount ? <span aria-live="polite">Saving {pendingMarkCount} mark{pendingMarkCount === 1 ? '' : 's'}...</span> : null}
+                {lastChange ? <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => void undoLastMark()} type="button">Undo last</button> : null}
+              </div>
             </div>
             <div className="attendance-student-card">
               <div className="attendance-student-card__identity">
@@ -438,15 +502,15 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
             {excuseOpen ? <div className="attendance-excuse-form">
               <label className="admin-field" htmlFor={`attendance-excuse-${currentStudent.id}`}>
                 <span>Excuse reason</span>
-                <textarea aria-describedby={excuseError ? 'attendance-excuse-error' : undefined} aria-invalid={Boolean(excuseError)} autoFocus disabled={saving} id={`attendance-excuse-${currentStudent.id}`} onChange={(event) => { setExcuseReason(event.target.value); setExcuseError('') }} placeholder="Enter the reason this student is excused" rows={3} value={excuseReason} />
+                <textarea aria-describedby={excuseError ? 'attendance-excuse-error' : undefined} aria-invalid={Boolean(excuseError)} autoFocus disabled={saving || closeRequested} id={`attendance-excuse-${currentStudent.id}`} onChange={(event) => { setExcuseReason(event.target.value); setExcuseError('') }} placeholder="Enter the reason this student is excused" rows={3} value={excuseReason} />
               </label>
               {excuseError ? <small className="class-score-field-error" id="attendance-excuse-error">{excuseError}</small> : null}
               <div className="attendance-excuse-form__actions">
-                <button className="button button--secondary" disabled={saving} onClick={() => { setExcuseOpen(false); setExcuseError('') }} type="button">Cancel</button>
-                <button className="button button--primary" disabled={saving} onClick={confirmExcused} type="button"><Icon name="save" /><span>{saving ? 'Saving...' : 'Confirm excused'}</span></button>
+                <button className="button button--secondary" disabled={saving || closeRequested} onClick={() => { setExcuseOpen(false); setExcuseError('') }} type="button">Cancel</button>
+                <button className="button button--primary" disabled={saving || closeRequested} onClick={confirmExcused} type="button"><Icon name="save" /><span>Confirm excused</span></button>
               </div>
             </div> : <div aria-label={`Mark attendance for ${studentDisplayName(currentStudent)}`} className="attendance-status-actions">
-              {attendanceStatuses.map((option, index) => <button aria-keyshortcuts={`${index + 1}`} aria-label={option.label} aria-pressed={currentDraft?.status === option.status} className={`attendance-status-action attendance-status-action--${option.status.toLowerCase()}`} disabled={saving} key={option.status} onClick={() => chooseStatus(option.status)} type="button">
+              {attendanceStatuses.map((option, index) => <button aria-keyshortcuts={`${index + 1}`} aria-label={option.label} aria-pressed={currentDraft?.status === option.status} className={`attendance-status-action attendance-status-action--${option.status.toLowerCase()}`} disabled={saving || closeRequested} key={option.status} onClick={() => chooseStatus(option.status)} type="button">
                 <Icon name={option.icon} /><span>{option.label}</span><small>{index + 1}</small>
               </button>)}
             </div>}
@@ -461,10 +525,10 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
                 <strong>Mark {unmarkedCount} remaining present?</strong>
                 <span>Already marked students will not change.</span>
                 <div>
-                  <button className="button button--secondary button--compact" disabled={saving} onClick={() => setBulkPresentOpen(false)} type="button">Cancel</button>
-                  <button className="button button--primary button--compact" disabled={saving} onClick={() => void markRemainingPresent()} type="button">Confirm</button>
+                  <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount)} onClick={() => setBulkPresentOpen(false)} type="button">Cancel</button>
+                  <button className="button button--primary button--compact" disabled={saving || Boolean(pendingMarkCount)} onClick={() => void markRemainingPresent()} type="button">Confirm</button>
                 </div>
-              </div> : <button className="button button--secondary button--compact" disabled={saving} onClick={() => setBulkPresentOpen(true)} type="button">Mark remaining Present</button>}
+              </div> : <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => setBulkPresentOpen(true)} type="button">Mark remaining Present</button>}
             </div> : null}
             <p className="attendance-keyboard-hint">Keyboard: 1 Present · 2 Late · 3 Absent · 4 Excused · ← Previous · → Next · U Undo</p>
             <div className="attendance-roll-call__navigation">
@@ -478,11 +542,13 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   )
 }
 
-function AttendanceCompletion({ onClose, onHistory, onReview, onUndo, saving, summary, total }: {
+function AttendanceCompletion({ closeRequested, onClose, onHistory, onReview, onUndo, pendingMarkCount, saving, summary, total }: {
+  closeRequested: boolean
   onClose: () => void
   onHistory: () => void
   onReview: () => void
   onUndo?: () => void
+  pendingMarkCount: number
   saving: boolean
   summary: ReturnType<typeof summarizeDrafts>
   total: number
@@ -498,11 +564,12 @@ function AttendanceCompletion({ onClose, onHistory, onReview, onUndo, saving, su
       <AttendanceTotal label="Absent" value={summary.absent} />
       <AttendanceTotal label="Excused" value={summary.excused} />
     </div>
+    {pendingMarkCount ? <p aria-live="polite" className="admin-message">Saving {pendingMarkCount} mark{pendingMarkCount === 1 ? '' : 's'}...</p> : null}
     <div className="class-modal-actions">
-      {onUndo ? <button className="button button--secondary" disabled={saving} onClick={onUndo} type="button">Undo last</button> : null}
-      <button className="button button--secondary" disabled={saving} onClick={onReview} type="button"><Icon name="arrow-left" /><span>Review from first</span></button>
-      <button className="button button--secondary" disabled={saving} onClick={onHistory} type="button"><Icon name="search" /><span>History</span></button>
-      <button className="button button--primary" disabled={saving} onClick={onClose} type="button"><Icon name="check" /><span>Finish</span></button>
+      {onUndo ? <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onUndo} type="button">Undo last</button> : null}
+      <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onReview} type="button"><Icon name="arrow-left" /><span>Review from first</span></button>
+      <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onHistory} type="button"><Icon name="search" /><span>History</span></button>
+      <button className="button button--primary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onClose} type="button"><Icon name="check" /><span>Finish</span></button>
     </div>
   </div>
 }

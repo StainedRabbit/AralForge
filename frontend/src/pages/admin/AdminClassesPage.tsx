@@ -978,6 +978,13 @@ function ClassRoster({
     ])
   }, [queryClient, selectedSchedule?.id])
 
+  const refreshAttendanceWorkspace = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      exact: true,
+      queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
+    })
+  }, [queryClient, selectedSchedule?.id])
+
   useEffect(() => {
     const target = rosterLoadMoreRef.current
     if (!target || !hasNextRosterPage || isNextRosterPageError) return
@@ -1278,7 +1285,7 @@ function ClassRoster({
           data={attendanceData}
           initialTab="take"
           key={selectedSchedule.id}
-          refresh={refreshClassRoster}
+          refresh={refreshAttendanceWorkspace}
           schedule={selectedSchedule}
           onClose={() => setIsAttendanceOpen(false)}
         />

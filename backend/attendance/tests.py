@@ -1,9 +1,12 @@
 from datetime import time
 
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
@@ -177,6 +180,87 @@ class ClassAttendanceApiTests(APITestCase):
             AttendanceRecord.objects.get(session=session, student=self.student).status,
             'LATE',
         )
+
+    def test_mark_student_uses_a_lean_bounded_query_for_create_and_update(self):
+        session = self.create_session(self.schedule_a)
+        url = reverse('attendance:attendance-session-mark-student', args=[session.id])
+        access_token = RefreshToken.for_user(self.teacher).access_token
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        with CaptureQueriesContext(connection) as create_queries:
+            created = self.client.put(
+                url,
+                {'status': 'PRESENT', 'student': self.student.id},
+                format='json',
+            )
+        with CaptureQueriesContext(connection) as update_queries:
+            updated = self.client.put(
+                url,
+                {'status': 'LATE', 'student': self.student.id},
+                format='json',
+            )
+
+        self.assertEqual(created.status_code, status.HTTP_200_OK)
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(
+            len(create_queries),
+            9,
+            msg='\n'.join(query['sql'] for query in create_queries),
+        )
+        self.assertLessEqual(
+            len(update_queries),
+            7,
+            msg='\n'.join(query['sql'] for query in update_queries),
+        )
+        for queries in (create_queries, update_queries):
+            session_queries = [
+                query['sql']
+                for query in queries
+                if 'FROM "attendance_attendancesession"' in query['sql']
+            ]
+            self.assertEqual(len(session_queries), 1)
+            self.assertNotIn(' JOIN ', session_queries[0].upper())
+            self.assertNotIn('"subjects_subject"', session_queries[0])
+            self.assertNotIn('"subjects_subjectschedule"', session_queries[0])
+            self.assertNotIn('"subjects_schoolyearsemester"', session_queries[0])
+            self.assertFalse(any(
+                '"accounts_user"."password"' in query['sql']
+                and 'attendance_attendancesession_roster_students' in query['sql']
+                for query in queries
+            ))
+
+    def test_roster_save_uses_a_lean_session_and_scalar_roster_membership_query(self):
+        session = self.create_session(self.schedule_a)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.put(
+                reverse('attendance:attendance-session-save-roster', args=[session.id]),
+                {
+                    'records': [
+                        {'status': 'PRESENT', 'student': self.student.id},
+                    ],
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        session_queries = [
+            query['sql']
+            for query in queries
+            if 'FROM "attendance_attendancesession"' in query['sql']
+        ]
+        self.assertEqual(len(session_queries), 1)
+        self.assertNotIn(' JOIN ', session_queries[0].upper())
+        self.assertTrue(any(
+            'attendance_attendancesession_roster_students' in query['sql']
+            for query in queries
+        ))
+        self.assertFalse(any(
+            '"accounts_user"."password"' in query['sql']
+            and 'attendance_attendancesession_roster_students' in query['sql']
+            for query in queries
+        ))
 
     def test_marking_non_excused_clears_an_existing_excuse_reason(self):
         session = self.create_session(self.schedule_a)
