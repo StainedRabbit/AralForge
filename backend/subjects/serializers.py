@@ -1,4 +1,7 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
+from accounts.services import clean_student_number
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .scheduling import normalize_schedule_days
@@ -106,6 +109,19 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('End time must be after start time.')
 
         return attrs
+
+
+class RosterStudentCreateSerializer(serializers.Serializer):
+    student_number = serializers.CharField(max_length=30, trim_whitespace=True)
+    first_name = serializers.CharField(max_length=150, trim_whitespace=True)
+    last_name = serializers.CharField(max_length=150, trim_whitespace=True)
+    email = serializers.EmailField(allow_blank=True, required=False)
+
+    def validate_student_number(self, value):
+        try:
+            return clean_student_number(value)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
 
 
 class ScheduleStudentSerializer(serializers.ModelSerializer):

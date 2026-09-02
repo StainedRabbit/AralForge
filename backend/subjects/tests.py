@@ -450,6 +450,161 @@ class SubjectScheduleApiTests(APITestCase):
         enrollment.refresh_from_db()
         self.assertTrue(enrollment.is_active)
 
+    def test_create_student_action_creates_account_credentials_and_enrollment_atomically(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            reverse('subjects:subject-schedule-create-student', args=[schedule.id]),
+            {
+                'student_number': 'NEW-2030-01',
+                'first_name': 'Robin',
+                'last_name': 'Young',
+                'email': 'robin@example.com',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        profile = StudentProfile.objects.select_related('user').get(student_number='NEW-2030-01')
+        enrollment = ScheduleStudent.objects.get(schedule=schedule, student=profile.user)
+        self.assertTrue(enrollment.is_active)
+        self.assertEqual(enrollment.added_by, self.teacher)
+        self.assertEqual(profile.user.first_name, 'Robin')
+        self.assertEqual(profile.user.last_name, 'Young')
+        self.assertEqual(profile.user.email, 'robin@example.com')
+        self.assertEqual(profile.user.username, 'NEW-2030-01')
+        self.assertTrue(profile.user.must_change_password)
+        self.assertTrue(profile.user.check_password('NEW-2030-01'))
+        self.assertEqual(response.data['student']['display_name'], 'Robin Young')
+        self.assertEqual(response.data['enrollment']['id'], enrollment.id)
+        self.assertEqual(response.data['credentials'], {
+            'username': 'NEW-2030-01',
+            'temporary_password': 'NEW-2030-01',
+            'must_change_password': True,
+        })
+
+    def test_create_student_action_returns_existing_account_enrollment_status(self):
+        schedule = self.create_schedule()
+        existing = get_user_model().objects.create_user(
+            username='Existing-2030-01',
+            first_name='Existing',
+            last_name='Learner',
+            role=get_user_model().Role.STUDENT,
+        )
+        profile = StudentProfile.objects.create(
+            user=existing,
+            student_number='Existing-2030-01',
+        )
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-create-student', args=[schedule.id])
+        payload = {
+            'student_number': 'existing-2030-01',
+            'first_name': 'Replacement',
+            'last_name': 'Name',
+        }
+
+        not_enrolled = self.client.post(url, payload, format='json')
+        self.assertEqual(not_enrolled.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(not_enrolled.data['code'], 'student_exists')
+        self.assertEqual(not_enrolled.data['student']['id'], existing.id)
+        self.assertEqual(not_enrolled.data['student']['enrollment_status'], 'not_enrolled')
+
+        enrollment = ScheduleStudent.objects.create(
+            schedule=schedule,
+            student=existing,
+            is_active=False,
+        )
+        inactive = self.client.post(url, payload, format='json')
+        self.assertEqual(inactive.data['student']['enrollment_status'], 'inactive')
+
+        enrollment.is_active = True
+        enrollment.save(update_fields=('is_active',))
+        active = self.client.post(url, payload, format='json')
+        self.assertEqual(active.data['student']['enrollment_status'], 'active')
+        profile.user.refresh_from_db()
+        self.assertEqual(profile.user.first_name, 'Existing')
+
+        existing.is_active = False
+        existing.save(update_fields=('is_active',))
+        unavailable = self.client.post(url, payload, format='json')
+        self.assertEqual(unavailable.data['code'], 'student_unavailable')
+        self.assertEqual(unavailable.data['student']['enrollment_status'], 'unavailable')
+
+        get_user_model().objects.create_user(
+            username='USERNAME-CONFLICT-01',
+            role=get_user_model().Role.TEACHER,
+        )
+        username_conflict = self.client.post(url, {
+            'student_number': 'username-conflict-01',
+            'first_name': 'Conflict',
+            'last_name': 'Account',
+        }, format='json')
+        self.assertEqual(username_conflict.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(username_conflict.data['code'], 'student_unavailable')
+        self.assertNotIn('student', username_conflict.data)
+
+    def test_create_student_action_rejects_invalid_archived_and_unauthorized_requests(self):
+        schedule = self.create_schedule()
+        url = reverse('subjects:subject-schedule-create-student', args=[schedule.id])
+        self.client.force_authenticate(self.teacher)
+
+        for field, value in (
+            ('student_number', 'invalid number'),
+            ('first_name', ''),
+            ('last_name', ''),
+            ('email', 'not-an-email'),
+        ):
+            with self.subTest(field=field):
+                payload = {
+                    'student_number': 'VALID-2030-01',
+                    'first_name': 'Valid',
+                    'last_name': 'Student',
+                    'email': '',
+                }
+                payload[field] = value
+                response = self.client.post(url, payload, format='json')
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        schedule.is_active = False
+        schedule.save(update_fields=('is_active',))
+        archived = self.client.post(url, {
+            'student_number': 'ARCHIVED-2030-01',
+            'first_name': 'Archived',
+            'last_name': 'Student',
+        }, format='json')
+        self.assertEqual(archived.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(StudentProfile.objects.filter(student_number='ARCHIVED-2030-01').exists())
+
+        schedule.is_active = True
+        schedule.save(update_fields=('is_active',))
+        self.client.force_authenticate(self.student)
+        unauthorized = self.client.post(url, {
+            'student_number': 'DENIED-2030-01',
+            'first_name': 'Denied',
+            'last_name': 'Student',
+        }, format='json')
+        self.assertEqual(unauthorized.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(StudentProfile.objects.filter(student_number='DENIED-2030-01').exists())
+
+    def test_create_student_action_rolls_back_account_when_enrollment_fails(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+
+        with patch('subjects.views.ScheduleStudent.objects.create', side_effect=RuntimeError('failed enrollment')):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse('subjects:subject-schedule-create-student', args=[schedule.id]),
+                    {
+                        'student_number': 'ROLLBACK-2030-01',
+                        'first_name': 'Rollback',
+                        'last_name': 'Student',
+                    },
+                    format='json',
+                )
+
+        self.assertFalse(StudentProfile.objects.filter(student_number='ROLLBACK-2030-01').exists())
+
     def test_import_roster_matches_existing_accounts_only(self):
         schedule = self.create_schedule()
         StudentProfile.objects.create(

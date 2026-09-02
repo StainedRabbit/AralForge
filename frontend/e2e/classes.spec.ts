@@ -812,16 +812,23 @@ test('supports keyboard row actions and safe roster removal', async ({ page }) =
 
 test('searches, selects, and reactivates students with the streamlined picker', async ({ page }, testInfo) => {
   const importedStudentNumber = `E2E-NEW-${String(testInfo.retry + 1).padStart(2, '0')}`
+  const createdStudentNumber = `E2E-DIRECT-${String(testInfo.retry + 1).padStart(2, '0')}`
+  const secondCreatedStudentNumber = `${createdStudentNumber}-B`
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' })
   await openClasses(page)
   await selectClass(page, 'E2E101')
   await page.getByRole('button', { name: 'Add students' }).click()
 
   const dialog = page.getByRole('dialog', { name: 'Add students' })
   const chooseTab = dialog.getByRole('tab', { name: 'Choose students' })
+  const createTab = dialog.getByRole('tab', { name: 'Create new' })
   const importTab = dialog.getByRole('tab', { name: 'Import CSV' })
   await expect(chooseTab).toHaveAttribute('aria-selected', 'true')
   await chooseTab.focus()
   await chooseTab.press('ArrowRight')
+  await expect(createTab).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog.getByLabel('Student number')).toBeVisible()
+  await createTab.press('ArrowRight')
   await expect(importTab).toHaveAttribute('aria-selected', 'true')
   await expect(dialog.getByLabel('Student list CSV')).toBeVisible()
   const downloadPromise = page.waitForEvent('download')
@@ -831,7 +838,67 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   const downloadPath = await download.path()
   expect(downloadPath).not.toBeNull()
   expect(await readFile(downloadPath!, 'utf8')).toBe('Student Number,Last Name,First Name,Middle Name\r\n')
-  await chooseTab.click()
+  await createTab.click()
+
+  const createStudentNumberInput = dialog.getByLabel('Student number')
+  await expect(createStudentNumberInput).toBeFocused()
+  await createStudentNumberInput.fill('invalid number')
+  await dialog.getByLabel('First name').fill('Temporary')
+  await dialog.getByLabel('Last name').fill('Entry')
+  await dialog.getByRole('button', { name: 'Create and add student' }).click()
+  await expect(dialog).toContainText('Student number may contain only')
+  await expect(createStudentNumberInput).toHaveAttribute('aria-invalid', 'true')
+
+  await createStudentNumberInput.fill('E2E-003')
+  await dialog.getByRole('button', { name: 'Create and add student' }).click()
+  const existingAccount = dialog.getByRole('region', { name: 'Existing student account' })
+  await expect(existingAccount).toContainText('Morgan Lee')
+  await expect(existingAccount).toContainText('Not enrolled')
+  await existingAccount.getByRole('button', { name: 'Use existing student' }).click()
+  await expect(chooseTab).toHaveAttribute('aria-selected', 'true')
+  const selection = dialog.getByRole('region', { name: 'Selected students' })
+  await expect(selection).toContainText('Morgan Lee')
+  await selection.getByRole('button', { name: 'Remove Morgan Lee' }).click()
+
+  await createTab.click()
+  await createStudentNumberInput.fill(createdStudentNumber)
+  await dialog.getByLabel('First name').fill('Direct')
+  await dialog.getByLabel('Last name').fill('Student')
+  await dialog.getByLabel('Email').fill('direct.student@example.com')
+  let directCreateRequests = 0
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/create-student/')) directCreateRequests += 1
+  })
+  await dialog.getByRole('button', { name: 'Create and add student' }).dblclick()
+  const createSuccess = dialog.getByRole('status', { name: 'Student created' })
+  await expect(createSuccess).toContainText('Direct Student')
+  await expect(createSuccess).toContainText(createdStudentNumber)
+  expect(directCreateRequests).toBe(1)
+  await createSuccess.getByRole('button', { name: 'Copy credentials' }).click()
+  await expect(createSuccess).toContainText('Credentials copied.')
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(createdStudentNumber)
+  await createSuccess.getByRole('button', { name: 'Add another' }).click()
+  await expect(createStudentNumberInput).toBeFocused()
+  await createStudentNumberInput.fill(secondCreatedStudentNumber)
+  await dialog.getByLabel('First name').fill('Second')
+  await dialog.getByLabel('Last name').fill('Student')
+  await dialog.getByRole('button', { name: 'Create and add student' }).click()
+  await expect(createSuccess).toContainText('Second Student')
+  await createSuccess.getByRole('button', { name: 'Done' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: 'Direct Student' })).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: 'Second Student' })).toBeVisible()
+
+  const activeJamieRow = page.getByRole('row').filter({ hasText: 'Jamie Santos' })
+  if (await activeJamieRow.count()) {
+    await activeJamieRow.getByRole('button', { name: 'More actions for Jamie Santos' }).click()
+    await page.getByRole('menuitem', { name: 'Remove from roster' }).click()
+    await page.getByRole('dialog', { name: 'Remove this student?' }).getByRole('button', { name: 'Remove from active roster' }).click()
+    await expect(activeJamieRow).toHaveCount(0)
+  }
+
+  await page.getByRole('button', { name: 'Add students' }).click()
+  await expect(chooseTab).toHaveAttribute('aria-selected', 'true')
 
   const search = dialog.getByRole('combobox', { name: 'Find a student' })
   await expect(search).toBeFocused()
@@ -842,7 +909,6 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await search.press('ArrowDown')
   await search.press('Enter')
 
-  const selection = dialog.getByRole('region', { name: 'Selected students' })
   await expect(selection).toContainText('Selected (1)')
   await expect(selection).toContainText('Jamie Santos')
   await search.fill('Morgan')
@@ -868,6 +934,15 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await search.press('Enter')
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(selection.locator('li')).toBeVisible()
+  await createTab.click()
+  await expect(dialog.getByRole('button', { name: 'Create and add student' })).toBeVisible()
+  const mobileDialogMetrics = await dialog.locator('.attendance-modal__panel').evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(mobileDialogMetrics.scrollWidth).toBeLessThanOrEqual(mobileDialogMetrics.clientWidth + 1)
+  await chooseTab.click()
+  await expect(selection).toContainText('Jamie Santos')
   await dialog.getByRole('button', { name: 'Add 1' }).click()
   await expect(dialog).toContainText('0 added, 1 reactivated, 0 already active.')
   await dialog.getByTitle('Close').click()

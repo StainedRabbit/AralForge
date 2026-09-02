@@ -23,6 +23,7 @@ from .serializers import (
     ScheduleStudentSerializer,
     SchoolYearSemesterSerializer,
     SchoolYearSerializer,
+    RosterStudentCreateSerializer,
     SubjectScheduleSerializer,
     SubjectSerializer,
 )
@@ -327,6 +328,60 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         result = enroll_users(schedule, students, request.user)
         return Response(result)
 
+    @action(detail=True, methods=['post'], url_path='create-student')
+    @transaction.atomic
+    def create_student(self, request, pk=None):
+        schedule = self.get_object()
+        if not schedule.is_active:
+            return Response(
+                {'detail': 'Restore this class before adding a new student.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RosterStudentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        student_number = serializer.validated_data['student_number']
+        existing_profile = (
+            StudentProfile.objects.select_for_update()
+            .select_related('user')
+            .filter(student_number__iexact=student_number)
+            .first()
+        )
+        if existing_profile:
+            return existing_roster_student_response(schedule, existing_profile)
+
+        username_conflict = User.objects.filter(username__iexact=student_number).exists()
+        if username_conflict:
+            return Response({
+                'code': 'student_unavailable',
+                'detail': 'This student number conflicts with an existing account. Review it in Student Management.',
+            }, status=status.HTTP_409_CONFLICT)
+
+        profile = create_student_account(
+            student_number=student_number,
+            first_name=serializer.validated_data['first_name'],
+            last_name=serializer.validated_data['last_name'],
+            email=serializer.validated_data.get('email', ''),
+            is_active=True,
+        )
+        enrollment = ScheduleStudent.objects.create(
+            schedule=schedule,
+            student=profile.user,
+            added_by=request.user,
+        )
+        return Response({
+            'student': roster_student_metadata(profile, 'active'),
+            'enrollment': ScheduleStudentSerializer(
+                enrollment,
+                context=self.get_serializer_context(),
+            ).data,
+            'credentials': {
+                'username': profile.student_number,
+                'temporary_password': profile.student_number,
+                'must_change_password': True,
+            },
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], url_path='import-roster')
     @transaction.atomic
     def import_roster(self, request, pk=None):
@@ -567,6 +622,46 @@ def schedule_dependency_counts(schedule):
         if count:
             dependencies[accessor] = count
     return dependencies
+
+
+def roster_student_metadata(profile, enrollment_status):
+    return {
+        'id': profile.user_id,
+        'display_name': profile.user.get_full_name().strip() or profile.student_number,
+        'student_number': profile.student_number,
+        'enrollment_status': enrollment_status,
+    }
+
+
+def existing_roster_student_response(schedule, profile):
+    user = profile.user
+    if user.role != User.Role.STUDENT or not user.is_active or not profile.is_active:
+        return Response({
+            'code': 'student_unavailable',
+            'detail': 'This student account is disabled and must be reviewed in Student Management.',
+            'student': roster_student_metadata(profile, 'unavailable'),
+        }, status=status.HTTP_409_CONFLICT)
+
+    enrollment = (
+        ScheduleStudent.objects.select_for_update()
+        .filter(schedule=schedule, student=user)
+        .first()
+    )
+    if enrollment and enrollment.is_active:
+        enrollment_status = 'active'
+        detail = 'This student is already active in the roster.'
+    elif enrollment:
+        enrollment_status = 'inactive'
+        detail = 'This student already exists and can be reactivated.'
+    else:
+        enrollment_status = 'not_enrolled'
+        detail = 'This student already exists and can be added to this class.'
+
+    return Response({
+        'code': 'student_exists',
+        'detail': detail,
+        'student': roster_student_metadata(profile, enrollment_status),
+    }, status=status.HTTP_409_CONFLICT)
 
 
 @transaction.atomic

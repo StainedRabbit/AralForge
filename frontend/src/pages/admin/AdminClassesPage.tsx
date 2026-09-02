@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
+import { ApiError } from '../../api'
 import { Icon } from '../../components/Icon'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
 import { ClassAttendanceDialog } from '../../components/admin/ClassAttendanceDialog'
@@ -88,6 +89,31 @@ type AvailableStudent = {
   student_number: string
   enrollment_status: 'not_enrolled' | 'inactive'
 }
+
+type StudentPickerTab = 'choose' | 'create' | 'import'
+
+type ExistingRosterStudent = Omit<AvailableStudent, 'enrollment_status'> & {
+  enrollment_status: 'active' | 'inactive' | 'not_enrolled' | 'unavailable'
+}
+
+type CreatedRosterStudent = {
+  student: Omit<ExistingRosterStudent, 'enrollment_status'> & { enrollment_status: 'active' }
+  enrollment: ScheduleStudent
+  credentials: {
+    username: string
+    temporary_password: string
+    must_change_password: true
+  }
+}
+
+type CreateStudentConflict = {
+  code: 'student_exists' | 'student_unavailable'
+  detail: string
+  student?: ExistingRosterStudent
+}
+
+type CreateStudentField = 'email' | 'first_name' | 'last_name' | 'student_number'
+type CreateStudentErrors = Partial<Record<CreateStudentField, string>>
 
 type RosterApiItem = ScheduleStudent & {
   email: string
@@ -1097,7 +1123,7 @@ function ClassRoster({
             </button>
             <button
               className="button button--secondary"
-              disabled={!selectedSchedule}
+              disabled={!selectedSchedule?.is_active}
               onClick={() => setIsAdding(true)}
               type="button"
             >
@@ -1886,8 +1912,16 @@ function AddStudentsModal({
   refresh: () => Promise<void>
   schedule: SubjectSchedule
 }) {
-  const [activeTab, setActiveTab] = useState<'choose' | 'import'>('choose')
+  const [activeTab, setActiveTab] = useState<StudentPickerTab>('choose')
   const [query, setQuery] = useState('')
+  const [createStudentNumber, setCreateStudentNumber] = useState('')
+  const [createFirstName, setCreateFirstName] = useState('')
+  const [createLastName, setCreateLastName] = useState('')
+  const [createEmail, setCreateEmail] = useState('')
+  const [createdStudent, setCreatedStudent] = useState<CreatedRosterStudent | null>(null)
+  const [existingStudent, setExistingStudent] = useState<ExistingRosterStudent | null>(null)
+  const [copyMessage, setCopyMessage] = useState('')
+  const [createErrors, setCreateErrors] = useState<CreateStudentErrors>({})
   const [importRows, setImportRows] = useState<StudentImportRow[]>([])
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
   const [newCredentials, setNewCredentials] = useState<Array<{ student_number: string; temporary_password: string }>>([])
@@ -1901,6 +1935,8 @@ function AddStudentsModal({
   const [studentError, setStudentError] = useState('')
   const dialogRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const createStudentNumberRef = useRef<HTMLInputElement>(null)
+  const createRequestRef = useRef(false)
   const selectedIds = selectedStudents.map((student) => student.id)
   const normalizedQuery = query.trim()
   const suggestions = students.filter(
@@ -1987,19 +2023,27 @@ function AddStudentsModal({
     searchInputRef.current?.focus()
   }
 
-  function selectTab(tab: 'choose' | 'import', focusTab = false) {
+  function selectTab(tab: StudentPickerTab, focusTab = false) {
     setActiveTab(tab)
     if (focusTab) {
       window.setTimeout(() => document.getElementById(`${tab}-students-tab`)?.focus(), 0)
     } else if (tab === 'choose') {
       window.setTimeout(() => searchInputRef.current?.focus(), 0)
+    } else if (tab === 'create' && !createdStudent) {
+      window.setTimeout(() => createStudentNumberRef.current?.focus(), 0)
     }
   }
 
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
-    const nextTab = event.key === 'ArrowLeft' || event.key === 'Home' ? 'choose' : 'import'
+    const tabs: StudentPickerTab[] = ['choose', 'create', 'import']
+    const currentIndex = tabs.indexOf(activeTab)
+    let nextTab: StudentPickerTab
+    if (event.key === 'Home') nextTab = tabs[0]
+    else if (event.key === 'End') nextTab = tabs[tabs.length - 1]
+    else if (event.key === 'ArrowLeft') nextTab = tabs[(currentIndex - 1 + tabs.length) % tabs.length]
+    else nextTab = tabs[(currentIndex + 1) % tabs.length]
     selectTab(nextTab, true)
   }
 
@@ -2051,6 +2095,91 @@ function AddStudentsModal({
     } finally {
       setSaving(false)
     }
+  }
+
+  async function createAndAddStudent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (createRequestRef.current) return
+    createRequestRef.current = true
+    setSaving(true)
+    setMessage('')
+    setExistingStudent(null)
+    setCopyMessage('')
+    setCreateErrors({})
+
+    try {
+      const result = await api<CreatedRosterStudent>(
+        `/subjects/subject-schedules/${schedule.id}/create-student/`,
+        {
+          body: JSON.stringify({
+            student_number: createStudentNumber,
+            first_name: createFirstName,
+            last_name: createLastName,
+            email: createEmail,
+          }),
+          method: 'POST',
+        },
+      )
+      setCreatedStudent(result)
+      await refresh()
+    } catch (caughtError) {
+      if (
+        caughtError instanceof ApiError &&
+        caughtError.status === 409 &&
+        isCreateStudentConflict(caughtError.data)
+      ) {
+        setExistingStudent(caughtError.data.student ?? null)
+        setMessage(caughtError.data.detail)
+      } else if (caughtError instanceof ApiError && caughtError.status === 400) {
+        const errors = createStudentFieldErrors(caughtError.data)
+        setCreateErrors(errors)
+        setMessage(Object.keys(errors).length ? 'Check the highlighted student details.' : caughtError.message)
+      } else {
+        setMessage(toErrorMessage(caughtError))
+      }
+    } finally {
+      createRequestRef.current = false
+      setSaving(false)
+    }
+  }
+
+  function useExistingStudent() {
+    if (!existingStudent || !['inactive', 'not_enrolled'].includes(existingStudent.enrollment_status)) return
+    const availableStudent: AvailableStudent = {
+      id: existingStudent.id,
+      display_name: existingStudent.display_name,
+      student_number: existingStudent.student_number,
+      enrollment_status: existingStudent.enrollment_status as AvailableStudent['enrollment_status'],
+    }
+    setSelectedStudents((current) =>
+      current.some((student) => student.id === availableStudent.id)
+        ? current
+        : [...current, availableStudent],
+    )
+    setExistingStudent(null)
+    setMessage(`${availableStudent.display_name} is selected and ready to add.`)
+    selectTab('choose')
+  }
+
+  function resetCreateStudent() {
+    setCreateStudentNumber('')
+    setCreateFirstName('')
+    setCreateLastName('')
+    setCreateEmail('')
+    setCreatedStudent(null)
+    setExistingStudent(null)
+    setCopyMessage('')
+    setCreateErrors({})
+    setMessage('')
+    window.setTimeout(() => createStudentNumberRef.current?.focus(), 0)
+  }
+
+  async function copyCreatedCredentials() {
+    if (!createdStudent) return
+    const copied = await copyTextToClipboard(
+      `Username: ${createdStudent.credentials.username}\nTemporary password: ${createdStudent.credentials.temporary_password}`,
+    )
+    setCopyMessage(copied ? 'Credentials copied.' : 'Copy is unavailable. Select and copy the credentials below.')
   }
 
   async function importStudents() {
@@ -2130,6 +2259,7 @@ function AddStudentsModal({
       <button
         aria-label="Close add students dialog"
         className="attendance-modal__backdrop"
+        disabled={saving}
         onClick={onClose}
         type="button"
       />
@@ -2139,7 +2269,7 @@ function AddStudentsModal({
             <strong id="add-students-title">Add students</strong>
             <span>{schedule.subject_code} {schedule.section || ''}</span>
           </div>
-          <button className="icon-button" onClick={onClose} title="Close" type="button">
+          <button className="icon-button" disabled={saving} onClick={onClose} title="Close" type="button">
             <Icon name="close" />
           </button>
         </div>
@@ -2149,6 +2279,7 @@ function AddStudentsModal({
             aria-controls="choose-students-panel"
             aria-selected={activeTab === 'choose'}
             className={activeTab === 'choose' ? 'is-active' : ''}
+            disabled={saving}
             id="choose-students-tab"
             onClick={() => selectTab('choose')}
             onKeyDown={handleTabKeyDown}
@@ -2159,9 +2290,24 @@ function AddStudentsModal({
             <span>Choose students</span>
           </button>
           <button
+            aria-controls="create-students-panel"
+            aria-selected={activeTab === 'create'}
+            className={activeTab === 'create' ? 'is-active' : ''}
+            disabled={saving}
+            id="create-students-tab"
+            onClick={() => selectTab('create')}
+            onKeyDown={handleTabKeyDown}
+            role="tab"
+            type="button"
+          >
+            <Icon name="plus" />
+            <span>Create new</span>
+          </button>
+          <button
             aria-controls="import-students-panel"
             aria-selected={activeTab === 'import'}
             className={activeTab === 'import' ? 'is-active' : ''}
+            disabled={saving}
             id="import-students-tab"
             onClick={() => selectTab('import')}
             onKeyDown={handleTabKeyDown}
@@ -2279,6 +2425,58 @@ function AddStudentsModal({
         </div>
 
         <div
+          aria-labelledby="create-students-tab"
+          className="student-picker-panel"
+          hidden={activeTab !== 'create'}
+          id="create-students-panel"
+          role="tabpanel"
+        >
+          {createdStudent ? (
+            <section aria-label="Student created" className="student-create-success" role="status">
+              <span className="student-create-success__icon"><Icon name="check" /></span>
+              <div className="student-create-success__heading">
+                <p className="eyebrow">Created and enrolled</p>
+                <h2>{createdStudent.student.display_name}</h2>
+                <p>{createdStudent.student.student_number} is now active in {schedule.subject_code} {schedule.section || ''}.</p>
+              </div>
+              <dl className="student-create-credentials">
+                <div><dt>Username</dt><dd>{createdStudent.credentials.username}</dd></div>
+                <div><dt>Temporary password</dt><dd>{createdStudent.credentials.temporary_password}</dd></div>
+              </dl>
+              <p className="student-create-success__note">The student must create a secure password after their first sign-in.</p>
+              {copyMessage ? <p aria-live="polite" className="student-create-copy-message">{copyMessage}</p> : null}
+              <div className="student-create-success__actions">
+                <button className="button button--secondary" onClick={() => void copyCreatedCredentials()} type="button"><Icon name="file" /><span>Copy credentials</span></button>
+                <button className="button button--secondary" onClick={resetCreateStudent} type="button"><Icon name="plus" /><span>Add another</span></button>
+                <button className="button button--primary" onClick={onClose} type="button">Done</button>
+              </div>
+            </section>
+          ) : (
+            <>
+              <form className="student-create-form" onSubmit={createAndAddStudent}>
+                <div className="student-create-form__heading"><p className="eyebrow">New student account</p><h2>Create and add in one step</h2><p>The student number becomes the initial username and temporary password.</p></div>
+                <div className="student-create-form__fields">
+                  <label className="admin-field"><span>Student number</span><input aria-describedby={createErrors.student_number ? 'create-student-number-error' : undefined} aria-invalid={Boolean(createErrors.student_number)} autoComplete="off" disabled={saving} maxLength={30} onChange={(event) => { setCreateStudentNumber(event.target.value); setCreateErrors((current) => ({ ...current, student_number: undefined })) }} ref={createStudentNumberRef} required type="text" value={createStudentNumber} />{createErrors.student_number ? <small className="student-create-field-error" id="create-student-number-error">{createErrors.student_number}</small> : null}</label>
+                  <label className="admin-field"><span>Email <small>Optional</small></span><input aria-describedby={createErrors.email ? 'create-student-email-error' : undefined} aria-invalid={Boolean(createErrors.email)} autoComplete="email" disabled={saving} onChange={(event) => { setCreateEmail(event.target.value); setCreateErrors((current) => ({ ...current, email: undefined })) }} type="email" value={createEmail} />{createErrors.email ? <small className="student-create-field-error" id="create-student-email-error">{createErrors.email}</small> : null}</label>
+                  <label className="admin-field"><span>First name</span><input aria-describedby={createErrors.first_name ? 'create-first-name-error' : undefined} aria-invalid={Boolean(createErrors.first_name)} autoComplete="given-name" disabled={saving} maxLength={150} onChange={(event) => { setCreateFirstName(event.target.value); setCreateErrors((current) => ({ ...current, first_name: undefined })) }} required type="text" value={createFirstName} />{createErrors.first_name ? <small className="student-create-field-error" id="create-first-name-error">{createErrors.first_name}</small> : null}</label>
+                  <label className="admin-field"><span>Last name</span><input aria-describedby={createErrors.last_name ? 'create-last-name-error' : undefined} aria-invalid={Boolean(createErrors.last_name)} autoComplete="family-name" disabled={saving} maxLength={150} onChange={(event) => { setCreateLastName(event.target.value); setCreateErrors((current) => ({ ...current, last_name: undefined })) }} required type="text" value={createLastName} />{createErrors.last_name ? <small className="student-create-field-error" id="create-last-name-error">{createErrors.last_name}</small> : null}</label>
+                </div>
+                <button className="button button--primary student-create-form__submit" disabled={saving} type="submit"><Icon name="plus" /><span>{saving ? 'Creating and adding...' : 'Create and add student'}</span></button>
+              </form>
+
+              {existingStudent ? (
+                <section aria-label="Existing student account" className="student-existing-account">
+                  <div><p className="eyebrow">Student account found</p><strong>{existingStudent.display_name}</strong><span>{existingStudent.student_number}</span></div>
+                  <span className={`student-existing-account__status student-existing-account__status--${existingStudent.enrollment_status}`}>{existingStudentStatusLabel(existingStudent.enrollment_status)}</span>
+                  {existingStudent.enrollment_status === 'inactive' || existingStudent.enrollment_status === 'not_enrolled' ? <button className="button button--secondary" onClick={useExistingStudent} type="button">Use existing student</button> : null}
+                  {existingStudent.enrollment_status === 'unavailable' ? <Link className="button button--secondary" onClick={onClose} to="/admin/students">Open Student Management</Link> : null}
+                </section>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <div
           aria-labelledby="import-students-tab"
           className="student-picker-panel"
           hidden={activeTab !== 'import'}
@@ -2355,22 +2553,24 @@ function AddStudentsModal({
 
         {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
 
-        <div className="class-modal-actions">
-          <button className="button button--secondary" onClick={onClose} type="button">
-            Cancel
-          </button>
-          {activeTab === 'choose' ? (
-            <button
-              className="button button--primary"
-              disabled={saving || !selectedIds.length}
-              onClick={() => void addStudents()}
-              type="button"
-            >
-              <Icon name="save" />
-              <span>{saving ? 'Adding...' : `Add ${selectedIds.length}`}</span>
+        {!(activeTab === 'create' && createdStudent) ? (
+          <div className="class-modal-actions">
+            <button className="button button--secondary" disabled={saving} onClick={onClose} type="button">
+              Cancel
             </button>
-          ) : null}
-        </div>
+            {activeTab === 'choose' ? (
+              <button
+                className="button button--primary"
+                disabled={saving || !selectedIds.length}
+                onClick={() => void addStudents()}
+                type="button"
+              >
+                <Icon name="save" />
+                <span>{saving ? 'Adding...' : `Add ${selectedIds.length}`}</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -2924,6 +3124,46 @@ function importStatusLabel(status: ImportPreview['rows'][number]['status']) {
     error: 'Error',
     reactivate: 'Reactivate',
   }[status]
+}
+
+function existingStudentStatusLabel(status: ExistingRosterStudent['enrollment_status']) {
+  return {
+    active: 'Already active',
+    inactive: 'Inactive enrollment',
+    not_enrolled: 'Not enrolled',
+    unavailable: 'Account unavailable',
+  }[status]
+}
+
+function isCreateStudentConflict(value: unknown): value is CreateStudentConflict {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<CreateStudentConflict>
+  return (
+    (candidate.code === 'student_exists' || candidate.code === 'student_unavailable') &&
+    typeof candidate.detail === 'string'
+  )
+}
+
+function createStudentFieldErrors(value: unknown): CreateStudentErrors {
+  if (!value || typeof value !== 'object') return {}
+  const payload = value as Record<string, unknown>
+  const fields: CreateStudentField[] = ['student_number', 'first_name', 'last_name', 'email']
+  return fields.reduce<CreateStudentErrors>((errors, field) => {
+    const fieldValue = payload[field]
+    if (typeof fieldValue === 'string') errors[field] = fieldValue
+    else if (Array.isArray(fieldValue) && typeof fieldValue[0] === 'string') errors[field] = fieldValue[0]
+    return errors
+  }, {})
+}
+
+async function copyTextToClipboard(value: string) {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return false
+  try {
+    await navigator.clipboard.writeText(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function downloadNewStudentCredentials(credentials: Array<{ student_number: string; temporary_password: string }>) {

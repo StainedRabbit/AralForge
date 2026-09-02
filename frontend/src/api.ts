@@ -6,11 +6,13 @@ const API_BASE_URL = resolveApiBaseUrl()
 
 export class ApiError extends Error {
   status: number
+  data: unknown
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.data = data
   }
 }
 
@@ -154,7 +156,7 @@ async function parseResponse<T>(response: Response) {
   const payload = hasJson ? await response.json() : await response.text()
 
   if (!response.ok) {
-    throw new ApiError(readErrorMessage(payload), response.status)
+    throw new ApiError(readErrorMessage(payload), response.status, payload)
   }
 
   return payload as T
