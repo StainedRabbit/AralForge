@@ -225,6 +225,30 @@ def recompute_all_for_student(student, schedule):
         recompute_student_category_from_items(student, category, schedule)
 
 
+def recompute_grade_target_for_students(student_ids, grade_category, schedule=None):
+    """Recompute one category target without per-student schedule queries."""
+    student_ids = {int(student_id) for student_id in student_ids}
+    if not student_ids:
+        return {'categories': 0, 'periods': 0, 'finals': 0}
+
+    if schedule is not None:
+        return recompute_student_categories_bulk({
+            (student_id, grade_category.id, schedule.id)
+            for student_id in student_ids
+        })
+
+    # Legacy aggregate grades are not schedule-scoped and are intentionally
+    # handled by the original single-student calculation path.
+    student_model = StudentGradeItemScore._meta.get_field('student').remote_field.model
+    for student in student_model.objects.filter(id__in=student_ids):
+        recompute_student_category_from_items(student, grade_category, schedule=None)
+    return {
+        'categories': len(student_ids),
+        'periods': len(student_ids),
+        'finals': len(student_ids),
+    }
+
+
 def _bulk_save(model, rows, existing, key, fields):
     creates = []
     updates = []

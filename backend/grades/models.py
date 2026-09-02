@@ -369,6 +369,21 @@ class GradeItem(models.Model):
         return self.points_possible
 
     def save(self, *args, **kwargs):
+        previous_target = None
+        if self.pk:
+            previous = type(self).objects.select_related(
+                'grade_category', 'schedule',
+            ).filter(pk=self.pk).first()
+            if previous and (
+                previous.grade_category_id != self.grade_category_id
+                or previous.schedule_id != self.schedule_id
+            ):
+                previous_target = (
+                    self._affected_student_ids(previous),
+                    previous.grade_category,
+                    previous.schedule,
+                )
+
         if not self.title:
             self.title = self.source_title
         if self.source_type != GradeItemSourceType.MANUAL:
@@ -376,35 +391,37 @@ class GradeItem(models.Model):
         if self.points_possible is None or self.points_possible <= 0:
             raise ValidationError('Points possible must be greater than zero.')
         super().save(*args, **kwargs)
-        from .services import recompute_student_category_from_items
+        from .services import recompute_grade_target_for_students
         from .source_sync import sync_grade_item
 
         if self.source_type != GradeItemSourceType.MANUAL and self.schedule_id:
             sync_grade_item(self)
 
-        students = {score.student for score in self.student_scores.select_related('student')}
-        if self.schedule_id:
-            students.update(
-                enrollment.student
-                for enrollment in self.schedule.students.filter(is_active=True).select_related('student')
-            )
-        for student in students:
-            recompute_student_category_from_items(student, self.grade_category, self.schedule)
+        recompute_grade_target_for_students(
+            self._affected_student_ids(self), self.grade_category, self.schedule,
+        )
+        if previous_target:
+            student_ids, grade_category, schedule = previous_target
+            recompute_grade_target_for_students(student_ids, grade_category, schedule)
 
     def delete(self, *args, **kwargs):
-        students = {score.student for score in self.student_scores.select_related('student')}
-        if self.schedule_id:
-            students.update(
-                enrollment.student
-                for enrollment in self.schedule.students.filter(is_active=True).select_related('student')
-            )
-        affected = [(student, self.grade_category, self.schedule) for student in students]
+        student_ids = self._affected_student_ids(self)
+        grade_category = self.grade_category
+        schedule = self.schedule
         result = super().delete(*args, **kwargs)
-        from .services import recompute_student_category_from_items
+        from .services import recompute_grade_target_for_students
 
-        for student, grade_category, schedule in affected:
-            recompute_student_category_from_items(student, grade_category, schedule)
+        recompute_grade_target_for_students(student_ids, grade_category, schedule)
         return result
+
+    @staticmethod
+    def _affected_student_ids(item):
+        student_ids = set(item.student_scores.values_list('student_id', flat=True))
+        if item.schedule_id:
+            student_ids.update(item.schedule.students.filter(
+                is_active=True,
+            ).values_list('student_id', flat=True))
+        return student_ids
 
     def __str__(self):
         return f'{self.grade_category} - {self.title}'

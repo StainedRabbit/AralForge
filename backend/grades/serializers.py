@@ -258,19 +258,6 @@ class GradeItemSerializer(serializers.ModelSerializer):
 
         return attrs
 
-    def update(self, instance, validated_data):
-        previous_schedule = instance.schedule
-        previous_category = instance.grade_category
-        students = [score.student for score in instance.student_scores.select_related('student')]
-        updated = super().update(instance, validated_data)
-        if previous_schedule != updated.schedule or previous_category != updated.grade_category:
-            from .services import recompute_student_category_from_items
-
-            for student in students:
-                recompute_student_category_from_items(student, previous_category, previous_schedule)
-        return updated
-
-
 class StudentGradeItemScoreSerializer(serializers.ModelSerializer):
     schedule = serializers.IntegerField(source='grade_item.schedule_id', read_only=True)
     grade_category = serializers.IntegerField(source='grade_item.grade_category_id', read_only=True)

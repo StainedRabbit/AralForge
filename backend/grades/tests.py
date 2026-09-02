@@ -572,36 +572,75 @@ class ClassScopedGradeTests(APITestCase):
         )
 
     def test_score_sheet_start_creates_pending_rows_ordered_by_last_name(self):
-        self.student.first_name = 'Zoe'
-        self.student.last_name = 'young'
+        self.student.first_name = 'Learner'
+        self.student.last_name = '000'
         self.student.save(update_fields=['first_name', 'last_name'])
-        self.other_student.first_name = 'Amy'
-        self.other_student.last_name = 'Adams'
-        self.other_student.save(update_fields=['first_name', 'last_name'])
-        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        students = [self.student] + [
+            User.objects.create_user(
+                username=f'score_sheet_student_{index:02d}',
+                role=User.Role.STUDENT,
+                first_name='Learner',
+                last_name=f'{index:03d}',
+            )
+            for index in range(1, 50)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in students[1:]
+        ])
         self.client.force_authenticate(self.teacher)
 
-        response = self.client.post(
-            '/api/grades/items/score-sheet/start/',
-            {
-                'schedule': self.schedule_a.id,
-                'grade_category': self.category.id,
-                'title': 'Runner quiz',
-                'date': '2027-08-03',
-                'points_possible': '10.00',
-            },
-            format='json',
-        )
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.post(
+                '/api/grades/items/score-sheet/start/',
+                {
+                    'schedule': self.schedule_a.id,
+                    'grade_category': self.category.id,
+                    'title': 'Runner quiz',
+                    'date': '2027-08-03',
+                    'points_possible': '10.00',
+                },
+                format='json',
+            )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual([row['student'] for row in response.data['rows']], [
-            self.other_student.id,
-            self.student.id,
-        ])
+        self.assertEqual(
+            [row['student'] for row in response.data['rows']],
+            [student.id for student in students],
+        )
         self.assertTrue(all(row['score_id'] is None for row in response.data['rows']))
         self.assertFalse(StudentGradeItemScore.objects.filter(
             grade_item_id=response.data['item']['id'],
         ).exists())
+        self.assertEqual(GradeItem.objects.filter(
+            schedule=self.schedule_a,
+            title='Runner quiz',
+            source_type=GradeItemSourceType.MANUAL,
+        ).count(), 1)
+        category_grades = StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            student__in=students,
+        )
+        self.assertEqual(category_grades.count(), 50)
+        self.assertFalse(category_grades.exclude(
+            completion_status='PENDING',
+            pending_item_count=1,
+        ).exists())
+        period_grades = PeriodGrade.objects.filter(
+            schedule=self.schedule_a,
+            grading_period=GradingPeriod.PRELIM,
+            student__in=students,
+        )
+        self.assertEqual(period_grades.count(), 50)
+        self.assertFalse(period_grades.exclude(completion_status='PENDING').exists())
+        final_grades = FinalGrade.objects.filter(
+            schedule=self.schedule_a,
+            student__in=students,
+        )
+        self.assertEqual(final_grades.count(), 50)
+        self.assertFalse(final_grades.exclude(completion_status='PENDING').exists())
+        self.assertLessEqual(len(queries), 40)
 
     def test_score_sheet_mark_saves_edits_excuses_and_deletes_one_student(self):
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
@@ -882,6 +921,7 @@ class ClassScopedGradeTests(APITestCase):
         self.assertTrue(FinalGrade.objects.filter(student=self.student, schedule__isnull=True).exists())
 
     def test_moving_item_recomputes_old_and_new_class_totals(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
         item = GradeItem.objects.create(
             schedule=self.schedule_a,
             grade_category=self.category,
@@ -898,10 +938,21 @@ class ClassScopedGradeTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(StudentCategoryGrade.objects.filter(schedule=self.schedule_a, student=self.student).exists())
+        self.assertFalse(StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_a,
+            student=self.other_student,
+        ).exists())
         self.assertEqual(
             StudentCategoryGrade.objects.get(schedule=self.schedule_b, student=self.student).raw_score,
             Decimal('9.00'),
         )
+
+        GradeItem.objects.get(pk=item.pk).delete()
+
+        self.assertFalse(StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_b,
+            student=self.student,
+        ).exists())
 
     def test_excused_item_resolves_without_adding_to_denominator(self):
         first = GradeItem.objects.create(
