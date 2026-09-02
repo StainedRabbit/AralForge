@@ -6,6 +6,7 @@ from .models import (
     FinalGrade,
     GradeCategory,
     GradeItem,
+    GradeItemSourceType,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
@@ -255,6 +256,18 @@ class GradeItemSerializer(serializers.ModelSerializer):
         points_possible = attrs.get('points_possible', getattr(self.instance, 'points_possible', None))
         if points_possible is not None and points_possible <= 0:
             raise serializers.ValidationError({'points_possible': 'Points possible must be greater than zero.'})
+        if (
+            self.instance
+            and source_type == GradeItemSourceType.MANUAL
+            and points_possible is not None
+            and self.instance.student_scores.filter(
+                status=StudentGradeItemScore.Status.GRADED,
+                raw_score__gt=points_possible,
+            ).exists()
+        ):
+            raise serializers.ValidationError({
+                'points_possible': 'Maximum score cannot be lower than a saved student score.',
+            })
 
         return attrs
 

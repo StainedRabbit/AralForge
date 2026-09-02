@@ -49,6 +49,16 @@ type SavedScoreResponse = {
   student: number
 }
 type ScoreChange = { index: number; previous: ScoreDraft; student: number }
+type ScoreSheetEditDraft = {
+  categoryId: string
+  date: string
+  period: (typeof periods)[number]
+  pointsPossible: string
+  title: string
+}
+type DeleteConfirmation =
+  | { kind: 'score'; student: number; studentName: string }
+  | { kind: 'sheet' }
 
 export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
   api: AuthedRequest
@@ -76,6 +86,8 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [sheetQuery, setSheetQuery] = useState('')
+  const [editDraft, setEditDraft] = useState<ScoreSheetEditDraft | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
 
   const categories = data.gradeCategories.filter((category) =>
     category.subject === schedule.subject &&
@@ -83,8 +95,8 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
     category.category !== 'ATTENDANCE')
   const selectedCategory = categories.find((category) => category.id === Number(categoryId)) ?? categories[0] ?? null
   const scoreSheets = useMemo(() => {
-    const items = activeItem && !data.gradeItems.some((item) => item.id === activeItem.id)
-      ? [activeItem, ...data.gradeItems]
+    const items = activeItem
+      ? [activeItem, ...data.gradeItems.filter((item) => item.id !== activeItem.id)]
       : data.gradeItems
     return items
       .filter((item) => item.schedule === schedule.id && item.source_type === 'MANUAL')
@@ -121,20 +133,37 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
     ? data.gradeCategories.find((category) => category.id === activeItem.grade_category) ?? null
     : null
   const progressPercent = activeDrafts.length ? Math.round((savedCount / activeDrafts.length) * 100) : 0
+  const editCategories = editDraft ? data.gradeCategories.filter((category) =>
+    category.subject === schedule.subject &&
+    category.grading_period === editDraft.period &&
+    category.category !== 'ATTENDANCE') : []
+  const selectedEditCategory = editDraft
+    ? editCategories.find((category) => category.id === Number(editDraft.categoryId)) ?? editCategories[0] ?? null
+    : null
+  const highestSavedScore = drafts.reduce((highest, draft) =>
+    draft.saved?.status === 'GRADED' ? Math.max(highest, numeric(draft.saved.rawScore)) : highest, 0)
+  const editMaximumError = editDraft && numeric(editDraft.pointsPossible) < highestSavedScore
+    ? `Maximum score must be at least ${highestSavedScore}.`
+    : ''
 
   useEffect(() => {
     dialogRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    if (tab === 'enter' && activeItem && currentStudentId != null && !showSummary && !excuseOpen) scoreInputRef.current?.focus()
-  }, [activeItem, currentStudentId, excuseOpen, showSummary, tab])
+    if (tab === 'enter' && activeItem && currentStudentId != null && !showSummary && !excuseOpen && !editDraft && !deleteConfirmation) scoreInputRef.current?.focus()
+  }, [activeItem, currentStudentId, deleteConfirmation, editDraft, excuseOpen, showSummary, tab])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault()
-        if (excuseOpen) {
+        if (deleteConfirmation) {
+          setDeleteConfirmation(null)
+        } else if (editDraft) {
+          setEditDraft(null)
+          setMessage('')
+        } else if (excuseOpen) {
           setExcuseOpen(false)
           setExcuseError('')
         } else if (!saving) closeDialog()
@@ -159,7 +188,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
       const target = event.target as HTMLElement
       if (target.matches('input, textarea, select, [contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
-      if (!activeItem || showSummary || saving || excuseOpen) return
+      if (!activeItem || showSummary || saving || excuseOpen || editDraft || deleteConfirmation) return
       if (event.key === 'ArrowLeft' && currentIndex > 0) {
         event.preventDefault()
         moveToStudent(currentIndex - 1)
@@ -187,6 +216,8 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
     setCurrentIndex(0)
     setShowSummary(false)
     setLastChange(null)
+    setEditDraft(null)
+    setDeleteConfirmation(null)
     setTitle('')
     setPointsPossible('10')
     setSheetDate(todayInputValue())
@@ -214,6 +245,8 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
       setCurrentIndex(firstPendingIndex(nextDrafts))
       setShowSummary(false)
       setLastChange(null)
+      setEditDraft(null)
+      setDeleteConfirmation(null)
       setMessage('Score sheet started. Scores save as you record them.')
       void refresh().catch(() => undefined)
     } catch (error) {
@@ -241,9 +274,119 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
       setCurrentIndex(pendingIndex >= 0 ? pendingIndex : 0)
       setShowSummary(false)
       setLastChange(null)
+      setEditDraft(null)
+      setDeleteConfirmation(null)
       setTab('enter')
       setMessage(pendingIndex >= 0 ? 'Continuing at the first pending student.' : 'Reviewing this completed score sheet.')
     } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEditingSheet() {
+    if (!activeItem) return
+    const category = data.gradeCategories.find((candidate) => candidate.id === activeItem.grade_category)
+    setEditDraft({
+      categoryId: String(activeItem.grade_category),
+      date: activeItem.date ?? activeItem.created_at.slice(0, 10),
+      period: category?.grading_period ?? 'PRELIM',
+      pointsPossible: activeItem.points_possible,
+      title: activeItem.title,
+    })
+    setMessage('')
+  }
+
+  async function saveSheetEdits() {
+    if (
+      !activeItem || !editDraft || !selectedEditCategory || saving ||
+      !editDraft.title.trim() || !editDraft.date || numeric(editDraft.pointsPossible) <= 0 ||
+      editMaximumError
+    ) return
+    setSaving(true)
+    setMessage('')
+    try {
+      const response = await api<ScoreSheetResponse>(`/grades/items/${activeItem.id}/score-sheet/`, {
+        body: JSON.stringify({
+          date: editDraft.date,
+          grade_category: selectedEditCategory.id,
+          points_possible: editDraft.pointsPossible,
+          title: editDraft.title.trim(),
+        }),
+        method: 'PATCH',
+      })
+      const currentStudent = currentDraft?.student ?? null
+      const nextDrafts = response.rows.map((row) => apiRowToDraft(row, data))
+      const nextActiveDrafts = nextDrafts.filter((draft) => draft.isActive)
+      const nextIndex = currentStudent == null
+        ? firstPendingIndex(nextDrafts)
+        : Math.max(nextActiveDrafts.findIndex((draft) => draft.student === currentStudent), 0)
+      setActiveItem(response.item)
+      setDrafts(nextDrafts)
+      setCurrentIndex(nextIndex)
+      setPeriod(editDraft.period)
+      setCategoryId(String(response.item.grade_category))
+      setSheetDate(response.item.date ?? editDraft.date)
+      setTitle(response.item.title)
+      setPointsPossible(response.item.points_possible)
+      setEditDraft(null)
+      setMessage('Activity details updated. Saved student results were retained.')
+      void refresh().catch(() => undefined)
+    } catch (error) {
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clearSavedScore(studentId: number) {
+    if (!activeItem || saving) return
+    const target = drafts.find((draft) => draft.student === studentId)
+    const targetIndex = activeDrafts.findIndex((draft) => draft.student === studentId)
+    if (!target?.saved || targetIndex < 0) return
+    const previous = canonicalDraft(target)
+    setSaving(true)
+    setMessage('')
+    try {
+      await api(`/grades/items/${activeItem.id}/mark/`, {
+        body: JSON.stringify({ student: studentId }),
+        method: 'DELETE',
+      })
+      setDrafts((current) => current.map((draft) => draft.student === studentId ? {
+        ...draft,
+        rawScore: '',
+        remarks: '',
+        saved: null,
+        scoreId: null,
+        status: 'GRADED',
+      } : draft))
+      setCurrentIndex(targetIndex)
+      setShowSummary(false)
+      setLastChange({ index: targetIndex, previous, student: studentId })
+      setDeleteConfirmation(null)
+      setMessage(`${target.studentName}'s saved result was cleared.`)
+    } catch (error) {
+      setDeleteConfirmation(null)
+      setMessage(toErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deleteSheet() {
+    if (!activeItem || saving) return
+    const deletedTitle = activeItem.title
+    setSaving(true)
+    setMessage('')
+    try {
+      await api(`/grades/items/${activeItem.id}/score-sheet/`, { method: 'DELETE' })
+      await refresh()
+      clearEntry()
+      setTab('sheets')
+      setMessage(`${deletedTitle} was permanently deleted.`)
+    } catch (error) {
+      setDeleteConfirmation(null)
       setMessage(toErrorMessage(error))
     } finally {
       setSaving(false)
@@ -396,7 +539,24 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         </div>
 
         <div hidden={tab !== 'enter'} id="score-entry-panel" role="tabpanel">
-          {!activeItem ? (
+          {editDraft && activeItem ? (
+            <div className="class-score-setup">
+              <div className="class-score-setup__intro">
+                <span className="class-score-setup__icon"><Icon name="edit" /></span>
+                <div><p className="eyebrow">Edit score sheet</p><h2>Edit the activity</h2><p>Saved student results will stay with this activity.</p></div>
+              </div>
+              {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
+              <div className="class-score-setup__fields">
+                <label className="admin-field class-score-setup__title"><span>Activity title</span><input aria-label="Edit activity title" disabled={saving} onChange={(event) => setEditDraft((current) => current ? { ...current, title: event.target.value } : current)} required value={editDraft.title} /></label>
+                <label className="admin-field"><span>Maximum score</span><input aria-describedby={editMaximumError ? 'edit-maximum-error' : undefined} aria-invalid={Boolean(editMaximumError)} aria-label="Edit maximum score" disabled={saving} min="0.01" onChange={(event) => setEditDraft((current) => current ? { ...current, pointsPossible: event.target.value } : current)} required step="0.01" type="number" value={editDraft.pointsPossible} />{editMaximumError ? <small className="class-score-field-error" id="edit-maximum-error">{editMaximumError}</small> : null}</label>
+                <label className="admin-field"><span>Date</span><input aria-label="Edit activity date" disabled={saving} onChange={(event) => setEditDraft((current) => current ? { ...current, date: event.target.value } : current)} required type="date" value={editDraft.date} /></label>
+                <label className="admin-field"><span>Grading period</span><select aria-label="Edit grading period" disabled={saving} onChange={(event) => setEditDraft((current) => current ? { ...current, categoryId: '', period: event.target.value as ScoreSheetEditDraft['period'] } : current)} value={editDraft.period}>{periods.map((item) => <option key={item} value={item}>{periodLabels[item]}</option>)}</select></label>
+                <label className="admin-field class-score-setup__category"><span>Category</span><select aria-label="Edit category" disabled={saving || !editCategories.length} onChange={(event) => setEditDraft((current) => current ? { ...current, categoryId: event.target.value } : current)} value={selectedEditCategory?.id ?? ''}>{editCategories.map((category) => <option key={category.id} value={category.id}>{category.name} ({category.category})</option>)}</select></label>
+              </div>
+              {!editCategories.length ? <p className="admin-message class-score-setup__guidance">No non-attendance categories are configured for {periodLabels[editDraft.period]}. <Link to="/admin/grades">Configure grade categories</Link>.</p> : null}
+              <div className="class-score-setup__footer"><span><Icon name="users" /> {drafts.filter((draft) => draft.saved).length} saved result{drafts.filter((draft) => draft.saved).length === 1 ? '' : 's'} retained</span><div className="class-score-edit-actions"><button className="button button--secondary" disabled={saving} onClick={() => { setEditDraft(null); setMessage('') }} type="button">Cancel</button><button className="button button--primary" disabled={saving || !selectedEditCategory || !editDraft.title.trim() || !editDraft.date || numeric(editDraft.pointsPossible) <= 0 || Boolean(editMaximumError)} onClick={() => void saveSheetEdits()} type="button"><Icon name="save" /><span>{saving ? 'Saving...' : 'Save changes'}</span></button></div></div>
+            </div>
+          ) : !activeItem ? (
             <div className="class-score-setup">
               <div className="class-score-setup__intro">
                 <span className="class-score-setup__icon"><Icon name="grade" /></span>
@@ -413,7 +573,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
               <div className="class-score-setup__footer"><span><Icon name="users" /> {data.enrollments.filter((enrollment) => enrollment.schedule === schedule.id && enrollment.is_active).length} active students</span><button className="button button--primary" disabled={saving || !selectedCategory || !title.trim() || !sheetDate || numeric(pointsPossible) <= 0} onClick={() => void startNewSheet()} type="button"><Icon name="arrow-right" /><span>{saving ? 'Starting...' : 'Start scoring'}</span></button></div>
             </div>
           ) : showSummary ? (
-            <ScoreCompletion excused={excusedCount} graded={gradedCount} inactiveDrafts={inactiveDrafts} onClose={closeDialog} onReview={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing scores from the first student.') }} onSheets={() => setTab('sheets')} onUndo={lastChange ? () => void undoLastScore() : undefined} saving={saving} total={activeDrafts.length} zeros={zeroCount} />
+            <ScoreCompletion excused={excusedCount} graded={gradedCount} inactiveDrafts={inactiveDrafts} message={message} onClose={closeDialog} onDelete={() => setDeleteConfirmation({ kind: 'sheet' })} onEdit={startEditingSheet} onReview={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing scores from the first student.') }} onSheets={() => setTab('sheets')} onUndo={lastChange ? () => void undoLastScore() : undefined} saving={saving} total={activeDrafts.length} zeros={zeroCount} />
           ) : currentDraft ? (
             <div className="attendance-roll-call score-roll-call">
               {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
@@ -421,7 +581,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
                 <section className="score-workspace-header">
                   <div className="class-score-sheet-heading">
                     <div><p className="eyebrow">Now scoring</p><h2>{activeItem.title}</h2><span>{formatDate(activeItem.date ?? sheetDate)} <i aria-hidden="true">·</i> {activeCategory?.name ?? 'Uncategorized'} <i aria-hidden="true">·</i> {maximum} points</span></div>
-                    <div className="class-score-sheet-heading__actions">{lastChange ? <button className="button button--secondary button--compact" disabled={saving} onClick={() => void undoLastScore()} type="button">Undo last</button> : null}<button className="button button--secondary button--compact" disabled={saving} onClick={clearEntry} type="button"><Icon name="plus" /><span>New score sheet</span></button></div>
+                    <div className="class-score-sheet-heading__actions">{lastChange ? <button className="button button--secondary button--compact" disabled={saving} onClick={() => void undoLastScore()} type="button">Undo last</button> : null}<button className="button button--secondary button--compact" disabled={saving} onClick={startEditingSheet} type="button"><Icon name="edit" /><span>Edit activity</span></button><button className="button button--secondary button--compact button--danger" disabled={saving} onClick={() => setDeleteConfirmation({ kind: 'sheet' })} type="button"><Icon name="trash" /><span>Delete sheet</span></button><button className="button button--secondary button--compact" disabled={saving} onClick={clearEntry} type="button"><Icon name="plus" /><span>New score sheet</span></button></div>
                   </div>
                   <div className="score-progress" role="progressbar" aria-label="Score sheet progress" aria-valuemax={activeDrafts.length} aria-valuemin={0} aria-valuenow={savedCount}>
                     <div><strong>{progressPercent}% complete</strong><span>{savedCount} of {activeDrafts.length} saved</span></div>
@@ -451,7 +611,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
                 <p className="attendance-keyboard-hint">Keyboard: Enter Record score · ← Previous · → Next or Skip as 0 · U Undo</p>
                 {inactiveDrafts.length ? <InactiveHistory drafts={inactiveDrafts} /> : null}
-                {!excuseOpen ? <div className="score-runner-actions"><button aria-label="Previous student" className="button button--secondary" disabled={saving || currentIndex === 0} onClick={() => moveToStudent(currentIndex - 1)} type="button"><Icon name="arrow-left" /><span>Previous</span></button><button className="button button--secondary" disabled={saving} onClick={openExcuse} type="button"><Icon name="warning" /><span>Excused</span></button><button className="button button--primary" disabled={saving || Boolean(currentError)} onClick={() => void saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks)} type="button"><Icon name="save" /><span>{saving ? 'Saving...' : 'Record score'}</span></button><button aria-label={currentDraft.saved ? 'Next student' : 'Skip as 0'} className="button button--secondary" disabled={saving} onClick={() => void advance()} type="button"><span>{currentDraft.saved ? 'Next' : 'Skip as 0'}</span><Icon name="arrow-right" /></button></div> : null}
+                {!excuseOpen ? <div className="score-runner-actions"><button aria-label="Previous student" className="button button--secondary" disabled={saving || currentIndex === 0} onClick={() => moveToStudent(currentIndex - 1)} type="button"><Icon name="arrow-left" /><span>Previous</span></button><button className="button button--secondary" disabled={saving} onClick={openExcuse} type="button"><Icon name="warning" /><span>Excused</span></button>{currentDraft.saved ? <button className="button button--secondary button--danger" disabled={saving} onClick={() => setDeleteConfirmation({ kind: 'score', student: currentDraft.student, studentName: currentDraft.studentName })} type="button"><Icon name="trash" /><span>Clear score</span></button> : null}<button className="button button--primary" disabled={saving || Boolean(currentError)} onClick={() => void saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks)} type="button"><Icon name="save" /><span>{saving ? 'Saving...' : currentDraft.saved ? 'Update score' : 'Record score'}</span></button><button aria-label={currentDraft.saved ? 'Next student' : 'Skip as 0'} className="button button--secondary" disabled={saving} onClick={() => void advance()} type="button"><span>{currentDraft.saved ? 'Next' : 'Skip as 0'}</span><Icon name="arrow-right" /></button></div> : null}
               </div>
             </div>
           ) : <p className="admin-empty-line">No active students are available for this score sheet.</p>}
@@ -473,6 +633,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         </div>
 
         {message && (tab === 'sheets' || !activeItem) ? <p aria-live="polite" className="admin-message">{message}</p> : null}
+        {deleteConfirmation && activeItem ? <ScoreDeleteConfirmation confirmation={deleteConfirmation} savedCount={drafts.filter((draft) => draft.saved).length} saving={saving} sheetTitle={activeItem.title} onCancel={() => setDeleteConfirmation(null)} onConfirm={() => deleteConfirmation.kind === 'sheet' ? void deleteSheet() : void clearSavedScore(deleteConfirmation.student)} /> : null}
       </div>
     </div>
   )
@@ -533,11 +694,14 @@ function StudentSearch({ currentStudentId, disabled, onSelect, students }: {
   </div>
 }
 
-function ScoreCompletion({ excused, graded, inactiveDrafts, onClose, onReview, onSheets, onUndo, saving, total, zeros }: {
+function ScoreCompletion({ excused, graded, inactiveDrafts, message, onClose, onDelete, onEdit, onReview, onSheets, onUndo, saving, total, zeros }: {
   excused: number
   graded: number
   inactiveDrafts: ScoreDraft[]
+  message: string
   onClose: () => void
+  onDelete: () => void
+  onEdit: () => void
   onReview: () => void
   onSheets: () => void
   onUndo?: () => void
@@ -547,10 +711,29 @@ function ScoreCompletion({ excused, graded, inactiveDrafts, onClose, onReview, o
 }) {
   return <div className="attendance-roll-call score-roll-call"><div className="attendance-completion">
     <div className="attendance-completion__heading"><span className="attendance-completion__icon"><Icon name="check" /></span><div><p className="eyebrow">Score sheet complete</p><h2>{total} student{total === 1 ? '' : 's'} saved</h2><p>Every active student has a score or an approved excuse.</p></div></div>
+    {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
     <div aria-label="Score totals" className="attendance-breakdown__stats" role="group"><ScoreTotal label="Graded" value={graded} /><ScoreTotal label="Zero" value={zeros} /><ScoreTotal label="Excused" value={excused} /></div>
     {inactiveDrafts.length ? <InactiveHistory drafts={inactiveDrafts} /> : null}
-    <div className="class-modal-actions">{onUndo ? <button className="button button--secondary" disabled={saving} onClick={onUndo} type="button">Undo last</button> : null}<button className="button button--secondary" disabled={saving} onClick={onReview} type="button">Review scores</button><button className="button button--secondary" disabled={saving} onClick={onSheets} type="button">Score sheets</button><button className="button button--primary" disabled={saving} onClick={onClose} type="button">Close</button></div>
+    <div className="class-modal-actions">{onUndo ? <button className="button button--secondary" disabled={saving} onClick={onUndo} type="button">Undo last</button> : null}<button className="button button--secondary" disabled={saving} onClick={onEdit} type="button"><Icon name="edit" /><span>Edit activity</span></button><button className="button button--secondary button--danger" disabled={saving} onClick={onDelete} type="button"><Icon name="trash" /><span>Delete sheet</span></button><button className="button button--secondary" disabled={saving} onClick={onReview} type="button">Review scores</button><button className="button button--secondary" disabled={saving} onClick={onSheets} type="button">Score sheets</button><button className="button button--primary" disabled={saving} onClick={onClose} type="button">Close</button></div>
   </div></div>
+}
+
+function ScoreDeleteConfirmation({ confirmation, onCancel, onConfirm, savedCount, saving, sheetTitle }: {
+  confirmation: DeleteConfirmation
+  onCancel: () => void
+  onConfirm: () => void
+  savedCount: number
+  saving: boolean
+  sheetTitle: string
+}) {
+  const isSheet = confirmation.kind === 'sheet'
+  return <div aria-describedby="score-delete-description" aria-labelledby="score-delete-title" aria-modal="true" className="class-score-discard" onKeyDown={(event) => { if (event.key === 'Escape' && !saving) { event.preventDefault(); event.stopPropagation(); onCancel() } }} role="alertdialog">
+    <div>
+      <strong id="score-delete-title">{isSheet ? 'Permanently delete this score sheet?' : `Clear ${confirmation.studentName}'s saved result?`}</strong>
+      <span id="score-delete-description">{isSheet ? `${sheetTitle} and ${savedCount} saved student result${savedCount === 1 ? '' : 's'} will be permanently deleted.` : 'This student will return to Pending. You can restore the result immediately with Undo last.'}</span>
+      <div className="class-modal-actions"><button autoFocus className="button button--secondary" disabled={saving} onClick={onCancel} type="button">Cancel</button><button className="button button--danger" disabled={saving} onClick={onConfirm} type="button"><Icon name="trash" /><span>{saving ? 'Deleting...' : isSheet ? 'Delete permanently' : 'Clear score'}</span></button></div>
+    </div>
+  </div>
 }
 
 function ScoreTotal({ label, value }: { label: string; value: number }) {

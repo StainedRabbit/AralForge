@@ -25,7 +25,12 @@ from grades.models import (
     StudentGradeItemScore,
     transmute_score,
 )
-from grades.services import compute_final_grade, compute_period_grade, compute_student_category_grade
+from grades.services import (
+    compute_final_grade,
+    compute_period_grade,
+    compute_student_category_grade,
+    recompute_grade_target_for_students,
+)
 from learning_modules.models import (
     LearningContextType,
     Module,
@@ -641,6 +646,209 @@ class ClassScopedGradeTests(APITestCase):
         self.assertEqual(final_grades.count(), 50)
         self.assertFalse(final_grades.exclude(completion_status='PENDING').exists())
         self.assertLessEqual(len(queries), 40)
+
+    def test_score_sheet_details_update_all_fields_and_keep_scores_with_bounded_queries(self):
+        midterm_category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.MIDTERM,
+            category=GradeCategoryChoices.ACTIVITY,
+            name='Midterm activities',
+            weight=Decimal('100.00'),
+        )
+        attendance_category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.ATTENDANCE,
+            name='Attendance',
+            weight=Decimal('0.00'),
+        )
+        foreign_category = GradeCategory.objects.create(
+            subject=self.other_schedule.subject,
+            grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ,
+            name='Other subject quizzes',
+            weight=Decimal('100.00'),
+        )
+        students = [self.student] + [
+            User.objects.create_user(
+                username=f'edit_sheet_student_{index:02d}',
+                role=User.Role.STUDENT,
+            )
+            for index in range(1, 50)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in students[1:]
+        ])
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Original activity',
+            date='2027-08-03',
+            points_possible=Decimal('10.00'),
+        )
+        StudentGradeItemScore.objects.create(
+            grade_item=item,
+            student=self.student,
+            raw_score=Decimal('8.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+        url = f'/api/grades/items/{item.id}/score-sheet/'
+
+        with CaptureQueriesContext(connection) as queries:
+            updated = self.client.patch(url, {
+                'title': 'Updated activity',
+                'date': '2027-08-04',
+                'points_possible': '12.00',
+                'grade_category': midterm_category.id,
+            }, format='json')
+
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data['item']['title'], 'Updated activity')
+        self.assertEqual(updated.data['item']['date'], '2027-08-04')
+        self.assertEqual(updated.data['item']['points_possible'], '12.00')
+        self.assertEqual(updated.data['item']['grade_category'], midterm_category.id)
+        self.assertEqual(len(updated.data['rows']), 50)
+        self.assertLessEqual(len(queries), 65)
+        score = StudentGradeItemScore.objects.get(grade_item=item, student=self.student)
+        self.assertEqual(score.raw_score, Decimal('8.00'))
+        self.assertFalse(StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+        ).exists())
+        moved_grade = StudentCategoryGrade.objects.get(
+            schedule=self.schedule_a,
+            grade_category=midterm_category,
+            student=self.student,
+        )
+        self.assertEqual(moved_grade.raw_score, Decimal('8.00'))
+        self.assertEqual(moved_grade.total_score, Decimal('12.00'))
+        prelim_grade = PeriodGrade.objects.get(
+            schedule=self.schedule_a,
+            grading_period=GradingPeriod.PRELIM,
+            student=self.student,
+        )
+        midterm_grade = PeriodGrade.objects.get(
+            schedule=self.schedule_a,
+            grading_period=GradingPeriod.MIDTERM,
+            student=self.student,
+        )
+        self.assertEqual(prelim_grade.completion_status, 'PENDING')
+        self.assertIsNone(prelim_grade.raw_score)
+        self.assertEqual(midterm_grade.completion_status, 'COMPLETE')
+        final_grade = FinalGrade.objects.get(schedule=self.schedule_a, student=self.student)
+        self.assertEqual(final_grade.completion_status, 'PENDING')
+        self.assertIsNone(final_grade.prelim_grade)
+        self.assertEqual(final_grade.midterm_grade, midterm_grade.raw_score)
+
+        too_small = self.client.patch(url, {'points_possible': '7.00'}, format='json')
+        self.assertEqual(too_small.status_code, 400)
+        self.assertIn('points_possible', too_small.data)
+        gradebook_too_small = self.client.patch(
+            f'/api/grades/items/{item.id}/',
+            {'points_possible': '7.00'},
+            format='json',
+        )
+        self.assertEqual(gradebook_too_small.status_code, 400)
+        self.assertIn('points_possible', gradebook_too_small.data)
+        attendance = self.client.patch(
+            url, {'grade_category': attendance_category.id}, format='json',
+        )
+        self.assertEqual(attendance.status_code, 400)
+        foreign = self.client.patch(
+            url, {'grade_category': foreign_category.id}, format='json',
+        )
+        self.assertEqual(foreign.status_code, 400)
+        immutable = self.client.patch(
+            url, {'schedule': self.schedule_b.id}, format='json',
+        )
+        self.assertEqual(immutable.status_code, 400)
+        item.refresh_from_db()
+        self.assertEqual(item.points_possible, Decimal('12.00'))
+        self.assertEqual(item.grade_category, midterm_category)
+
+        self.client.force_authenticate(self.student)
+        forbidden = self.client.patch(url, {'title': 'Student edit'}, format='json')
+        self.assertEqual(forbidden.status_code, 403)
+        forbidden_delete = self.client.delete(url)
+        self.assertEqual(forbidden_delete.status_code, 403)
+        self.assertTrue(GradeItem.objects.filter(pk=item.pk).exists())
+
+        self.client.force_authenticate(self.teacher)
+        GradeItem.objects.filter(pk=item.pk).update(source_type=GradeItemSourceType.ATTENDANCE)
+        linked = self.client.patch(url, {'title': 'Linked edit'}, format='json')
+        self.assertEqual(linked.status_code, 400)
+        linked_delete = self.client.delete(url)
+        self.assertEqual(linked_delete.status_code, 400)
+        self.assertTrue(GradeItem.objects.filter(pk=item.pk).exists())
+
+        GradeItem.objects.filter(pk=item.pk).update(source_type=GradeItemSourceType.MANUAL)
+        SubjectSchedule.objects.filter(pk=self.schedule_a.pk).update(is_active=False)
+        archived = self.client.patch(url, {'title': 'Archived edit'}, format='json')
+        archived_delete = self.client.delete(url)
+        self.assertEqual(archived.status_code, 400)
+        self.assertEqual(archived_delete.status_code, 400)
+        self.assertTrue(GradeItem.objects.filter(pk=item.pk).exists())
+
+    def test_deleting_score_sheet_cascades_scores_and_recomputes_with_bounded_queries(self):
+        students = [self.student] + [
+            User.objects.create_user(
+                username=f'delete_sheet_student_{index:02d}',
+                role=User.Role.STUDENT,
+            )
+            for index in range(1, 50)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in students[1:]
+        ])
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Delete activity',
+            date='2027-08-03',
+            points_possible=Decimal('10.00'),
+        )
+        StudentGradeItemScore.objects.bulk_create([
+            StudentGradeItemScore(
+                grade_item=item,
+                student=student,
+                raw_score=Decimal('8.00'),
+            )
+            for student in students
+        ])
+        recompute_grade_target_for_students(
+            [student.id for student in students],
+            self.category,
+            self.schedule_a,
+        )
+        self.assertEqual(StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            completion_status='COMPLETE',
+        ).count(), 50)
+        item_id = item.id
+        self.client.force_authenticate(self.teacher)
+
+        with CaptureQueriesContext(connection) as queries:
+            deleted = self.client.delete(f'/api/grades/items/{item_id}/score-sheet/')
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertLessEqual(len(queries), 40)
+        self.assertFalse(GradeItem.objects.filter(pk=item_id).exists())
+        self.assertFalse(StudentGradeItemScore.objects.filter(grade_item_id=item_id).exists())
+        self.assertFalse(StudentCategoryGrade.objects.filter(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            student__in=students,
+        ).exists())
+        period_grades = PeriodGrade.objects.filter(
+            schedule=self.schedule_a,
+            grading_period=GradingPeriod.PRELIM,
+            student__in=students,
+        )
+        self.assertEqual(period_grades.count(), 50)
+        self.assertFalse(period_grades.exclude(completion_status='PENDING').exists())
 
     def test_score_sheet_mark_saves_edits_excuses_and_deletes_one_student(self):
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)

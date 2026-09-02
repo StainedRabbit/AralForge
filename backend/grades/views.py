@@ -614,6 +614,68 @@ class GradeItemViewSet(viewsets.ModelViewSet):
         item = self._create_score_sheet_item(request, require_active_roster=True)
         return Response(score_sheet_payload(item), status=status.HTTP_201_CREATED)
 
+    @action(
+        detail=True,
+        methods=['patch', 'delete'],
+        url_path='score-sheet',
+        url_name='manage-score-sheet',
+    )
+    @transaction.atomic
+    def manage_score_sheet(self, request, pk=None):
+        require_teacher(request)
+        item = get_object_or_404(
+            self.get_queryset().select_for_update(of=('self',)),
+            pk=pk,
+        )
+        if not item.schedule_id or not item.schedule.is_active:
+            raise serializers.ValidationError({
+                'schedule': 'Archived or unassigned classes cannot manage score sheets.',
+            })
+        if item.source_type != GradeItemSourceType.MANUAL:
+            raise serializers.ValidationError({
+                'source_type': 'Only manual score sheets can be managed here.',
+            })
+
+        SubjectSchedule.objects.select_for_update(of=('self',)).get(pk=item.schedule_id)
+        if request.method == 'DELETE':
+            item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        editable_fields = {'title', 'date', 'points_possible', 'grade_category'}
+        unsupported_fields = set(request.data) - editable_fields
+        if unsupported_fields:
+            raise serializers.ValidationError({
+                'detail': 'Only title, date, maximum score, and category can be changed.',
+            })
+
+        values = {
+            field: request.data[field]
+            for field in editable_fields
+            if field in request.data
+        }
+        if 'title' in values:
+            raw_title = values['title']
+            values['title'] = raw_title.strip() if isinstance(raw_title, str) else raw_title
+            if not values['title'] or not isinstance(values['title'], str):
+                raise serializers.ValidationError({'title': 'An activity title is required.'})
+        if 'date' in values and not values['date']:
+            raise serializers.ValidationError({'date': 'A score-sheet date is required.'})
+
+        item_serializer = self.get_serializer(item, data=values, partial=True)
+        item_serializer.is_valid(raise_exception=True)
+        category = item_serializer.validated_data.get('grade_category', item.grade_category)
+        if category.category == GradeCategoryChoices.ATTENDANCE:
+            raise serializers.ValidationError({
+                'grade_category': 'Use the attendance workflow for attendance categories.',
+            })
+        if category.subject_id != item.schedule.subject_id:
+            raise serializers.ValidationError({
+                'grade_category': 'This category does not belong to the score-sheet class.',
+            })
+
+        item = item_serializer.save()
+        return Response(score_sheet_payload(item))
+
     def _create_score_sheet_item(self, request, require_active_roster=False):
         require_teacher(request)
         schedule = get_object_or_404(

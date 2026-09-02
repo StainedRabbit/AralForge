@@ -252,13 +252,17 @@ def recompute_grade_target_for_students(student_ids, grade_category, schedule=No
 def _bulk_save(model, rows, existing, key, fields):
     creates = []
     updates = []
+    field_attributes = tuple(
+        (field_name, model._meta.get_field(field_name).attname)
+        for field_name in fields
+    )
     for row in rows:
         current = existing.get(key(row))
         if current is None:
             creates.append(row)
             continue
-        for field in fields:
-            setattr(current, field, getattr(row, field))
+        for _field_name, attribute_name in field_attributes:
+            setattr(current, attribute_name, getattr(row, attribute_name))
         updates.append(current)
     if creates:
         model.objects.bulk_create(creates, batch_size=500)

@@ -3368,6 +3368,7 @@ a.teacher-recent-item:focus-visible {
 .class-score-sheet-heading__actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -3631,7 +3632,7 @@ a.teacher-recent-item:focus-visible {
   z-index: 2;
   bottom: -1px;
   display: grid;
-  grid-template-columns: auto auto minmax(150px, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -3643,6 +3644,12 @@ a.teacher-recent-item:focus-visible {
 
 .score-runner-actions .button--primary {
   justify-content: center;
+}
+
+.class-score-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .class-score-table-wrap {
