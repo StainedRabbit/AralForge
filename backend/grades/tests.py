@@ -571,6 +571,139 @@ class ClassScopedGradeTests(APITestCase):
             Decimal('0.00'),
         )
 
+    def test_score_sheet_start_creates_pending_rows_ordered_by_last_name(self):
+        self.student.first_name = 'Zoe'
+        self.student.last_name = 'young'
+        self.student.save(update_fields=['first_name', 'last_name'])
+        self.other_student.first_name = 'Amy'
+        self.other_student.last_name = 'Adams'
+        self.other_student.save(update_fields=['first_name', 'last_name'])
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.post(
+            '/api/grades/items/score-sheet/start/',
+            {
+                'schedule': self.schedule_a.id,
+                'grade_category': self.category.id,
+                'title': 'Runner quiz',
+                'date': '2027-08-03',
+                'points_possible': '10.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([row['student'] for row in response.data['rows']], [
+            self.other_student.id,
+            self.student.id,
+        ])
+        self.assertTrue(all(row['score_id'] is None for row in response.data['rows']))
+        self.assertFalse(StudentGradeItemScore.objects.filter(
+            grade_item_id=response.data['item']['id'],
+        ).exists())
+
+    def test_score_sheet_mark_saves_edits_excuses_and_deletes_one_student(self):
+        ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Runner quiz',
+            date='2027-08-03',
+            points_possible=Decimal('10.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+        url = f'/api/grades/items/{item.id}/mark/'
+
+        created = self.client.put(
+            url,
+            {'student': self.student.id, 'raw_score': '8.50', 'status': 'GRADED'},
+            format='json',
+        )
+        self.assertEqual(created.status_code, 200, created.data)
+        self.assertEqual(created.data['raw_score'], '8.50')
+        self.assertEqual(
+            StudentCategoryGrade.objects.get(
+                schedule=self.schedule_a,
+                student=self.student,
+                grade_category=self.category,
+            ).raw_score,
+            Decimal('8.50'),
+        )
+
+        zero = self.client.put(
+            url,
+            {'student': self.student.id, 'raw_score': '0', 'status': 'GRADED'},
+            format='json',
+        )
+        self.assertEqual(zero.status_code, 200, zero.data)
+        self.assertEqual(zero.data['raw_score'], '0.00')
+        self.assertEqual(StudentGradeItemScore.objects.filter(
+            grade_item=item,
+            student=self.student,
+        ).count(), 1)
+
+        excused = self.client.put(
+            url,
+            {
+                'student': self.other_student.id,
+                'status': 'EXCUSED',
+                'remarks': 'Approved absence',
+            },
+            format='json',
+        )
+        self.assertEqual(excused.status_code, 200, excused.data)
+        self.assertEqual(excused.data['status'], 'EXCUSED')
+        self.assertIsNone(excused.data['raw_score'])
+
+        deleted = self.client.delete(
+            url,
+            {'student': self.student.id},
+            format='json',
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(StudentGradeItemScore.objects.filter(
+            grade_item=item,
+            student=self.student,
+        ).exists())
+
+    def test_score_sheet_mark_validates_pending_scores_and_active_roster(self):
+        item = GradeItem.objects.create(
+            schedule=self.schedule_a,
+            grade_category=self.category,
+            title='Runner validation',
+            date='2027-08-03',
+            points_possible=Decimal('10.00'),
+        )
+        self.client.force_authenticate(self.teacher)
+        url = f'/api/grades/items/{item.id}/mark/'
+
+        blank = self.client.put(
+            url,
+            {'student': self.student.id, 'raw_score': '', 'status': 'GRADED'},
+            format='json',
+        )
+        self.assertEqual(blank.status_code, 400)
+        too_high = self.client.put(
+            url,
+            {'student': self.student.id, 'raw_score': '11', 'status': 'GRADED'},
+            format='json',
+        )
+        self.assertEqual(too_high.status_code, 400)
+        no_reason = self.client.put(
+            url,
+            {'student': self.student.id, 'status': 'EXCUSED', 'remarks': ''},
+            format='json',
+        )
+        self.assertEqual(no_reason.status_code, 400)
+        inactive = self.client.put(
+            url,
+            {'student': self.other_student.id, 'raw_score': '8', 'status': 'GRADED'},
+            format='json',
+        )
+        self.assertEqual(inactive.status_code, 400)
+        self.assertFalse(StudentGradeItemScore.objects.filter(grade_item=item).exists())
+
     def test_score_sheet_validation_is_atomic(self):
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.other_student)
         self.client.force_authenticate(self.teacher)

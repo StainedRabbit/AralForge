@@ -2954,6 +2954,47 @@ a.teacher-recent-item:focus-visible {
   gap: 16px;
 }
 
+.score-roll-call {
+  padding-top: 2px;
+}
+
+.score-entry-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.score-entry-form input {
+  width: 100%;
+}
+
+.score-entry-form__actions,
+.score-entry-form__error {
+  grid-column: 1 / -1;
+}
+
+.score-entry-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.score-status--saved {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.score-roll-call .attendance-student-card__identity p {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .class-score-setup {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3079,6 +3120,11 @@ a.teacher-recent-item:focus-visible {
   gap: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--border);
+}
+
+.class-score-history summary {
+  cursor: pointer;
+  font-weight: 850;
 }
 
 .class-score-history .class-score-table {
@@ -5989,6 +6035,19 @@ a.teacher-recent-item:focus-visible {
 
   .class-score-setup {
     grid-template-columns: 1fr;
+  }
+
+  .score-entry-form {
+    grid-template-columns: 1fr;
+  }
+
+  .score-entry-form__actions,
+  .score-entry-form__error {
+    grid-column: auto;
+  }
+
+  .score-entry-form__actions .button {
+    flex: 1;
   }
 
   .class-score-sheet-heading {

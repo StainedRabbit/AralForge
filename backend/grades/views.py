@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Case, CharField, Count, Exists, Max, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -603,6 +604,17 @@ class GradeItemViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='score-sheet')
     @transaction.atomic
     def score_sheet(self, request):
+        item = self._create_score_sheet_item(request)
+        save_score_sheet_roster(item, request.data.get('records'))
+        return Response(score_sheet_payload(item), status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='score-sheet/start')
+    @transaction.atomic
+    def start_score_sheet(self, request):
+        item = self._create_score_sheet_item(request, require_active_roster=True)
+        return Response(score_sheet_payload(item), status=status.HTTP_201_CREATED)
+
+    def _create_score_sheet_item(self, request, require_active_roster=False):
         require_teacher(request)
         schedule = get_object_or_404(
             SubjectSchedule.objects.select_for_update(of=('self',)).select_related('subject'),
@@ -618,6 +630,13 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             })
         if not request.data.get('date'):
             raise serializers.ValidationError({'date': 'A score-sheet date is required.'})
+        if require_active_roster and not ScheduleStudent.objects.filter(
+            schedule=schedule,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError({
+                'records': 'Add at least one active student before recording scores.',
+            })
         order = GradeItem.objects.filter(
             schedule=schedule,
             grade_category=category,
@@ -633,9 +652,7 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'source_type': 'MANUAL',
         })
         item_serializer.is_valid(raise_exception=True)
-        item = item_serializer.save()
-        save_score_sheet_roster(item, request.data.get('records'))
-        return Response(score_sheet_payload(item), status=status.HTTP_201_CREATED)
+        return item_serializer.save()
 
     @action(detail=True, methods=['get', 'put'], url_path='roster')
     @transaction.atomic
@@ -651,6 +668,76 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             save_score_sheet_roster(item, request.data.get('records'))
             item.refresh_from_db()
         return Response(score_sheet_payload(item))
+
+    @action(detail=True, methods=['put', 'delete'], url_path='mark')
+    @transaction.atomic
+    def mark(self, request, pk=None):
+        require_teacher(request)
+        item = self.get_object()
+        if not item.schedule_id or not item.schedule.is_active:
+            raise serializers.ValidationError({
+                'schedule': 'Archived or unassigned classes cannot record scores.',
+            })
+        if item.source_type != GradeItemSourceType.MANUAL:
+            raise serializers.ValidationError({
+                'source_type': 'Only manual score sheets can be edited here.',
+            })
+
+        SubjectSchedule.objects.select_for_update(of=('self',)).get(pk=item.schedule_id)
+        try:
+            student_id = int(request.data.get('student'))
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({'student': 'A valid student is required.'})
+
+        enrollment = ScheduleStudent.objects.select_related(
+            'student', 'student__student_profile',
+        ).filter(
+            schedule=item.schedule,
+            student_id=student_id,
+            is_active=True,
+        ).first()
+        if not enrollment:
+            raise serializers.ValidationError({
+                'student': 'The student is not part of the active class roster.',
+            })
+
+        existing = StudentGradeItemScore.objects.select_for_update().filter(
+            grade_item=item,
+            student_id=student_id,
+        ).first()
+        if request.method == 'DELETE':
+            if existing:
+                if existing.origin == StudentGradeItemScore.Origin.AUTOMATIC:
+                    raise serializers.ValidationError({
+                        'score': 'Automatically synchronized scores cannot be removed here.',
+                    })
+                existing.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        validated = validate_score_sheet_mark(item, request.data)
+        defaults = {
+            'raw_score': validated['raw_score'],
+            'status': validated['status'],
+            'origin': StudentGradeItemScore.Origin.MANUAL,
+            'override_reason': (
+                validated['remarks']
+                if validated['status'] == StudentGradeItemScore.Status.EXCUSED
+                else ''
+            ),
+            'remarks': validated['remarks'],
+        }
+        if existing:
+            for field, value in defaults.items():
+                setattr(existing, field, value)
+            existing.save()
+            score = existing
+        else:
+            score = StudentGradeItemScore.objects.create(
+                grade_item=item,
+                student_id=student_id,
+                **defaults,
+            )
+        return Response(StudentGradeItemScoreSerializer(score).data)
 
     @action(detail=True, methods=['post'])
     def resync(self, request, pk=None):
@@ -766,7 +853,7 @@ def active_score_roster(item):
         ScheduleStudent.objects.select_for_update(of=('self',))
         .select_related('student', 'student__student_profile')
         .filter(schedule=item.schedule, is_active=True)
-        .order_by('student__last_name', 'student__first_name', 'student_id')
+        .order_by(Lower('student__last_name'), Lower('student__first_name'), 'student_id')
     )
 
 
@@ -829,6 +916,29 @@ def validate_score_sheet_records(item, records, enrollments):
     return validated
 
 
+def validate_score_sheet_mark(item, record):
+    row_status = str(record.get('status') or StudentGradeItemScore.Status.GRADED).upper()
+    remarks = str(record.get('remarks') or '').strip()
+    if row_status not in StudentGradeItemScore.Status.values:
+        raise serializers.ValidationError({'status': 'Status must be graded or excused.'})
+    if row_status == StudentGradeItemScore.Status.EXCUSED:
+        if not remarks:
+            raise serializers.ValidationError({'remarks': 'An excuse reason is required.'})
+        raw_score = None
+    else:
+        value = record.get('raw_score')
+        if value in (None, ''):
+            raise serializers.ValidationError({'raw_score': 'Enter a score or explicitly skip as zero.'})
+        score_field = serializers.DecimalField(
+            max_digits=7,
+            decimal_places=2,
+            min_value=Decimal('0'),
+            max_value=item.points_possible,
+        )
+        raw_score = score_field.run_validation(value)
+    return {'raw_score': raw_score, 'remarks': remarks, 'status': row_status}
+
+
 def save_score_sheet_roster(item, records):
     enrollments = active_score_roster(item)
     if not enrollments:
@@ -852,11 +962,11 @@ def score_sheet_payload(item):
     active_enrollments = list(
         item.schedule.students.select_related('student', 'student__student_profile')
         .filter(is_active=True)
-        .order_by('student__last_name', 'student__first_name', 'student_id')
+        .order_by(Lower('student__last_name'), Lower('student__first_name'), 'student_id')
     ) if item.schedule_id else []
     scores = list(
         item.student_scores.select_related('student', 'student__student_profile')
-        .order_by('student__last_name', 'student__first_name', 'student_id')
+        .order_by(Lower('student__last_name'), Lower('student__first_name'), 'student_id')
     )
     scores_by_student = {score.student_id: score for score in scores}
     active_ids = {enrollment.student_id for enrollment in active_enrollments}
