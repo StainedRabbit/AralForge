@@ -477,7 +477,7 @@ function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
     const key = `${keyPrefix}-inline-${match.index}`
 
     if (token.startsWith('`')) {
-      pieces.push(<code key={key}>{token.slice(1, -1)}</code>)
+      pieces.push(<code key={key}>{unescapeMarkdown(token.slice(1, -1))}</code>)
     } else if (token.startsWith('**')) {
       pieces.push(<strong key={key}>{unescapeMarkdown(token.slice(2, -2))}</strong>)
     } else if (token.startsWith('*')) {
