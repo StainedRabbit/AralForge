@@ -406,7 +406,8 @@
 
 .rich-text h1,
 .rich-text h2,
-.rich-text h3 {
+.rich-text h3,
+.rich-text h4 {
   margin: 0 0 12px;
   color: var(--text);
   line-height: 1.16;
@@ -422,6 +423,10 @@
 
 .rich-text h3 {
   font-size: 19px;
+}
+
+.rich-text h4 {
+  font-size: 17px;
 }
 
 .rich-text ul,
@@ -2396,7 +2401,8 @@
 
 .presentation-content h1,
 .presentation-content h2,
-.presentation-content h3 {
+.presentation-content h3,
+.presentation-content h4 {
   margin: 0;
   color: var(--text);
   line-height: 1.12;
@@ -2412,6 +2418,10 @@
 
 .presentation-content h3 {
   font-size: var(--presentation-heading-3-size);
+}
+
+.presentation-content h4 {
+  font-size: calc(var(--presentation-heading-3-size) * 0.82);
 }
 
 .presentation-content ul,

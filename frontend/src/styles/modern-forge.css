@@ -908,7 +908,8 @@ summary {
 .lesson-content-section h3,
 .rich-text h1,
 .rich-text h2,
-.rich-text h3 {
+.rich-text h3,
+.rich-text h4 {
   color: var(--forge-navy);
 }
 

@@ -12,7 +12,7 @@ type OrderedListItem = {
 }
 
 type TextPiece =
-  | { level: 1 | 2 | 3; type: 'heading'; value: string }
+  | { level: 1 | 2 | 3 | 4; type: 'heading'; value: string }
   | { type: 'ordered-list'; items: OrderedListItem[] }
   | { type: 'paragraph'; value: string }
   | { headers: string[]; rows: string[][]; type: 'table' }
@@ -366,11 +366,11 @@ function parseTextPieces(value: string): TextPiece[] {
       continue
     }
 
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)/)
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)/)
     if (heading) {
       flushLists()
       pieces.push({
-        level: heading[1].length as 1 | 2 | 3,
+        level: heading[1].length as 1 | 2 | 3 | 4,
         type: 'heading',
         value: heading[2],
       })
@@ -423,15 +423,43 @@ function isTableStart(lines: string[], index: number) {
 
 function parseTableRow(line: string) {
   const trimmed = line.trim()
-  if (!trimmed.includes('|')) {
+  const cells: string[] = []
+  let cell = ''
+  let hasSeparator = false
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index]
+
+    if (character === '\\' && trimmed[index + 1] === '|') {
+      cell += '\\|'
+      index += 1
+      continue
+    }
+
+    if (character === '|') {
+      cells.push(cell)
+      cell = ''
+      hasSeparator = true
+      continue
+    }
+
+    cell += character
+  }
+
+  if (!hasSeparator) {
     return []
   }
 
-  return trimmed
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((cell) => cell.trim())
+  cells.push(cell)
+
+  if (trimmed.startsWith('|')) {
+    cells.shift()
+  }
+  if (trimmed.endsWith('|') && !trimmed.endsWith('\\|')) {
+    cells.pop()
+  }
+
+  return cells.map((value) => value.trim())
 }
 
 function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
@@ -442,7 +470,7 @@ function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
 
   while ((match = pattern.exec(value)) !== null) {
     if (match.index > cursor) {
-      pieces.push(value.slice(cursor, match.index))
+      pieces.push(unescapeMarkdown(value.slice(cursor, match.index)))
     }
 
     const token = match[0]
@@ -451,15 +479,15 @@ function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
     if (token.startsWith('`')) {
       pieces.push(<code key={key}>{token.slice(1, -1)}</code>)
     } else if (token.startsWith('**')) {
-      pieces.push(<strong key={key}>{token.slice(2, -2)}</strong>)
+      pieces.push(<strong key={key}>{unescapeMarkdown(token.slice(2, -2))}</strong>)
     } else if (token.startsWith('*')) {
-      pieces.push(<em key={key}>{token.slice(1, -1)}</em>)
+      pieces.push(<em key={key}>{unescapeMarkdown(token.slice(1, -1))}</em>)
     } else {
       const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
       if (link) {
         pieces.push(
           <a href={safeHref(link[2])} key={key} rel="noreferrer" target="_blank">
-            {link[1]}
+            {unescapeMarkdown(link[1])}
           </a>,
         )
       }
@@ -469,10 +497,14 @@ function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
   }
 
   if (cursor < value.length) {
-    pieces.push(value.slice(cursor))
+    pieces.push(unescapeMarkdown(value.slice(cursor)))
   }
 
   return pieces
+}
+
+function unescapeMarkdown(value: string) {
+  return value.replaceAll('\\|', '|')
 }
 
 function safeHref(href: string) {
