@@ -40,6 +40,46 @@ code {
   padding: 0 12px;
 }
 
+.password-input {
+  position: relative;
+}
+
+.form-stack .password-input input {
+  padding-right: 48px;
+}
+
+.password-input__toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  transform: translateY(-50%);
+  place-items: center;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.password-input__toggle:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.password-input__toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.password-input__toggle .icon {
+  width: 19px;
+  height: 19px;
+}
+
 .form-stack textarea {
   min-height: 140px;
   padding: 12px;

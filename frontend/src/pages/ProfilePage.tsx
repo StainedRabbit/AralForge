@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
+import { PasswordInput } from '../components/PasswordInput'
 import { EmptyState, MetaStrip, Page, PageHeader, SectionHeading } from '../components/ui'
 import { formatDateTime, toErrorMessage } from '../utils/format'
 import { fullName, initials } from '../utils/student'
@@ -91,34 +92,33 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
           <form className="form-stack profile-password-form" onSubmit={changePassword}>
             <label>
               <span>Current password</span>
-              <input
+              <PasswordInput
                 autoComplete="current-password"
                 onChange={(event) => setCurrentPassword(event.target.value)}
                 required
-                type="password"
                 value={currentPassword}
               />
             </label>
             <label>
               <span>New password</span>
-              <input
+              <PasswordInput
                 autoComplete="new-password"
                 minLength={8}
                 onChange={(event) => setNewPassword(event.target.value)}
                 required
-                type="password"
                 value={newPassword}
+                visibilityLabel="new password"
               />
             </label>
             <label>
               <span>Confirm new password</span>
-              <input
+              <PasswordInput
                 autoComplete="new-password"
                 minLength={8}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 required
-                type="password"
                 value={confirmPassword}
+                visibilityLabel="password confirmation"
               />
             </label>
 

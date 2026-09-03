@@ -6,6 +6,7 @@ import type { Session } from '../api'
 import loginIllustration from '../assets/aralforge-login-illustration.jpg'
 import { BrandMark } from '../components/navigation'
 import { Icon } from '../components/Icon'
+import { PasswordInput } from '../components/PasswordInput'
 import { toErrorMessage } from '../utils/format'
 
 export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -100,12 +101,11 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
 
             <label>
               <span>Password</span>
-              <input
+              <PasswordInput
                 autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Enter your password"
                 required
-                type="password"
                 value={password}
               />
             </label>
@@ -114,22 +114,22 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
               <>
                 <label>
                   <span>New password</span>
-                  <input
+                  <PasswordInput
                     autoComplete="new-password"
                     onChange={(event) => setNewPassword(event.target.value)}
                     required
-                    type="password"
                     value={newPassword}
+                    visibilityLabel="new password"
                   />
                 </label>
                 <label>
                   <span>Confirm new password</span>
-                  <input
+                  <PasswordInput
                     autoComplete="new-password"
                     onChange={(event) => setConfirmPassword(event.target.value)}
                     required
-                    type="password"
                     value={confirmPassword}
+                    visibilityLabel="password confirmation"
                   />
                 </label>
               </>
