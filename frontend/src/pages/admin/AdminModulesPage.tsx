@@ -16,6 +16,12 @@ import type {
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
+  compatibilityEncodingNotice,
+  countReplacementCharacters,
+  decodeTextFile,
+  replacementCharacterWarning,
+} from '../../utils/textFile'
+import {
   getLessonSections,
   lessonSearchText,
   lessonSectionId,
@@ -656,6 +662,8 @@ function ModuleOutlineImportModal({
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [encodingNotice, setEncodingNotice] = useState('')
+  const replacementCount = countReplacementCharacters(text)
   const parsed = useMemo(() => parseModuleOutlineMarkdown(text), [text])
   const analysis = useMemo(
     () => analyzeModuleOutlineImport(parsed, moduleTopics, data.moduleLessons),
@@ -668,8 +676,13 @@ function ModuleOutlineImportModal({
     }
 
     setMessage('')
+    setEncodingNotice('')
     try {
-      setText(await file.text())
+      const decoded = await decodeTextFile(file)
+      setText(decoded.text)
+      setEncodingNotice(
+        decoded.usedCompatibilityFallback ? compatibilityEncodingNotice(file.name) : '',
+      )
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     }
@@ -687,6 +700,10 @@ function ModuleOutlineImportModal({
   }
 
   async function applyOutlineImport() {
+    if (replacementCount > 0) {
+      setMessage(replacementCharacterWarning(replacementCount))
+      return
+    }
     if (!parsed.topics.length) {
       setMessage('Add at least one topic heading before applying the outline.')
       return
@@ -833,6 +850,10 @@ function ModuleOutlineImportModal({
               />
               <small>Use topic headings with optional lesson bullets. Topics without lessons are valid; lesson bullets create blank lesson shells.</small>
             </label>
+            {encodingNotice ? <p className="admin-message text-import-notice" role="status">{encodingNotice}</p> : null}
+            {replacementCount ? (
+              <p className="admin-message text-import-warning" role="alert">{replacementCharacterWarning(replacementCount)}</p>
+            ) : null}
             {message ? <p className="admin-message">{message}</p> : null}
           </section>
           <section className="lesson-import-preview">
@@ -898,7 +919,7 @@ function ModuleOutlineImportModal({
           </section>
         </div>
         <div className="lesson-focus-modal__footer">
-          <button className="button button--primary" disabled={busy || !parsed.topics.length} onClick={() => void applyOutlineImport()} type="button">
+          <button className="button button--primary" disabled={busy || !parsed.topics.length || replacementCount > 0} onClick={() => void applyOutlineImport()} type="button">
             <Icon name="upload" />
             <span>{busy ? 'Applying...' : 'Apply Outline'}</span>
           </button>

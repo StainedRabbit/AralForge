@@ -3,6 +3,31 @@ import { expect, test, type Page } from '@playwright/test'
 import type { ModuleLesson, ModuleLessonProgress } from '../src/types'
 import { getLessonResumeTarget } from '../src/utils/modules'
 
+const windows1252Characters = new Map([
+  ['“', 0x93],
+  ['”', 0x94],
+  ['’', 0x92],
+  ['—', 0x97],
+])
+
+function encodeWindows1252(value: string) {
+  return Buffer.from(Array.from(value, (character) => {
+    const mapped = windows1252Characters.get(character)
+    if (mapped !== undefined) return mapped
+    const code = character.codePointAt(0) ?? 0
+    if (code > 0x7f) throw new Error(`Missing Windows-1252 test mapping for ${character}`)
+    return code
+  }))
+}
+
+function encodeUtf16Be(value: string) {
+  const littleEndian = Buffer.from(value, 'utf16le')
+  for (let index = 0; index < littleEndian.length; index += 2) {
+    ;[littleEndian[index], littleEndian[index + 1]] = [littleEndian[index + 1], littleEndian[index]]
+  }
+  return Buffer.concat([Buffer.from([0xfe, 0xff]), littleEndian])
+}
+
 async function openModuleWorkspace(page: Page) {
   await page.goto('/admin/modules/new')
   await page.getByLabel('Student number').fill('e2e-teacher')
@@ -231,6 +256,53 @@ test('downloads and imports topic outline Markdown variants', async ({ page }) =
   expect(markdown).toContain('# E2E Programming Module')
   expect(markdown).toContain('- Lesson 1: IPO Model')
 
+  const windows1252Outline = '# “Module” — Preview\r\n\r\n## Topic 1: Teacher’s Notes\r\n'
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'windows-1252-outline.md',
+    mimeType: 'text/markdown',
+    buffer: encodeWindows1252(windows1252Outline),
+  })
+  await expect(dialog.locator('textarea')).toHaveValue(/“Module” — Preview/)
+  await expect(dialog.locator('textarea')).toHaveValue(/Teacher’s Notes/)
+  await expect(dialog).toContainText('decoded using Windows-1252 compatibility mode')
+  await expect(dialog.locator('textarea')).not.toHaveValue(/\uFFFD/)
+
+  const utf8BomOutline = '# UTF-8 BOM\n\n## Topic 1: Unicode ✓\n'
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'utf-8-bom.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(utf8BomOutline)]),
+  })
+  await expect(dialog.locator('textarea')).toHaveValue(utf8BomOutline)
+  await expect(dialog).not.toContainText('decoded using Windows-1252 compatibility mode')
+
+  const utf16LeOutline = '# UTF-16 LE\n\n## Topic 1: Café\n'
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'utf-16-le.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(utf16LeOutline, 'utf16le')]),
+  })
+  await expect(dialog.locator('textarea')).toHaveValue(utf16LeOutline)
+
+  const utf16BeOutline = '# UTF-16 BE\n\n## Topic 1: Résumé\n'
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'utf-16-be.md',
+    mimeType: 'text/markdown',
+    buffer: encodeUtf16Be(utf16BeOutline),
+  })
+  await expect(dialog.locator('textarea')).toHaveValue(utf16BeOutline)
+
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'damaged-outline.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Damaged \uFFFD\n\n## Topic 1: One \uFFFD\n'),
+  })
+  await expect(dialog.getByRole('alert')).toContainText('Found 2 unknown replacement characters')
+  await expect(dialog.getByRole('button', { name: 'Apply Outline' })).toBeDisabled()
+  await dialog.locator('textarea').fill('# Corrected\n\n## Topic 1: Corrected text\n')
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Apply Outline' })).toBeEnabled()
+
   await dialog.locator('input[type="file"]').setInputFiles({
     name: 'topics-only.md',
     mimeType: 'text/markdown',
@@ -396,7 +468,13 @@ Complete the retained practice.
   await lessonImport.getByRole('button', { name: 'Apply to Empty Fields' }).click()
   await expect(lessonImport).toContainText('Lesson import applied to the draft.')
   await lessonImport.getByRole('button', { name: 'Close' }).click()
-  await expect(page.getByRole('textbox', { name: "Let's Practice", exact: true })).toHaveValue('Complete the retained practice.')
+  const practiceEditor = page.getByRole('textbox', { name: "Let's Practice", exact: true })
+  await expect(practiceEditor).toHaveValue('Complete the retained practice.')
+  await practiceEditor.fill('Complete the retained practice. \uFFFD')
+  await expect(page.getByRole('alert').first()).toContainText('Found 1 unknown replacement character')
+  await expect(page.getByRole('button', { name: 'Save lesson' })).toBeDisabled()
+  await practiceEditor.fill('Complete the retained practice.')
+  await expect(page.getByRole('button', { name: 'Save lesson' })).toBeEnabled()
 })
 
 test('creates, selects, and reloads a lesson beyond the global first page', async ({ page }) => {

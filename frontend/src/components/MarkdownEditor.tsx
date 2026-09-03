@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { RichLessonText } from './RichLessonText'
+import { countReplacementCharacters, replacementCharacterWarning } from '../utils/textFile'
 
 type MarkdownAction =
   | 'bold'
@@ -70,6 +71,7 @@ export function MarkdownEditor({
     canRedo: false,
     canUndo: false,
   })
+  const replacementCount = countReplacementCharacters(value)
 
   useEffect(() => {
     const history = historyRef.current
@@ -325,6 +327,9 @@ export function MarkdownEditor({
           />
         ) : null}
       </div>
+      {replacementCount ? (
+        <small className="admin-message text-import-warning" role="alert">{replacementCharacterWarning(replacementCount)}</small>
+      ) : null}
     </div>
   )
 }

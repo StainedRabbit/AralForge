@@ -20,6 +20,12 @@ import type {
 import { toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
 import {
+  compatibilityEncodingNotice,
+  countReplacementCharacters,
+  decodeTextFile,
+  replacementCharacterWarning,
+} from '../../utils/textFile'
+import {
   lessonDraftKey,
   readLessonDraft,
   removeLessonDraft,
@@ -63,6 +69,21 @@ type LessonTemplateFieldKey =
   | 'short_discussion'
   | 'lets_practice'
   | 'challenge_task'
+
+function countLessonReplacementCharacters(
+  draft: LessonDraft,
+  examples: LessonExampleDraft[],
+) {
+  const lessonText = Object.values(draft)
+    .filter((value): value is string => typeof value === 'string')
+    .join('')
+  const exampleText = examples
+    .filter((example) => !example.deleted)
+    .flatMap((example) => [example.title, example.alt_text, example.body, example.common_mistake])
+    .join('')
+
+  return countReplacementCharacters(lessonText) + countReplacementCharacters(exampleText)
+}
 
 export function AdminLessonEditorPage({
   api,
@@ -240,6 +261,7 @@ function AdminLessonEditorForm({
   const examplesDirty = serializeExampleDrafts(exampleDrafts) !== baselineExamples || exampleDrafts.some((example) => example.image)
   const isTextDirty = !draftsMatch(serializableDraft, baselineDraft)
   const hasUnsavedChanges = isTextDirty || examplesDirty
+  const replacementCount = countLessonReplacementCharacters(draft, exampleDrafts)
 
   useEffect(() => {
     if (!hasInteracted) {
@@ -306,6 +328,11 @@ function AdminLessonEditorForm({
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (replacementCount > 0) {
+      setMessage(replacementCharacterWarning(replacementCount))
+      setSaveState('unsaved')
+      return
+    }
     setSaving(true)
     setSaveState('saving')
     setMessage('')
@@ -692,6 +719,9 @@ function AdminLessonEditorForm({
               )}
             </section>
 
+            {replacementCount ? (
+              <p className="admin-message text-import-warning" role="alert">{replacementCharacterWarning(replacementCount)}</p>
+            ) : null}
             {message ? <p className="admin-message">{message}</p> : null}
 
             <div className="lesson-save-bar">
@@ -711,7 +741,7 @@ function AdminLessonEditorForm({
                 <Link className="button button--secondary" onClick={confirmLeave} to={backUrl}>
                   Cancel
                 </Link>
-                <button className="button button--primary" disabled={saving} type="submit">
+                <button className="button button--primary" disabled={saving || replacementCount > 0} type="submit">
                   <Icon name="save" />
                   <span>{saving ? 'Saving...' : 'Save lesson'}</span>
                 </button>
@@ -1349,10 +1379,12 @@ function LessonImportModal({
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [message, setMessage] = useState('')
+  const [encodingNotice, setEncodingNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const selectionRef = useRef({ end: 0, start: 0 })
   const parsed = useMemo(() => parseLessonImportMarkdown(text), [text])
+  const replacementCount = countReplacementCharacters(text)
   const imageReferences = useMemo(() => collectLessonImageReferences(parsed), [parsed])
   const fileCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -1363,11 +1395,21 @@ function LessonImportModal({
   async function uploadMarkdownFile(file: File | null) {
     if (!file) return
     if (!isLessonMarkdownFile(file)) {
+      setEncodingNotice('')
       setMessage('Upload a Markdown or text file for the lesson content.')
       return
     }
-    setText(await file.text())
-    setMessage(`${file.name} loaded.`)
+    setEncodingNotice('')
+    try {
+      const decoded = await decodeTextFile(file)
+      setText(decoded.text)
+      setEncodingNotice(
+        decoded.usedCompatibilityFallback ? compatibilityEncodingNotice(file.name) : '',
+      )
+      setMessage(`${file.name} loaded.`)
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    }
   }
 
   async function copyLessonImportExample() {
@@ -1439,6 +1481,10 @@ function LessonImportModal({
   }
 
   async function apply(mode: LessonImportMode) {
+    if (replacementCount > 0) {
+      setMessage(replacementCharacterWarning(replacementCount))
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
@@ -1515,6 +1561,10 @@ function LessonImportModal({
             {!canUploadAssets && imageReferences.length ? (
               <p className="admin-message">Save this lesson first to upload and rewrite linked image files.</p>
             ) : null}
+            {encodingNotice ? <p className="admin-message text-import-notice" role="status">{encodingNotice}</p> : null}
+            {replacementCount ? (
+              <p className="admin-message text-import-warning" role="alert">{replacementCharacterWarning(replacementCount)}</p>
+            ) : null}
             {message ? <p className="admin-message">{message}</p> : null}
           </section>
           <section className="lesson-import-preview">
@@ -1560,10 +1610,10 @@ function LessonImportModal({
           </section>
         </div>
         <div className="lesson-focus-modal__footer">
-          <button className="button button--secondary" disabled={busy || !text.trim()} onClick={() => void apply('empty')} type="button">
+          <button className="button button--secondary" disabled={busy || !text.trim() || replacementCount > 0} onClick={() => void apply('empty')} type="button">
             Apply to Empty Fields
           </button>
-          <button className="button button--primary" disabled={busy || !text.trim()} onClick={() => void apply('replace')} type="button">
+          <button className="button button--primary" disabled={busy || !text.trim() || replacementCount > 0} onClick={() => void apply('replace')} type="button">
             {busy ? 'Applying...' : 'Replace Lesson Fields'}
           </button>
         </div>

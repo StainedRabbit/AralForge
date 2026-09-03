@@ -19,6 +19,12 @@ import { Icon } from '../Icon'
 import { SectionHeading } from '../ui'
 import { queryKeys } from '../../queries/queryKeys'
 import { isJsonObject, migrateStorageValue } from '../../utils/storageMigration'
+import {
+  compatibilityEncodingNotice,
+  countReplacementCharacters,
+  decodeTextFile,
+  replacementCharacterWarning,
+} from '../../utils/textFile'
 import { ApiError } from '../../api'
 import {
   ActivityQuestionInput,
@@ -162,8 +168,10 @@ export function MainActivityEditor({
   const [saving, setSaving] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode>('not_started')
   const [importText, setImportText] = useState('')
+  const [importEncodingNotice, setImportEncodingNotice] = useState('')
   const [showImportExample, setShowImportExample] = useState(false)
   const [activeTab, setActiveTab] = useState<EditorTab>('setup')
+  const importReplacementCount = countReplacementCharacters(importText)
   const activeDrafts = questionDrafts.filter((question) => !question.deleted)
   const publishedPoints = activeDrafts
     .filter((question) => question.is_published)
@@ -306,6 +314,10 @@ export function MainActivityEditor({
   }
 
   function importQuestionDrafts() {
+    if (importReplacementCount > 0) {
+      setMessage(replacementCharacterWarning(importReplacementCount))
+      return
+    }
     const imported = parseImportedQuestions(importText, activeDrafts.length + 1)
     if (!imported.length) {
       setMessage('No questions were found. Start each block with MCQ:, TF:, FILL:, ORDER:, MATCH:, or CODE:.')
@@ -313,14 +325,23 @@ export function MainActivityEditor({
     }
     setQuestionDrafts((current) => [...current, ...imported])
     setImportText('')
+    setImportEncodingNotice('')
     setMessage(`${imported.length} question${imported.length === 1 ? '' : 's'} imported as drafts.`)
   }
 
   async function uploadImportFile(file: File | null) {
     if (!file) return
-    const text = await file.text()
-    setImportText(text)
-    setMessage(`${file.name} loaded into structured import.`)
+    setImportEncodingNotice('')
+    try {
+      const decoded = await decodeTextFile(file)
+      setImportText(decoded.text)
+      setImportEncodingNotice(
+        decoded.usedCompatibilityFallback ? compatibilityEncodingNotice(file.name) : '',
+      )
+      setMessage(`${file.name} loaded into structured import.`)
+    } catch (caughtError) {
+      setMessage(toErrorMessage(caughtError))
+    }
   }
 
   function downloadImportExample() {
@@ -647,6 +668,12 @@ export function MainActivityEditor({
             <span>Paste blocks starting with MCQ:, TF:, FILL:, ORDER:, MATCH:, or CODE:</span>
             <textarea onChange={(event) => setImportText(event.target.value)} rows={10} value={importText} />
           </label>
+          {importEncodingNotice ? <p className="admin-message text-import-notice" role="status">{importEncodingNotice}</p> : null}
+          {importReplacementCount ? (
+            <p className="admin-message text-import-warning" role="alert">
+              {replacementCharacterWarning(importReplacementCount)}
+            </p>
+          ) : null}
           <div className="lesson-editor__actions">
             <button className="button button--secondary button--compact" onClick={() => setShowImportExample(true)} type="button">
               <Icon name="book" />
@@ -665,7 +692,7 @@ export function MainActivityEditor({
                 type="file"
               />
             </label>
-            <button className="button button--primary button--compact" onClick={importQuestionDrafts} type="button">
+            <button className="button button--primary button--compact" disabled={importReplacementCount > 0} onClick={importQuestionDrafts} type="button">
               <Icon name="plus" />
               <span>Import Questions</span>
             </button>

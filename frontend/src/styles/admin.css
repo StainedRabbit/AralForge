@@ -158,6 +158,25 @@
   font-weight: 700;
 }
 
+.text-import-notice,
+.text-import-warning {
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.text-import-notice {
+  border-color: var(--warning);
+  color: var(--warning-dark, #805200);
+  background: var(--warning-soft, #fff3d8);
+}
+
+.text-import-warning {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .admin-table-panel {
   display: grid;
   gap: 12px;
