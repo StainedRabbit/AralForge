@@ -6,7 +6,7 @@ test.describe.configure({ mode: 'serial' })
 async function openClasses(page: Page) {
   await page.goto('/admin/classes')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
   await page.goto('/admin/classes')
@@ -654,19 +654,64 @@ test('creates, edits, clears, and deletes a class score sheet', async ({ page })
   await dialog.getByRole('button', { name: 'Clear student search' }).click()
   await expect(studentSearch).toHaveValue('')
 
+  let releaseFailedScore = () => undefined
+  const failedScoreGate = new Promise<void>((resolve) => { releaseFailedScore = resolve })
+  let failedScoreRequests = 0
+  await page.route('**/api/grades/items/*/mark/', async route => {
+    failedScoreRequests += 1
+    await failedScoreGate
+    await route.fulfill({
+      body: JSON.stringify({ detail: 'Temporary score failure.' }),
+      contentType: 'application/json',
+      status: 500,
+    })
+  })
   await dialog.getByLabel('Score for Rivera, Alex').fill('8.5')
   await dialog.getByRole('button', { name: 'Record score' }).click()
   await expect(dialog.getByRole('heading', { name: 'Santos, Jamie' })).toBeVisible()
-  await expect(dialog.getByRole('group', { name: 'Current score totals' })).toContainText('1Saved')
-  await studentSearch.fill('Alex')
-  await expect(dialog.getByRole('option').filter({ hasText: 'Rivera, Alex' })).toContainText('Graded')
-  await studentSearch.press('Escape')
-  await dialog.getByRole('button', { name: 'Undo last' }).click()
+  await expect(dialog.getByLabel('Score for Santos, Jamie')).toBeEnabled()
+  await dialog.getByLabel('Score for Santos, Jamie').fill('7')
+  await dialog.getByRole('button', { name: 'Record score' }).click()
+  await expect(dialog.getByText('Score sheet complete', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Saving 2 scores...')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Review scores' })).toBeDisabled()
+  await expect(dialog.getByRole('tab', { name: 'Score sheets' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Close scores' })).toBeDisabled()
+  await expect.poll(() => failedScoreRequests).toBe(1)
+  releaseFailedScore()
+  await expect(dialog).toContainText('Temporary score failure.')
   await expect(dialog.getByRole('heading', { name: 'Rivera, Alex' })).toBeVisible()
   await expect(dialog.getByLabel('Score for Rivera, Alex')).toHaveValue('')
+  await expect(dialog.getByRole('group', { name: 'Current score totals' })).toContainText('0Saved')
+  await page.unroute('**/api/grades/items/*/mark/')
+
+  let releaseFirstScore = () => undefined
+  const firstScoreGate = new Promise<void>((resolve) => { releaseFirstScore = resolve })
+  const savedScoreValues: string[] = []
+  await page.route('**/api/grades/items/*/mark/', async route => {
+    const payload = route.request().postDataJSON() as { raw_score: string }
+    savedScoreValues.push(payload.raw_score)
+    if (savedScoreValues.length === 1) await firstScoreGate
+    await route.continue()
+  })
   await dialog.getByLabel('Score for Rivera, Alex').fill('8.5')
   await dialog.getByLabel('Score for Rivera, Alex').press('Enter')
   await expect(dialog.getByRole('heading', { name: 'Santos, Jamie' })).toBeVisible()
+  await expect(dialog.getByLabel('Score for Santos, Jamie')).toBeFocused()
+  await expect(dialog.getByText('Saving 1 score...')).toBeVisible()
+  await dialog.getByLabel('Score for Santos, Jamie').fill('7')
+  await dialog.getByRole('button', { name: 'Record score' }).click()
+  await expect(dialog.getByText('Score sheet complete', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Saving 2 scores...')).toBeVisible()
+  await expect.poll(() => savedScoreValues).toEqual(['8.5'])
+  releaseFirstScore()
+  await expect.poll(() => savedScoreValues).toEqual(['8.5', '7'])
+  await expect(dialog.getByText(/Saving \d+ scores?\.\.\./)).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Review scores' })).toBeEnabled()
+  await page.unroute('**/api/grades/items/*/mark/')
+  await dialog.getByRole('button', { name: 'Undo last' }).click()
+  await expect(dialog.getByRole('heading', { name: 'Santos, Jamie' })).toBeVisible()
+  await expect(dialog.getByLabel('Score for Santos, Jamie')).toHaveValue('')
   await dialog.getByRole('button', { name: 'Close scores' }).click()
   await expect(dialog).toHaveCount(0)
 
@@ -1015,7 +1060,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await page.getByRole('button', { name: 'More navigation', exact: true }).click()
   await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
   await page.getByLabel('Student number').fill(importedStudentNumber)
-  await page.getByLabel('Password').fill(temporaryPassword)
+  await page.getByLabel('Password', { exact: true }).fill(temporaryPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: 'Create your password' })).toBeVisible()
   await page.getByLabel('New password', { exact: true }).fill('StudentSecurePass!482')

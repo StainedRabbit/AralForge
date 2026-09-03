@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function signIn(page: Page) {
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: 'Welcome back, E2E Teacher.' })).toBeVisible()
 }

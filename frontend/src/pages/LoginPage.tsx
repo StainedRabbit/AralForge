@@ -99,39 +99,33 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
               />
             </label>
 
-            <label>
-              <span>Password</span>
-              <PasswordInput
-                autoComplete="current-password"
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter your password"
-                required
-                value={password}
-              />
-            </label>
+            <PasswordInput
+              autoComplete="current-password"
+              label="Password"
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Enter your password"
+              required
+              value={password}
+            />
               </>
             ) : (
               <>
-                <label>
-                  <span>New password</span>
-                  <PasswordInput
-                    autoComplete="new-password"
-                    onChange={(event) => setNewPassword(event.target.value)}
-                    required
-                    value={newPassword}
-                    visibilityLabel="new password"
-                  />
-                </label>
-                <label>
-                  <span>Confirm new password</span>
-                  <PasswordInput
-                    autoComplete="new-password"
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    required
-                    value={confirmPassword}
-                    visibilityLabel="password confirmation"
-                  />
-                </label>
+                <PasswordInput
+                  autoComplete="new-password"
+                  label="New password"
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  required
+                  value={newPassword}
+                  visibilityLabel="new password"
+                />
+                <PasswordInput
+                  autoComplete="new-password"
+                  label="Confirm new password"
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  value={confirmPassword}
+                  visibilityLabel="password confirmation"
+                />
               </>
             )}
 

@@ -6,7 +6,7 @@ import { getLessonResumeTarget } from '../src/utils/modules'
 async function openModuleWorkspace(page: Page) {
   await page.goto('/admin/modules/new')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
 
@@ -111,7 +111,7 @@ test('selects valid start, resume, continue, and review lesson targets', () => {
 test('loads presentation using only the module-scoped workspace endpoint', async ({ page }) => {
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
 
@@ -402,7 +402,7 @@ Complete the retained practice.
 test('creates, selects, and reloads a lesson beyond the global first page', async ({ page }) => {
   await page.goto('/admin/modules')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
   await page.goto('/admin/modules')
@@ -452,7 +452,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   })
   await page.goto('/modules')
   await page.getByLabel('Student number').fill('E2E-001')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((url) => url.pathname === '/')
   await page.goto('/modules')

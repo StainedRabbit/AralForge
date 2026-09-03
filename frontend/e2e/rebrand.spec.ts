@@ -23,7 +23,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
   }
 
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()

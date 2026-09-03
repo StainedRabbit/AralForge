@@ -90,37 +90,31 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
             title="Change password"
           />
           <form className="form-stack profile-password-form" onSubmit={changePassword}>
-            <label>
-              <span>Current password</span>
-              <PasswordInput
-                autoComplete="current-password"
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                required
-                value={currentPassword}
-              />
-            </label>
-            <label>
-              <span>New password</span>
-              <PasswordInput
-                autoComplete="new-password"
-                minLength={8}
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-                value={newPassword}
-                visibilityLabel="new password"
-              />
-            </label>
-            <label>
-              <span>Confirm new password</span>
-              <PasswordInput
-                autoComplete="new-password"
-                minLength={8}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                required
-                value={confirmPassword}
-                visibilityLabel="password confirmation"
-              />
-            </label>
+            <PasswordInput
+              autoComplete="current-password"
+              label="Current password"
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              required
+              value={currentPassword}
+            />
+            <PasswordInput
+              autoComplete="new-password"
+              label="New password"
+              minLength={8}
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+              value={newPassword}
+              visibilityLabel="new password"
+            />
+            <PasswordInput
+              autoComplete="new-password"
+              label="Confirm new password"
+              minLength={8}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+              value={confirmPassword}
+              visibilityLabel="password confirmation"
+            />
 
             {passwordError ? (
               <div className="inline-alert" role="alert">

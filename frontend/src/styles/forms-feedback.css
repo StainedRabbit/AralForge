@@ -44,6 +44,14 @@ code {
   position: relative;
 }
 
+.form-stack .password-field {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
 .form-stack .password-input input {
   padding-right: 48px;
 }

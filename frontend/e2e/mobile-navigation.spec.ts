@@ -9,7 +9,7 @@ const phoneViewports = [
 async function signIn(page: Page, username: string) {
   await page.goto('/')
   await page.getByLabel('Student number').fill(username)
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden()
 }

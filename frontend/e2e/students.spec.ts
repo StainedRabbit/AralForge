@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function openStudents(page: Page) {
   await page.goto('/admin/students')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
   await page.goto('/admin/students')
@@ -62,7 +62,7 @@ test('creates a student with student-number credentials in one request', async (
     has: page.getByRole('heading', { name: 'Quick Student Setup' }),
   })
   await expect(quickSetup.getByLabel('Username')).toHaveCount(0)
-  await expect(quickSetup.getByLabel('Password')).toHaveCount(0)
+  await expect(quickSetup.getByLabel('Password', { exact: true })).toHaveCount(0)
   await expect(quickSetup.getByLabel('Section')).toHaveCount(0)
   await expect(quickSetup.getByLabel('Year level')).toHaveCount(0)
   await quickSetup.getByLabel('First name').fill('Quick')

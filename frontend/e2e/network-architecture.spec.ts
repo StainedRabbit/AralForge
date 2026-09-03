@@ -11,7 +11,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
 
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
@@ -30,7 +30,7 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
 test('retired teacher coding route returns to the teacher dashboard', async ({ page }) => {
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await page.goto('/admin/coding')
@@ -42,7 +42,7 @@ test('retired teacher coding route returns to the teacher dashboard', async ({ p
 test('feature navigation loads only that route resources', async ({ page }) => {
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
@@ -90,7 +90,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
 
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 

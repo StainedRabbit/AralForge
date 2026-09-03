@@ -32,7 +32,7 @@ async function assertNoViewportOverflow(page: Page) {
 
 async function signIn(page: Page, username: string) {
   await page.getByLabel('Student number').fill(username)
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
 }
 

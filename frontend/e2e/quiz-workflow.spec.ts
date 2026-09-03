@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function signIn(page: Page) {
   await page.goto('/admin')
   await page.getByLabel('Student number').fill('e2e-teacher')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
@@ -236,7 +236,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
     await page.evaluate(() => localStorage.clear())
     await page.goto('/modules')
     await page.getByLabel('Student number').fill('E2E-001')
-    await page.getByLabel('Password').fill('e2e-password')
+    await page.getByLabel('Password', { exact: true }).fill('e2e-password')
     await page.getByRole('button', { name: 'Sign in' }).click()
     await page.waitForURL((url) => url.pathname === '/')
     await page.goto(

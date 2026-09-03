@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function signInAndFindTarget(page: Page) {
   await page.goto('/modules')
   await page.getByLabel('Student number').fill('E2E-001')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((url) => url.pathname === '/')
 

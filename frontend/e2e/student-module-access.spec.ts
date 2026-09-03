@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function signIn(page: Page) {
   await page.goto('/')
   await page.getByLabel('Student number').fill('E2E-001')
-  await page.getByLabel('Password').fill('e2e-password')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden()
   await expect(page.locator('.dashboard-hero')).toBeVisible()
