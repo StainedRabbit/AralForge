@@ -702,6 +702,45 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(profile.user.first_name, 'Élise MarIA Ana-MaE')
         self.assertEqual(profile.user.last_name, "O'Connor")
 
+    def test_import_roster_accepts_unicode_names_and_rejects_replacement_characters(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+
+        unicode_preview = self.client.post(url, {
+            'dry_run': True,
+            'rows': [{
+                'student_number': '2027-UNICODE-1',
+                'first_name': 'Espa\u00f1ol',
+                'last_name': 'Ni\u00f1o',
+            }],
+        }, format='json')
+        self.assertEqual(unicode_preview.status_code, status.HTTP_200_OK)
+        self.assertTrue(unicode_preview.data['valid'])
+        self.assertEqual(unicode_preview.data['rows'][0]['student_name'], 'Espa\u00f1ol Ni\u00f1o')
+
+        damaged_preview = self.client.post(url, {
+            'dry_run': True,
+            'rows': [{
+                'student_number': '2027-DAMAGED-1',
+                'first_name': 'Espa\ufffdol',
+                'last_name': 'Student',
+            }],
+        }, format='json')
+        self.assertEqual(damaged_preview.status_code, status.HTTP_200_OK)
+        self.assertFalse(damaged_preview.data['valid'])
+        self.assertIn('unknown replacement character', damaged_preview.data['rows'][0]['error'])
+
+        damaged_import = self.client.post(url, {
+            'rows': [{
+                'student_number': '2027-DAMAGED-1',
+                'first_name': 'Espa\ufffdol',
+                'last_name': 'Student',
+            }],
+        }, format='json')
+        self.assertEqual(damaged_import.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(StudentProfile.objects.filter(student_number='2027-DAMAGED-1').exists())
+
     def test_import_roster_does_not_overwrite_existing_student_names(self):
         schedule = self.create_schedule()
         existing = get_user_model().objects.create_user(

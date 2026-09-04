@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import StudentProfile, User
-from .services import create_student_account, update_student_profile
+from .services import create_student_account, update_student_profile, validate_person_name
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -54,6 +54,13 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'role': 'Create student accounts through the student endpoint.'
                 })
+
+        for field in ('first_name', 'last_name'):
+            value = attrs.get(field, getattr(self.instance, field, ''))
+            try:
+                validate_person_name(value)
+            except DjangoValidationError as error:
+                raise serializers.ValidationError({field: error.messages}) from error
         return attrs
 
     def create(self, validated_data):
@@ -163,6 +170,13 @@ class StudentProfileSerializer(serializers.ModelSerializer):
                     field: 'Edit account details through the user endpoint.'
                     for field in account_fields
                 })
+
+        if self.instance is None:
+            for field in ('first_name', 'last_name'):
+                try:
+                    validate_person_name(attrs.get(field, ''))
+                except DjangoValidationError as error:
+                    raise serializers.ValidationError({field: error.messages}) from error
         return attrs
 
     def create(self, validated_data):

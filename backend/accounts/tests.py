@@ -75,6 +75,62 @@ class StudentAccountCreationTests(APITestCase):
         self.assertTrue(login.data['must_change_password'])
         self.assertNotIn('access', login.data)
 
+    def test_student_names_accept_unicode_and_reject_replacement_characters(self):
+        accepted = self.client.post(
+            reverse('accounts:student-list'),
+            {
+                'student_number': 'UNICODE-NAME-1',
+                'first_name': 'Espa\u00f1ol',
+                'last_name': 'Ni\u00f1o',
+            },
+            format='json',
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_201_CREATED)
+        accepted_user = StudentProfile.objects.select_related('user').get(
+            student_number='UNICODE-NAME-1',
+        ).user
+        self.assertEqual(accepted_user.first_name, 'Espa\u00f1ol')
+        self.assertEqual(accepted_user.last_name, 'Ni\u00f1o')
+
+        rejected = self.client.post(
+            reverse('accounts:student-list'),
+            {
+                'student_number': 'DAMAGED-NAME-1',
+                'first_name': 'Espa\ufffdol',
+                'last_name': 'Student',
+            },
+            format='json',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('first_name', rejected.data)
+        self.assertFalse(StudentProfile.objects.filter(student_number='DAMAGED-NAME-1').exists())
+
+    def test_legacy_damaged_user_name_can_be_manually_corrected(self):
+        user = get_user_model().objects.create_user(
+            username='LEGACY-DAMAGED-1',
+            first_name='Espa\ufffdol',
+            last_name='Student',
+            role=get_user_model().Role.STUDENT,
+        )
+        StudentProfile.objects.create(user=user, student_number='LEGACY-DAMAGED-1')
+
+        rejected = self.client.patch(
+            reverse('accounts:user-detail', args=[user.id]),
+            {'first_name': 'Still\ufffdDamaged'},
+            format='json',
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('first_name', rejected.data)
+
+        corrected = self.client.patch(
+            reverse('accounts:user-detail', args=[user.id]),
+            {'first_name': 'Espa\u00f1ol'},
+            format='json',
+        )
+        self.assertEqual(corrected.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.first_name, 'Espa\u00f1ol')
+
     def test_student_username_cannot_diverge_but_admin_can_set_a_secure_password(self):
         profile = StudentProfile.objects.create(
             user=get_user_model().objects.create_user(

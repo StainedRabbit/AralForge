@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { asArray } from '../../api'
@@ -44,6 +44,7 @@ export type AdminField<TItem> = {
     | 'textarea'
     | 'text'
     | 'time'
+  validate?: (value: DraftValue, draft: Record<string, DraftValue>) => string
   value?: (item: TItem) => unknown
 }
 
@@ -104,6 +105,12 @@ export function AdminResourcePanel<TItem extends { id: number }>({
   const serverCount = serverSide && serverQuery.data && !Array.isArray(serverQuery.data)
     ? serverQuery.data.count
     : serverItems.length
+  const validationErrors = fields.reduce<Record<string, string>>((errors, field) => {
+    const error = field.validate?.(draft[field.name], draft) ?? ''
+    if (error) errors[field.name] = error
+    return errors
+  }, {})
+  const hasValidationErrors = Object.keys(validationErrors).length > 0
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -162,6 +169,10 @@ export function AdminResourcePanel<TItem extends { id: number }>({
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (hasValidationErrors) {
+      setMessage('Correct the highlighted fields before saving.')
+      return
+    }
     setSaving(true)
     setMessage('')
 
@@ -230,6 +241,7 @@ export function AdminResourcePanel<TItem extends { id: number }>({
               <AdminFieldControl
                 api={api}
                 disabled={saving || Boolean(editing && field.readOnlyOnEdit)}
+                error={validationErrors[field.name]}
                 field={field}
                 key={field.name}
                 onChange={(value) =>
@@ -242,7 +254,7 @@ export function AdminResourcePanel<TItem extends { id: number }>({
 
           {message ? <p className="admin-message">{message}</p> : null}
 
-          <button className="button button--primary" disabled={saving} type="submit">
+          <button className="button button--primary" disabled={saving || hasValidationErrors} type="submit">
             <Icon name="save" />
             <span>{saving ? 'Saving...' : editing ? 'Save changes' : 'Create'}</span>
           </button>
@@ -333,16 +345,20 @@ export function AdminResourcePanel<TItem extends { id: number }>({
 function AdminFieldControl<TItem>({
   api,
   disabled,
+  error,
   field,
   onChange,
   value,
 }: {
   api: AuthedRequest
   disabled: boolean
+  error?: string
   field: AdminField<TItem>
   onChange: (value: DraftValue) => void
   value: DraftValue | undefined
 }) {
+  const errorId = `${useId()}-error`
+
   if (field.type === 'checkbox') {
     return (
       <label className="admin-check">
@@ -399,6 +415,7 @@ function AdminFieldControl<TItem>({
       <RemoteSelectControl
         api={api}
         disabled={disabled}
+        error={error}
         field={field}
         onChange={onChange}
         value={value}
@@ -451,6 +468,8 @@ function AdminFieldControl<TItem>({
     <label className="admin-field">
       <span>{field.label}</span>
       <input
+        aria-describedby={error ? errorId : undefined}
+        aria-invalid={Boolean(error)}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         placeholder={field.placeholder}
@@ -458,6 +477,7 @@ function AdminFieldControl<TItem>({
         type={field.type}
         value={String(value ?? '')}
       />
+      {error ? <small className="student-create-field-error" id={errorId}>{error}</small> : null}
     </label>
   )
 }
@@ -465,16 +485,20 @@ function AdminFieldControl<TItem>({
 function RemoteSelectControl<TItem>({
   api,
   disabled,
+  error,
   field,
   onChange,
   value,
 }: {
   api: AuthedRequest
   disabled: boolean
+  error?: string
   field: AdminField<TItem>
   onChange: (value: DraftValue) => void
   value: DraftValue | undefined
 }) {
+  const errorId = `${useId()}-error`
+
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   useEffect(() => {
@@ -504,6 +528,8 @@ function RemoteSelectControl<TItem>({
         value={search}
       />
       <select
+        aria-describedby={error ? errorId : undefined}
+        aria-invalid={Boolean(error)}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         required={field.required}
@@ -517,6 +543,7 @@ function RemoteSelectControl<TItem>({
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
+      {error ? <small className="student-create-field-error" id={errorId}>{error}</small> : null}
     </label>
   )
 }

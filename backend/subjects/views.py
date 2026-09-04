@@ -14,6 +14,7 @@ from accounts.models import StudentProfile, User
 from accounts.services import (
     clean_student_number,
     create_student_account,
+    REPLACEMENT_CHARACTER,
     validate_student_number_available,
 )
 from config.cache import CachedReferenceListMixin
@@ -416,6 +417,23 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             middle_name = normalize_imported_person_name(row.get('middle_name'))
             last_name = normalize_imported_person_name(row.get('last_name'))
             normalized = student_number.casefold()
+            replacement_count = sum(
+                name.count(REPLACEMENT_CHARACTER)
+                for name in (first_name, middle_name, last_name)
+            )
+            if replacement_count:
+                suffix = '' if replacement_count == 1 else 's'
+                row_results.append({
+                    'row': index,
+                    'student_number': student_number,
+                    'status': 'error',
+                    'error': (
+                        f'Name contains {replacement_count} unknown replacement character{suffix} '
+                        f'({REPLACEMENT_CHARACTER}). Correct the name before importing.'
+                    ),
+                })
+                has_errors = True
+                continue
             if not normalized:
                 row_results.append({'row': index, 'status': 'error', 'error': 'Student number is required.'})
                 has_errors = True

@@ -33,6 +33,12 @@ import { formatTime, numeric, toErrorMessage } from '../../utils/format'
 import { cleanImportedPersonName } from '../../utils/importCleaning'
 import { modulesForSubject as allModulesForSubject } from '../../utils/modules'
 import { fullName } from '../../utils/student'
+import {
+  compatibilityEncodingNotice,
+  countReplacementCharacters,
+  decodeTextFile,
+  replacementCharacterWarning,
+} from '../../utils/textFile'
 
 const AVAILABLE_STUDENT_LIMIT = 8
 const CLASS_PAGE_SIZE = 10
@@ -1592,6 +1598,7 @@ function RosterRow({
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
   const [message, setMessage] = useState('')
   const { enrollment } = row
+  const nameReplacementCount = countReplacementCharacters(row.studentName)
 
   async function toggleEnrollment() {
     setSaving(true)
@@ -1631,7 +1638,14 @@ function RosterRow({
     <>
     <tr>
       <td>
-        <strong>{row.studentName}</strong>
+        <span className="student-name-with-warning">
+          <strong>{row.studentName}</strong>
+          {nameReplacementCount ? (
+            <small className="name-correction-warning" role="status">
+              Name needs correction. <Link to="/admin/students">Edit the User Account in Student Management.</Link>
+            </small>
+          ) : null}
+        </span>
       </td>
       <td>{row.studentNumber}</td>
       <td>{row.email}</td>
@@ -1924,6 +1938,8 @@ function AddStudentsModal({
   const [createErrors, setCreateErrors] = useState<CreateStudentErrors>({})
   const [importRows, setImportRows] = useState<StudentImportRow[]>([])
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
+  const [importEncodingNotice, setImportEncodingNotice] = useState('')
+  const [importReplacementWarning, setImportReplacementWarning] = useState('')
   const [newCredentials, setNewCredentials] = useState<Array<{ student_number: string; temporary_password: string }>>([])
   const [selectedStudents, setSelectedStudents] = useState<AvailableStudent[]>([])
   const [message, setMessage] = useState('')
@@ -2183,7 +2199,7 @@ function AddStudentsModal({
   }
 
   async function importStudents() {
-    if (!importRows.length) {
+    if (!importRows.length || importReplacementWarning) {
       return
     }
 
@@ -2220,9 +2236,25 @@ function AddStudentsModal({
       return
     }
 
+    setImportRows([])
+    setImportPreview(null)
+    setImportEncodingNotice('')
+    setImportReplacementWarning('')
+    setNewCredentials([])
+    setMessage('')
+
     try {
-      const text = await file.text()
-      const rows = parseStudentImport(text)
+      const decoded = await decodeTextFile(file)
+      setImportEncodingNotice(
+        decoded.usedCompatibilityFallback ? compatibilityEncodingNotice(file.name) : '',
+      )
+      const replacementCount = countReplacementCharacters(decoded.text)
+      if (replacementCount) {
+        setImportReplacementWarning(replacementCharacterWarning(replacementCount))
+        return
+      }
+
+      const rows = parseStudentImport(decoded.text)
       const preview = await api<ImportPreview>(
         `/subjects/subject-schedules/${schedule.id}/import-roster/`,
         {
@@ -2235,7 +2267,6 @@ function AddStudentsModal({
       )
       setImportRows(rows)
       setImportPreview(preview)
-      setNewCredentials([])
       setMessage(
         preview.valid
           ? `${preview.ready_count} student${preview.ready_count === 1 ? '' : 's'} ready to import.`
@@ -2506,10 +2537,16 @@ function AddStudentsModal({
                 type="file"
               />
             </label>
+            {importEncodingNotice ? (
+              <p className="admin-message text-import-notice" role="status">{importEncodingNotice}</p>
+            ) : null}
+            {importReplacementWarning ? (
+              <p className="admin-message text-import-warning" role="alert">{importReplacementWarning}</p>
+            ) : null}
             {importRows.length ? (
               <button
                 className="button button--secondary"
-                disabled={saving || !importPreview?.valid}
+                disabled={saving || !importPreview?.valid || Boolean(importReplacementWarning)}
                 onClick={() => void importStudents()}
                 type="button"
               >

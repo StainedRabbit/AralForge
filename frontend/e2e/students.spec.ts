@@ -11,6 +11,18 @@ async function openStudents(page: Page) {
 }
 
 test('edits a student account and profile', async ({ page }) => {
+  let exposeLegacyDamagedName = true
+  await page.route('**/api/accounts/users/?*', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json() as {
+      results?: Array<{ first_name: string; username: string }>
+    }
+    if (exposeLegacyDamagedName) {
+      const student = payload.results?.find((user) => user.username === 'E2E-001')
+      if (student) student.first_name = 'Espa\ufffdol'
+    }
+    await route.fulfill({ response, json: payload })
+  })
   await openStudents(page)
 
   const accounts = page.locator('.admin-resource').filter({
@@ -19,10 +31,16 @@ test('edits a student account and profile', async ({ page }) => {
   const accountForm = accounts.locator('.admin-form')
   const accountRow = accounts.getByRole('row').filter({ hasText: 'E2E-001' })
 
+  await expect(accountRow.getByText('Name needs correction.')).toBeVisible()
   await accountRow.getByRole('button', { name: 'Edit User' }).click()
   await expect(accountForm.getByText('Edit User', { exact: true })).toBeVisible()
   await expect(accountForm.getByLabel('Username')).toBeFocused()
+  await expect(accountForm.getByLabel('First name')).toHaveAttribute('aria-invalid', 'true')
+  await expect(accountForm.getByRole('button', { name: 'Save changes' })).toBeDisabled()
   await accountForm.getByLabel('First name').fill('Edited')
+  await expect(accountForm.getByLabel('First name')).toHaveAttribute('aria-invalid', 'false')
+  await expect(accountForm.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+  exposeLegacyDamagedName = false
 
   const accountSave = page.waitForResponse((response) =>
     response.request().method() === 'PATCH'

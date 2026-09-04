@@ -28,6 +28,7 @@ import {
 } from '../../admin/adminHelpers'
 import { toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
+import { countReplacementCharacters, replacementCharacterWarning } from '../../utils/textFile'
 
 export function AdminStudentsPage({
   api,
@@ -79,7 +80,7 @@ export function AdminStudentsPage({
         serverSide
         title="User Accounts"
         columns={[
-          { header: 'Name', render: (user) => fullName(user) },
+          { header: 'Name', render: (user) => <StudentAccountName user={user} /> },
           { header: 'Username', render: (user) => user.username },
           { header: 'Role', render: (user) => user.role },
           { header: 'Active', render: (user) => booleanLabel(user.is_active) },
@@ -441,8 +442,8 @@ const userFields: AdminField<User>[] = [
   { label: 'Username', name: 'username', required: true, type: 'text' },
   { label: 'Password', name: 'password', type: 'password' },
   { label: 'Email', name: 'email', type: 'text' },
-  { label: 'First name', name: 'first_name', type: 'text' },
-  { label: 'Last name', name: 'last_name', type: 'text' },
+  { label: 'First name', name: 'first_name', type: 'text', validate: validateStudentNameField },
+  { label: 'Last name', name: 'last_name', type: 'text', validate: validateStudentNameField },
   {
     defaultValue: 'TEACHER',
     label: 'Role',
@@ -458,6 +459,26 @@ const userFields: AdminField<User>[] = [
     type: 'checkbox',
   },
 ]
+
+function validateStudentNameField(value: boolean | File | null | string | string[]) {
+  if (typeof value !== 'string') return ''
+  const replacementCount = countReplacementCharacters(value)
+  return replacementCount ? replacementCharacterWarning(replacementCount) : ''
+}
+
+function StudentAccountName({ user }: { user: User }) {
+  const replacementCount = countReplacementCharacters(`${user.first_name}${user.last_name}`)
+  return (
+    <span className="student-name-with-warning">
+      <strong>{fullName(user)}</strong>
+      {replacementCount ? (
+        <small className="name-correction-warning" role="status">
+          Name needs correction. Edit this User Account.
+        </small>
+      ) : null}
+    </span>
+  )
+}
 
 const profileFields = [
   { label: 'Student number', name: 'student_number', required: true, type: 'text' },

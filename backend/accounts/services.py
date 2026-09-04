@@ -6,6 +6,19 @@ from .models import StudentProfile, User
 
 
 username_validator = UnicodeUsernameValidator()
+REPLACEMENT_CHARACTER = '\ufffd'
+
+
+def validate_person_name(value):
+    name = str(value or '')
+    replacement_count = name.count(REPLACEMENT_CHARACTER)
+    if replacement_count:
+        suffix = '' if replacement_count == 1 else 's'
+        raise ValidationError(
+            f'Name contains {replacement_count} unknown replacement character{suffix} '
+            f'({REPLACEMENT_CHARACTER}). Correct the name before saving.'
+        )
+    return name
 
 
 def clean_student_number(value):
@@ -50,11 +63,13 @@ def create_student_account(
 ):
     student_number = clean_student_number(student_number)
     validate_student_number_available(student_number)
+    first_name = validate_person_name(first_name)
+    last_name = validate_person_name(last_name)
 
     user = User(
         username=student_number,
-        first_name=str(first_name or '').strip(),
-        last_name=str(last_name or '').strip(),
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
         email=str(email or '').strip(),
         role=User.Role.STUDENT,
         is_active=is_active,

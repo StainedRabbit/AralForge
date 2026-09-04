@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from accounts.services import clean_student_number
+from accounts.services import clean_student_number, validate_person_name
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .scheduling import normalize_schedule_days
@@ -122,6 +122,19 @@ class RosterStudentCreateSerializer(serializers.Serializer):
             return clean_student_number(value)
         except DjangoValidationError as error:
             raise serializers.ValidationError(error.messages) from error
+
+    def validate_first_name(self, value):
+        return validate_roster_person_name(value)
+
+    def validate_last_name(self, value):
+        return validate_roster_person_name(value)
+
+
+def validate_roster_person_name(value):
+    try:
+        return validate_person_name(value)
+    except DjangoValidationError as error:
+        raise serializers.ValidationError(error.messages) from error
 
 
 class ScheduleStudentSerializer(serializers.ModelSerializer):

@@ -3,6 +3,17 @@ import { expect, test, type Page } from '@playwright/test'
 
 test.describe.configure({ mode: 'serial' })
 
+function encodeWindows1252(value: string) {
+  const bytes = Array.from(value, (character) => {
+    if (character === '\u00f1') return 0xf1
+    if (character === '\u00d1') return 0xd1
+    const code = character.codePointAt(0) ?? 0
+    if (code > 0x7f) throw new Error(`Missing Windows-1252 test mapping for ${character}`)
+    return code
+  })
+  return Buffer.from(bytes)
+}
+
 async function openClasses(page: Page) {
   await page.goto('/admin/classes')
   await page.getByLabel('Student number').fill('e2e-teacher')
@@ -1036,7 +1047,48 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await page.getByRole('button', { name: 'Add students' }).click()
   const importDialog = page.getByRole('dialog', { name: 'Add students' })
   await importDialog.getByRole('tab', { name: 'Import CSV' }).click()
-  await importDialog.getByLabel('Student list CSV').setInputFiles({
+  const rosterFileInput = importDialog.getByLabel('Student list CSV')
+  let rosterPreviewRequests = 0
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST'
+      && /\/api\/subjects\/subject-schedules\/\d+\/import-roster\/$/.test(new URL(request.url()).pathname)
+      && request.postData()?.includes('"dry_run":true')
+    ) {
+      rosterPreviewRequests += 1
+    }
+  })
+
+  await rosterFileInput.setInputFiles({
+    name: 'windows-1252-student.csv',
+    mimeType: 'text/csv',
+    buffer: encodeWindows1252(`Student Number,Last Name,First Name,Middle Name\r\n${importedStudentNumber}-CP,student,Espa\u00f1ol,\r\n`),
+  })
+  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Espa\u00f1ol Student')
+  await expect(importDialog).toContainText('decoded using Windows-1252 compatibility mode')
+  await expect(importDialog).not.toContainText('\uFFFD')
+
+  const utf16Roster = `Student Number,Last Name,First Name,Middle Name\r\n${importedStudentNumber}-UTF16,student,Espa\u00f1ol,\r\n`
+  await rosterFileInput.setInputFiles({
+    name: 'utf-16-student.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(utf16Roster, 'utf16le')]),
+  })
+  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Espa\u00f1ol Student')
+  await expect(importDialog).not.toContainText('decoded using Windows-1252 compatibility mode')
+
+  const previewCountBeforeDamagedFile = rosterPreviewRequests
+  await rosterFileInput.setInputFiles({
+    name: 'damaged-student.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(`Student Number,Last Name,First Name,Middle Name\r\n${importedStudentNumber}-BAD,student,Espa\ufffdol,\r\n`),
+  })
+  await expect(importDialog.getByRole('alert')).toContainText('Found 1 unknown replacement character')
+  await expect(importDialog.getByLabel('Roster import preview')).toHaveCount(0)
+  await expect(importDialog.getByRole('button', { name: /^Import \d+ students$/ })).toHaveCount(0)
+  await expect.poll(() => rosterPreviewRequests).toBe(previewCountBeforeDamagedFile)
+
+  await rosterFileInput.setInputFiles({
     name: 'new-student.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from(`\uFEFFStudent Number,Last Name,First Name,Middle Name,Email,Section\r\n${importedStudentNumber},young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n`),
