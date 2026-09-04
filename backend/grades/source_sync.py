@@ -99,6 +99,67 @@ def sync_items(queryset):
     ))
 
 
+@transaction.atomic
+def sync_grade_items_for_students(queryset, student_ids):
+    """Synchronize automatic items for a bounded student set without save signals."""
+    student_ids = {int(student_id) for student_id in student_ids}
+    if not student_ids:
+        return 0
+
+    student_model = StudentGradeItemScore._meta.get_field('student').remote_field.model
+    students = list(student_model.objects.filter(id__in=student_ids))
+    changed = 0
+    for item in queryset.select_related('schedule', 'module_activity', 'attendance_session'):
+        existing = {
+            score.student_id: score
+            for score in StudentGradeItemScore.objects.filter(
+                grade_item=item,
+                student_id__in=student_ids,
+            )
+        }
+        creates = []
+        updates = []
+        delete_ids = []
+        for student in students:
+            current = existing.get(student.id)
+            if current and current.origin == StudentGradeItemScore.Origin.OVERRIDE:
+                continue
+            score = source_score(item, student)
+            if score is None:
+                if current and current.origin == StudentGradeItemScore.Origin.AUTOMATIC:
+                    delete_ids.append(current.id)
+                continue
+            if current:
+                current.raw_score = score
+                current.status = StudentGradeItemScore.Status.GRADED
+                current.origin = StudentGradeItemScore.Origin.AUTOMATIC
+                current.override_reason = ''
+                current.remarks = 'Synchronized from linked work.'
+                updates.append(current)
+            else:
+                creates.append(StudentGradeItemScore(
+                    grade_item=item,
+                    student=student,
+                    raw_score=score,
+                    status=StudentGradeItemScore.Status.GRADED,
+                    origin=StudentGradeItemScore.Origin.AUTOMATIC,
+                    override_reason='',
+                    remarks='Synchronized from linked work.',
+                ))
+        if delete_ids:
+            StudentGradeItemScore.objects.filter(id__in=delete_ids).delete()
+        if creates:
+            StudentGradeItemScore.objects.bulk_create(creates, batch_size=500)
+        if updates:
+            StudentGradeItemScore.objects.bulk_update(
+                updates,
+                ('raw_score', 'status', 'origin', 'override_reason', 'remarks'),
+                batch_size=500,
+            )
+        changed += len(delete_ids) + len(creates) + len(updates)
+    return changed
+
+
 def sync_activity_attempt_target(attempt):
     """Synchronize only the class item and student affected by an attempt."""
     if not attempt.schedule_id:

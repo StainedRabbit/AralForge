@@ -1122,6 +1122,177 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await expect(page.getByRole('heading', { name: 'Welcome back, Robin Mae Ann-Marie.' })).toBeVisible()
 })
 
+test('continues a roster import after the dialog closes and reconnects to progress', async ({ page }) => {
+  const jobId = '00000000-0000-4000-8000-000000000051'
+  let submitted = false
+  let pollCount = 0
+  const job = (status: 'PENDING' | 'RUNNING' | 'SUCCEEDED', progress: number) => ({
+    id: jobId,
+    job_type: 'IMPORT',
+    owner: 1,
+    status,
+    attempts: status === 'PENDING' ? 0 : 1,
+    progress,
+    total: 2,
+    result: status === 'SUCCEEDED' ? {
+      schedule: 1,
+      created_count: 2,
+      created_student_numbers: ['BG-IMPORT-1', 'BG-IMPORT-2'],
+      added_count: 2,
+      reactivated_count: 0,
+      already_active_count: 0,
+    } : {},
+    error: '',
+    created_at: '2026-09-04T12:00:00Z',
+    started_at: status === 'PENDING' ? null : '2026-09-04T12:00:01Z',
+    finished_at: status === 'SUCCEEDED' ? '2026-09-04T12:00:03Z' : null,
+  })
+
+  await page.route('**/api/subjects/subject-schedules/*/roster-import-status/', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ job: submitted ? job('RUNNING', 1) : null }),
+    })
+  })
+  await page.route('**/api/subjects/subject-schedules/*/import-roster/', async (route) => {
+    const body = route.request().postDataJSON()
+    const preview = {
+      valid: true,
+      row_count: 2,
+      ready_count: 2,
+      rows: [
+        { row: 1, student_number: 'BG-IMPORT-1', student_name: 'Background One', status: 'create' },
+        { row: 2, student_number: 'BG-IMPORT-2', student_name: 'Background Two', status: 'create' },
+      ],
+      create_count: 2,
+      enroll_count: 0,
+      reactivate_count: 0,
+      already_active_count: 0,
+    }
+    if (body.dry_run) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(preview) })
+      return
+    }
+    submitted = true
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...preview, job: job('PENDING', 0) }),
+    })
+  })
+  await page.route(`**/api/jobs/${jobId}/`, async (route) => {
+    pollCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(pollCount >= 2 ? job('SUCCEEDED', 2) : job('RUNNING', 1)),
+    })
+  })
+
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  await page.getByRole('button', { name: 'Add students' }).click()
+  let dialog = page.getByRole('dialog', { name: 'Add students' })
+  await dialog.getByRole('tab', { name: 'Import CSV' }).click()
+  await dialog.getByLabel('Student list CSV').setInputFiles({
+    name: 'background-roster.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'Student Number,Last Name,First Name,Middle Name\r\nBG-IMPORT-1,One,Background,\r\nBG-IMPORT-2,Two,Background,\r\n',
+    ),
+  })
+  await dialog.getByRole('button', { name: 'Import 2 students' }).click()
+  await expect(dialog.getByRole('status')).toContainText(/Importing [01] of 2 students/)
+  await expect(dialog.getByRole('tab', { name: 'Choose students' })).toBeEnabled()
+  await expect(dialog.getByTitle('Close')).toBeEnabled()
+  await dialog.getByTitle('Close').click()
+  await expect(dialog).toHaveCount(0)
+
+  const credentialsDownloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Add students' }).click()
+  dialog = page.getByRole('dialog', { name: 'Add students' })
+  await dialog.getByRole('tab', { name: 'Import CSV' }).click()
+  await expect(dialog.getByRole('status')).toContainText('Importing 1 of 2 students')
+  const credentialsDownload = await credentialsDownloadPromise
+  expect(credentialsDownload.suggestedFilename()).toBe('new-student-credentials.csv')
+  await expect(dialog).toContainText('2 accounts created, 2 enrolled, 0 reactivated.')
+  await expect(dialog.getByRole('button', { name: 'Download credentials again' })).toBeVisible()
+})
+
+test('reports a failed background roster import without leaving the import blocked', async ({ page }) => {
+  const jobId = '00000000-0000-4000-8000-000000000052'
+  const preview = {
+    valid: true,
+    row_count: 1,
+    ready_count: 1,
+    rows: [{ row: 1, student_number: 'BG-FAIL-1', student_name: 'Failed Student', status: 'create' }],
+    create_count: 1,
+    enroll_count: 0,
+    reactivate_count: 0,
+    already_active_count: 0,
+  }
+  const baseJob = {
+    id: jobId,
+    job_type: 'IMPORT',
+    owner: 1,
+    attempts: 1,
+    total: 1,
+    created_at: '2026-09-04T12:00:00Z',
+    started_at: '2026-09-04T12:00:01Z',
+  }
+  await page.route('**/api/subjects/subject-schedules/*/roster-import-status/', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job: null }) }))
+  await page.route('**/api/subjects/subject-schedules/*/import-roster/', async (route) => {
+    if (route.request().postDataJSON().dry_run) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(preview) })
+      return
+    }
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...preview,
+        job: { ...baseJob, status: 'PENDING', progress: 0, result: {}, error: '', finished_at: null },
+      }),
+    })
+  })
+  await page.route(`**/api/jobs/${jobId}/`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ...baseJob,
+      status: 'FAILED',
+      progress: 1,
+      result: {
+        preview: {
+          ...preview,
+          valid: false,
+          ready_count: 0,
+          rows: [{ row: 1, student_number: 'BG-FAIL-1', status: 'error', error: 'Conflict created during import.' }],
+        },
+      },
+      error: 'The roster changed while the import was running. No students were imported.',
+      finished_at: '2026-09-04T12:00:02Z',
+    }),
+  }))
+
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  await page.getByRole('button', { name: 'Add students' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add students' })
+  await dialog.getByRole('tab', { name: 'Import CSV' }).click()
+  await dialog.getByLabel('Student list CSV').setInputFiles({
+    name: 'failed-background-roster.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('Student Number,Last Name,First Name,Middle Name\r\nBG-FAIL-1,Student,Failed,\r\n'),
+  })
+  await dialog.getByRole('button', { name: 'Import 1 students' }).click()
+  await expect(dialog).toContainText('No students were imported.')
+  await expect(dialog.getByLabel('Roster import preview')).toContainText('Conflict created during import.')
+  await expect(dialog.getByLabel('Student list CSV')).toBeEnabled()
+})
+
 test('archives and restores a class without deleting it', async ({ page }) => {
   await openClasses(page)
   await startNewSchedule(page)

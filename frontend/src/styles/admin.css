@@ -2606,6 +2606,24 @@ a.teacher-recent-item:focus-visible {
   color: #b91c1c;
 }
 
+.class-import-job {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.class-import-job progress {
+  width: 100%;
+}
+
+.class-import-job span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .class-import-credentials {
   display: grid;
   gap: 8px;

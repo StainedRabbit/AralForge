@@ -1,10 +1,13 @@
 from datetime import time
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
@@ -17,6 +20,7 @@ def result_rows(response):
 from accounts.models import StudentProfile
 from attendance.models import AttendanceRecord
 from grades.models import StudentGradeItemScore
+from jobs.models import BackgroundJob
 from learning_modules.models import (
     ModuleActivityAttempt,
     ModuleActivitySubmission,
@@ -24,6 +28,8 @@ from learning_modules.models import (
     ModuleProgress,
 )
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
+from .tasks import import_roster_job
+from .roster_import import validate_roster_rows
 
 
 class PerformanceSeedCommandTests(TestCase):
@@ -142,6 +148,17 @@ class SubjectScheduleApiTests(APITestCase):
             start_time=time(9, 0),
             end_time=time(10, 0),
         )
+
+    def queue_and_run_roster_import(self, url, rows):
+        with patch('subjects.views.import_roster_job.delay') as delayed:
+            delayed.return_value = SimpleNamespace(id='test-roster-import')
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {'rows': rows}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        job = BackgroundJob.objects.get(pk=response.data['job']['id'])
+        import_roster_job.run(str(job.id))
+        job.refresh_from_db()
+        return response, job
 
     def test_used_schedule_cannot_be_permanently_deleted(self):
         schedule = self.create_schedule()
@@ -397,6 +414,7 @@ class SubjectScheduleApiTests(APITestCase):
             title='Class attendance',
             date='2027-08-30',
         )
+
         AttendanceRecord.objects.create(session=session, student=self.student, status='PRESENT')
         category = GradeCategory.objects.create(
             subject=self.subject,
@@ -629,13 +647,12 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertFalse(invalid_preview.data['valid'])
         self.assertFalse(ScheduleStudent.objects.filter(schedule=schedule).exists())
 
-        imported = self.client.post(
-            url,
-            {'rows': [{'student_number': '2027-0001'}]},
-            format='json',
+        imported, job = self.queue_and_run_roster_import(
+            url, [{'student_number': '2027-0001'}],
         )
-        self.assertEqual(imported.status_code, status.HTTP_200_OK)
-        self.assertEqual(imported.data['added_count'], 1)
+        self.assertEqual(imported.data['job']['status'], BackgroundJob.Status.PENDING)
+        self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
+        self.assertEqual(job.result['added_count'], 1)
         self.assertTrue(
             ScheduleStudent.objects.filter(schedule=schedule, student=self.student).exists(),
         )
@@ -659,19 +676,20 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertNotIn('credentials', preview.data)
         self.assertFalse(StudentProfile.objects.filter(student_number='2027-NEW-1').exists())
 
-        imported = self.client.post(url, {'rows': rows}, format='json')
-        self.assertEqual(imported.status_code, status.HTTP_200_OK)
-        self.assertEqual(imported.data['created_count'], 1)
-        credential = imported.data['credentials'][0]
+        imported, job = self.queue_and_run_roster_import(url, rows)
+        self.assertEqual(imported.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(job.result['created_count'], 1)
+        self.assertEqual(job.result['created_student_numbers'], ['2027-NEW-1'])
         profile = StudentProfile.objects.select_related('user').get(student_number='2027-NEW-1')
         self.assertEqual(profile.user.email, '')
         self.assertEqual(profile.user.first_name, 'New Middle')
         self.assertEqual(profile.user.last_name, 'Learner')
         self.assertEqual(profile.user.username, '2027-NEW-1')
         self.assertTrue(profile.user.must_change_password)
-        self.assertEqual(credential['temporary_password'], '2027-NEW-1')
-        self.assertTrue(profile.user.check_password(credential['temporary_password']))
+        self.assertTrue(profile.user.check_password('2027-NEW-1'))
         self.assertTrue(ScheduleStudent.objects.filter(schedule=schedule, student=profile.user).exists())
+        self.assertEqual(job.payload, {'schedule_id': schedule.id})
+        self.assertNotIn('password', str(job.result).lower())
 
     def test_import_roster_cleans_new_student_names_without_changing_identifiers(self):
         schedule = self.create_schedule()
@@ -693,9 +711,10 @@ class SubjectScheduleApiTests(APITestCase):
         )
         self.assertEqual(preview.data['rows'][0]['student_number'], '2027-mIxEd-01')
 
-        imported = self.client.post(url, {'rows': rows}, format='json')
+        imported, job = self.queue_and_run_roster_import(url, rows)
 
-        self.assertEqual(imported.status_code, status.HTTP_200_OK)
+        self.assertEqual(imported.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
         profile = StudentProfile.objects.select_related('user').get(
             student_number='2027-mIxEd-01',
         )
@@ -752,19 +771,17 @@ class SubjectScheduleApiTests(APITestCase):
         StudentProfile.objects.create(user=existing, student_number='2027-KEEP-NAME')
         self.client.force_authenticate(self.teacher)
 
-        response = self.client.post(
+        response, job = self.queue_and_run_roster_import(
             reverse('subjects:subject-schedule-import-roster', args=[schedule.id]),
-            {
-                'rows': [{
-                    'student_number': '2027-KEEP-NAME',
-                    'first_name': 'replacement',
-                    'last_name': 'name',
-                }],
-            },
-            format='json',
+            [{
+                'student_number': '2027-KEEP-NAME',
+                'first_name': 'replacement',
+                'last_name': 'name',
+            }],
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
         existing.refresh_from_db()
         self.assertEqual(existing.first_name, 'Existing')
         self.assertEqual(existing.last_name, 'Student')
@@ -787,6 +804,150 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(ScheduleStudent.objects.filter(schedule=schedule).exists())
         self.assertFalse(StudentProfile.objects.filter(student_number='2027-MISSING-NAME').exists())
+
+    def test_roster_preview_uses_bounded_conflict_queries(self):
+        schedule = self.create_schedule()
+        rows = [
+            {
+                'student_number': f'BATCH-{index:04d}',
+                'first_name': 'Batch',
+                'last_name': 'Student',
+            }
+            for index in range(51)
+        ]
+
+        with CaptureQueriesContext(connection) as queries:
+            validation = validate_roster_rows(schedule, rows)
+
+        self.assertTrue(validation.preview['valid'])
+        self.assertEqual(validation.preview['create_count'], 51)
+        self.assertLessEqual(len(queries), 3)
+
+    def test_duplicate_roster_submissions_reuse_active_job_and_status_endpoint(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        import_url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+        status_url = reverse('subjects:subject-schedule-roster-import-status', args=[schedule.id])
+        rows = [{'student_number': 'QUEUED-1', 'first_name': 'Queued', 'last_name': 'Student'}]
+
+        with patch('subjects.views.import_roster_job.delay') as delayed:
+            delayed.return_value = SimpleNamespace(id='test-roster-import')
+            with self.captureOnCommitCallbacks(execute=True):
+                first = self.client.post(import_url, {'rows': rows}, format='json')
+                second = self.client.post(import_url, {'rows': rows}, format='json')
+
+        self.assertEqual(first.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(second.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(first.data['job']['id'], second.data['job']['id'])
+        self.assertEqual(BackgroundJob.objects.count(), 1)
+        job_status = self.client.get(status_url)
+        self.assertEqual(job_status.status_code, status.HTTP_200_OK)
+        self.assertEqual(job_status.data['job']['id'], first.data['job']['id'])
+
+    def test_roster_import_reports_broker_failure_without_retaining_names(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+
+        with patch('subjects.views.import_roster_job.delay', side_effect=ConnectionError('broker unavailable')):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {
+                    'rows': [{
+                        'student_number': 'BROKER-1',
+                        'first_name': 'Private',
+                        'last_name': 'Name',
+                    }],
+                }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        job = BackgroundJob.objects.get(pk=response.data['job']['id'])
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertIn('broker unavailable', job.error)
+        self.assertEqual(job.payload, {'schedule_id': schedule.id})
+
+    def test_background_roster_validation_failure_rolls_back_every_row(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+        rows = [
+            {'student_number': 'RACE-1', 'first_name': 'First', 'last_name': 'Student'},
+            {'student_number': 'RACE-2', 'first_name': 'Second', 'last_name': 'Student'},
+        ]
+
+        with patch('subjects.views.import_roster_job.delay') as delayed:
+            delayed.return_value = SimpleNamespace(id='test-roster-import')
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {'rows': rows}, format='json')
+        get_user_model().objects.create(username='RACE-2', role=get_user_model().Role.TEACHER)
+        job = BackgroundJob.objects.get(pk=response.data['job']['id'])
+
+        import_roster_job.run(str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertIn('No students were imported', job.error)
+        self.assertFalse(StudentProfile.objects.filter(student_number__in=('RACE-1', 'RACE-2')).exists())
+        self.assertFalse(ScheduleStudent.objects.filter(schedule=schedule).exists())
+        self.assertEqual(job.payload, {'schedule_id': schedule.id})
+
+    def test_background_roster_database_failure_rolls_back_created_accounts(self):
+        schedule = self.create_schedule()
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-import-roster', args=[schedule.id])
+        rows = [
+            {'student_number': 'ROLLBACK-BATCH-1', 'first_name': 'First', 'last_name': 'Student'},
+            {'student_number': 'ROLLBACK-BATCH-2', 'first_name': 'Second', 'last_name': 'Student'},
+        ]
+
+        with patch('subjects.views.import_roster_job.delay') as delayed:
+            delayed.return_value = SimpleNamespace(id='test-roster-import')
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, {'rows': rows}, format='json')
+        job = BackgroundJob.objects.get(pk=response.data['job']['id'])
+
+        with patch(
+            'grades.signals.initialize_enrollment_grades_bulk',
+            side_effect=RuntimeError('grade initialization failed'),
+        ), self.assertRaises(RuntimeError):
+            import_roster_job.run(str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertFalse(StudentProfile.objects.filter(student_number__startswith='ROLLBACK-BATCH').exists())
+        self.assertFalse(ScheduleStudent.objects.filter(schedule=schedule).exists())
+        self.assertEqual(job.payload, {'schedule_id': schedule.id})
+
+    def test_background_roster_import_initializes_grade_rows_for_new_enrollments(self):
+        from grades.models import GradeCategory, GradeCategoryChoices, GradeItem, StudentCategoryGrade
+
+        schedule = self.create_schedule()
+        category = GradeCategory.objects.create(
+            subject=self.subject,
+            grading_period='PRELIM',
+            category=GradeCategoryChoices.QUIZ,
+            name='Import quizzes',
+            weight=100,
+        )
+        GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=category,
+            title='Import quiz',
+            points_possible=10,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        _, job = self.queue_and_run_roster_import(
+            reverse('subjects:subject-schedule-import-roster', args=[schedule.id]),
+            [{'student_number': 'GRADE-IMPORT-1', 'first_name': 'Grade', 'last_name': 'Student'}],
+        )
+
+        profile = StudentProfile.objects.get(student_number='GRADE-IMPORT-1')
+        self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
+        self.assertTrue(StudentCategoryGrade.objects.filter(
+            schedule=schedule,
+            student=profile.user,
+            grade_category=category,
+        ).exists())
 
     def test_delete_enrollment_deactivates_instead_of_removing(self):
         schedule = self.create_schedule()

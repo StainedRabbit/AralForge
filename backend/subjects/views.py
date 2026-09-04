@@ -1,6 +1,5 @@
-import re
+from datetime import timedelta
 
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -12,12 +11,12 @@ from rest_framework.response import Response
 from accounts.permissions import IsAdminTeacherOrReadOnly
 from accounts.models import StudentProfile, User
 from accounts.services import (
-    clean_student_number,
     create_student_account,
-    REPLACEMENT_CHARACTER,
-    validate_student_number_available,
 )
 from config.cache import CachedReferenceListMixin
+from jobs.models import BackgroundJob
+from jobs.serializers import BackgroundJobSerializer
+from jobs.tasks import enqueue
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .serializers import (
@@ -28,6 +27,8 @@ from .serializers import (
     SubjectScheduleSerializer,
     SubjectSerializer,
 )
+from .roster_import import MAX_ROSTER_IMPORT_ROWS, validate_roster_rows
+from .tasks import import_roster_job
 
 
 class SubjectViewSet(CachedReferenceListMixin, viewsets.ModelViewSet):
@@ -384,195 +385,64 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='import-roster')
-    @transaction.atomic
     def import_roster(self, request, pk=None):
         schedule = self.get_object()
         rows = request.data.get('rows')
         dry_run = bool(request.data.get('dry_run', False))
         if not isinstance(rows, list) or not rows:
             raise serializers.ValidationError({'rows': 'Provide at least one roster row.'})
-        if len(rows) > 1000:
+        if len(rows) > MAX_ROSTER_IMPORT_ROWS:
             raise serializers.ValidationError({'rows': 'Roster imports are limited to 1,000 rows.'})
 
-        profiles_by_number = {
-            profile.student_number.strip().casefold(): profile
-            for profile in StudentProfile.objects.select_for_update().select_related('user')
-        }
-        enrollments_by_student = {
-            enrollment.student_id: enrollment
-            for enrollment in ScheduleStudent.objects.select_for_update().filter(schedule=schedule)
-        }
-        seen = set()
-        validated = []
-        row_results = []
-        has_errors = False
-        summary = {'create_count': 0, 'enroll_count': 0, 'reactivate_count': 0, 'already_active_count': 0}
-        for index, row in enumerate(rows, start=1):
-            if not isinstance(row, dict):
-                row_results.append({'row': index, 'status': 'error', 'error': 'Row must be an object.'})
-                has_errors = True
-                continue
-            student_number = str(row.get('student_number') or '').strip()
-            first_name = normalize_imported_person_name(row.get('first_name'))
-            middle_name = normalize_imported_person_name(row.get('middle_name'))
-            last_name = normalize_imported_person_name(row.get('last_name'))
-            normalized = student_number.casefold()
-            replacement_count = sum(
-                name.count(REPLACEMENT_CHARACTER)
-                for name in (first_name, middle_name, last_name)
-            )
-            if replacement_count:
-                suffix = '' if replacement_count == 1 else 's'
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': (
-                        f'Name contains {replacement_count} unknown replacement character{suffix} '
-                        f'({REPLACEMENT_CHARACTER}). Correct the name before importing.'
-                    ),
-                })
-                has_errors = True
-                continue
-            if not normalized:
-                row_results.append({'row': index, 'status': 'error', 'error': 'Student number is required.'})
-                has_errors = True
-                continue
-            if len(student_number) > StudentProfile._meta.get_field('student_number').max_length:
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': 'Student number is too long.',
-                })
-                has_errors = True
-                continue
-            if normalized in seen:
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': 'Duplicate student number in this file.',
-                })
-                has_errors = True
-                continue
-            seen.add(normalized)
-            profile = profiles_by_number.get(normalized)
-            if profile and (
-                profile.user.role != User.Role.STUDENT
-                or not profile.user.is_active
-                or not profile.is_active
-            ):
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': 'This student account is disabled and must be reviewed in Student Management.',
-                })
-                has_errors = True
-                continue
-            if profile:
-                enrollment = enrollments_by_student.get(profile.user_id)
-                if enrollment and enrollment.is_active:
-                    row_status = 'already_enrolled'
-                    summary['already_active_count'] += 1
-                elif enrollment:
-                    row_status = 'reactivate'
-                    summary['reactivate_count'] += 1
-                else:
-                    row_status = 'enroll'
-                    summary['enroll_count'] += 1
-                validated.append({'profile': profile, 'status': row_status})
-                row_results.append({
-                    'row': index,
-                    'student_number': profile.student_number,
-                    'student_id': profile.user_id,
-                    'student_name': profile.user.get_full_name() or profile.student_number,
-                    'status': row_status,
-                })
-                continue
-
-            if not first_name or not last_name:
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': 'First name and last name are required for a new student.',
-                })
-                has_errors = True
-                continue
-            try:
-                clean_student_number(student_number)
-                validate_student_number_available(student_number)
-            except DjangoValidationError as error:
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': ' '.join(error.messages),
-                })
-                has_errors = True
-                continue
-            account_first_name = ' '.join(part for part in (first_name, middle_name) if part)
-            if len(account_first_name) > 150 or len(last_name) > 150:
-                row_results.append({
-                    'row': index,
-                    'student_number': student_number,
-                    'status': 'error',
-                    'error': 'The combined first and middle name, and the last name, must each be 150 characters or fewer.',
-                })
-                has_errors = True
-                continue
-            validated.append({
-                'first_name': account_first_name,
-                'last_name': last_name,
-                'student_number': student_number,
-                'status': 'create',
-            })
-            summary['create_count'] += 1
-            row_results.append({
-                'row': index,
-                'student_number': student_number,
-                'student_name': f'{account_first_name} {last_name}',
-                'status': 'create',
-            })
-
-        preview = {
-            'valid': not has_errors,
-            'row_count': len(rows),
-            'ready_count': len(validated),
-            'rows': row_results,
-            **summary,
-        }
+        validation = validate_roster_rows(schedule, rows)
+        preview = validation.preview
         if dry_run:
             return Response(preview)
-        if has_errors:
+        if not preview['valid']:
             return Response(preview, status=status.HTTP_400_BAD_REQUEST)
 
-        students = []
-        credentials = []
-        for entry in validated:
-            profile = entry.get('profile')
-            if profile:
-                students.append(profile.user)
-                continue
-            profile = create_student_account(
-                student_number=entry['student_number'],
-                first_name=entry['first_name'],
-                last_name=entry['last_name'],
-                email='',
-                is_active=True,
+        with transaction.atomic():
+            SubjectSchedule.objects.select_for_update().get(pk=schedule.id)
+            job = enqueue(
+                import_roster_job,
+                job_type=BackgroundJob.Type.IMPORT,
+                owner=request.user,
+                payload={
+                    'schedule_id': schedule.id,
+                    'actor_id': request.user.id,
+                    'rows': validation.rows,
+                },
+                total=len(validation.rows),
+                idempotency_key=f'roster-import:{schedule.id}',
+                dispatch_failure_payload={'schedule_id': schedule.id},
             )
-            students.append(profile.user)
-            credentials.append({
-                'student_number': entry['student_number'],
-                'temporary_password': entry['student_number'],
-            })
+        if job.owner_id != request.user.id:
+            return Response(
+                {'detail': 'Another teacher is already importing this roster.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        job.refresh_from_db()
+        if job.status == BackgroundJob.Status.FAILED and 'rows' in job.payload:
+            job.payload = {'schedule_id': schedule.id}
+            job.save(update_fields=('payload',))
+        return Response(
+            {**preview, 'job': BackgroundJobSerializer(job).data},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
-        preview.update(enroll_users(schedule, students, request.user))
-        preview['created_count'] = len(credentials)
-        preview['credentials'] = credentials
-        return Response(preview)
+    @action(detail=True, methods=['get'], url_path='roster-import-status')
+    def roster_import_status(self, request, pk=None):
+        schedule = self.get_object()
+        cutoff = timezone.now() - timedelta(days=1)
+        job = BackgroundJob.objects.filter(
+            job_type=BackgroundJob.Type.IMPORT,
+            owner=request.user,
+            idempotency_key=f'roster-import:{schedule.id}',
+            created_at__gte=cutoff,
+        ).first()
+        return Response({
+            'job': BackgroundJobSerializer(job).data if job else None,
+        })
 
 
 class ScheduleStudentViewSet(viewsets.ModelViewSet):
@@ -621,14 +491,6 @@ def bounded_int(value, default=0, maximum=None):
     return min(number, maximum) if maximum is not None else number
 
 
-def normalize_imported_person_name(value):
-    cleaned = ' '.join(str(value or '').split())
-    return re.sub(
-        r"(^|[\s\-'\u2019])([^\W\d_])",
-        lambda match: f'{match.group(1)}{match.group(2).upper()}',
-        cleaned,
-        flags=re.UNICODE,
-    )
 def schedule_dependency_counts(schedule):
     dependencies = {}
     for relation in schedule._meta.related_objects:

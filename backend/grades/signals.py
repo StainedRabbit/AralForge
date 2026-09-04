@@ -92,6 +92,26 @@ def initialize_enrollment_grades(sender, instance, **kwargs):
     recompute_all_for_student(instance.student, instance.schedule)
 
 
+def initialize_enrollment_grades_bulk(schedule, student_ids):
+    """Apply enrollment grade initialization once for a roster-import batch."""
+    from .services import recompute_student_categories_bulk
+    from .source_sync import sync_grade_items_for_students
+
+    student_ids = {int(student_id) for student_id in student_ids}
+    if not student_ids:
+        return
+    sync_grade_items_for_students(
+        schedule.grade_items.exclude(source_type=GradeItemSourceType.MANUAL),
+        student_ids,
+    )
+    category_ids = list(GradeCategory.objects.filter(subject=schedule.subject).values_list('id', flat=True))
+    recompute_student_categories_bulk({
+        (student_id, category_id, schedule.id)
+        for student_id in student_ids
+        for category_id in category_ids
+    })
+
+
 def _items_for_source(source_type, field, source_id):
     return GradeItem.objects.filter(source_type=source_type, **{field: source_id})
 

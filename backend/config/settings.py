@@ -252,7 +252,7 @@ CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', REDIS_URL or 'cache+m
 CELERY_TASK_ALWAYS_EAGER = env_bool('CELERY_TASK_ALWAYS_EAGER', default=not bool(REDIS_URL))
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '900'))
+CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '1800'))
 
 
 # Password validation
@@ -357,12 +357,15 @@ if not DEBUG:
         raise RuntimeError('ALLOWED_HOSTS must be set when DEBUG=False.')
     require_production_values((
         'DATABASE_URL',
+        'REDIS_URL',
         'CORS_ALLOWED_ORIGINS',
         'CSRF_TRUSTED_ORIGINS',
         *SUPABASE_STORAGE_ENV_VARS,
     ))
     if urlparse(DATABASE_URL).scheme not in {'postgres', 'postgresql'}:
         raise RuntimeError('Production DATABASE_URL must use PostgreSQL.')
+    if CELERY_TASK_ALWAYS_EAGER:
+        raise RuntimeError('CELERY_TASK_ALWAYS_EAGER must be disabled in production.')
 
     SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', default=True)
     CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', default=True)

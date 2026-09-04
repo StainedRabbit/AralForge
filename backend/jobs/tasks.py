@@ -86,7 +86,16 @@ def sync_module_progress_job(self, job_id):
         raise
 
 
-def enqueue(task, *, job_type, owner=None, payload=None, total=0, idempotency_key=None):
+def enqueue(
+    task,
+    *,
+    job_type,
+    owner=None,
+    payload=None,
+    total=0,
+    idempotency_key=None,
+    dispatch_failure_payload=None,
+):
     payload = payload or {}
     with transaction.atomic():
         if idempotency_key:
@@ -109,6 +118,8 @@ def enqueue(task, *, job_type, owner=None, payload=None, total=0, idempotency_ke
                 result = task.delay(str(job.id))
             except Exception as error:
                 mark_failed(job, error)
+                if dispatch_failure_payload is not None:
+                    BackgroundJob.objects.filter(pk=job.pk).update(payload=dispatch_failure_payload)
                 return
             BackgroundJob.objects.filter(pk=job.pk).update(celery_task_id=result.id or '')
 

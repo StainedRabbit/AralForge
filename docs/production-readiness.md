@@ -20,6 +20,8 @@ Railway requires these values for each environment:
 - `CSRF_TRUSTED_ORIGINS` (the exact HTTPS origins)
 - `API_SLOW_REQUEST_MS=750`
 - `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
+- `REDIS_URL` (the shared Railway Redis URL used by the API and Celery worker)
+- `CELERY_TASK_TIME_LIMIT=1800`
 - `SUPABASE_S3_ENDPOINT` (the existing compatibility name for the Cloudflare R2 S3 endpoint)
 - `SUPABASE_S3_REGION`
 - `SUPABASE_S3_ACCESS_KEY_ID`
@@ -27,6 +29,14 @@ Railway requires these values for each environment:
 - `SUPABASE_STORAGE_BUCKET`
 
 Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. Production builds reject missing, insecure, or loopback values. Keep separate frontend deployments for staging and production.
+
+Each Railway environment also requires a worker service built from the same commit and configured with the same database, application, storage, and Redis variables as the API. Its start command is:
+
+```bash
+celery -A config worker --loglevel=info --concurrency=1
+```
+
+Provision Redis and start the worker before deploying frontend code that submits background roster imports. Without a reachable broker, the import job is recorded as failed and the UI will report that no students were imported.
 
 ## Staging frontend and API connection
 

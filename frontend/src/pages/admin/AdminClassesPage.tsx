@@ -27,6 +27,7 @@ import type {
   StudentCategoryGrade,
   PeriodGrade,
   FinalGrade,
+  BackgroundJob,
 } from '../../types'
 import { toOptions } from '../../admin/adminHelpers'
 import { formatTime, numeric, toErrorMessage } from '../../utils/format'
@@ -87,6 +88,17 @@ type ImportPreview = {
   already_active_count?: number
   created_count?: number
   credentials?: Array<{ student_number: string; temporary_password: string }>
+  job?: BackgroundJob
+}
+
+type RosterImportJobResult = {
+  schedule?: number
+  created_count?: number
+  created_student_numbers?: string[]
+  added_count?: number
+  reactivated_count?: number
+  already_active_count?: number
+  preview?: ImportPreview
 }
 
 type AvailableStudent = {
@@ -1941,6 +1953,7 @@ function AddStudentsModal({
   const [importEncodingNotice, setImportEncodingNotice] = useState('')
   const [importReplacementWarning, setImportReplacementWarning] = useState('')
   const [newCredentials, setNewCredentials] = useState<Array<{ student_number: string; temporary_password: string }>>([])
+  const [importJob, setImportJob] = useState<BackgroundJob | null>(null)
   const [selectedStudents, setSelectedStudents] = useState<AvailableStudent[]>([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -1953,12 +1966,80 @@ function AddStudentsModal({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const createStudentNumberRef = useRef<HTMLInputElement>(null)
   const createRequestRef = useRef(false)
+  const handledImportJobRef = useRef<string | null>(null)
   const selectedIds = selectedStudents.map((student) => student.id)
   const normalizedQuery = query.trim()
   const suggestions = students.filter(
     (student) => !selectedStudents.some((selected) => selected.id === student.id),
   )
   const showSuggestions = activeTab === 'choose' && normalizedQuery.length >= 2
+  const importJobActive = importJob?.status === 'PENDING' || importJob?.status === 'RUNNING'
+
+  const receiveImportJob = useCallback((job: BackgroundJob) => {
+    setImportJob(job)
+    if (job.status === 'PENDING' || job.status === 'RUNNING' || handledImportJobRef.current === job.id) return
+    handledImportJobRef.current = job.id
+    window.localStorage.setItem(rosterImportAcknowledgedKey(schedule.id), job.id)
+    const result = job.result as RosterImportJobResult
+    if (job.status === 'SUCCEEDED') {
+      const credentials = (result.created_student_numbers ?? []).map((studentNumber) => ({
+        student_number: studentNumber,
+        temporary_password: studentNumber,
+      }))
+      setNewCredentials(credentials)
+      if (credentials.length) downloadNewStudentCredentials(credentials)
+      setMessage(
+        `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
+      )
+      void refresh()
+      return
+    }
+    if (result.preview) setImportPreview(result.preview)
+    setMessage(job.error || 'The roster import failed. No students were imported.')
+  }, [refresh, schedule.id])
+
+  useEffect(() => {
+    let cancelled = false
+    void api<{ job: BackgroundJob | null }>(
+      `/subjects/subject-schedules/${schedule.id}/roster-import-status/`,
+    ).then(({ job }) => {
+      if (cancelled || !job) return
+      const acknowledged = window.localStorage.getItem(rosterImportAcknowledgedKey(schedule.id))
+      if (acknowledged === job.id && !['PENDING', 'RUNNING'].includes(job.status)) return
+      receiveImportJob(job)
+    }).catch(() => {
+      // A status check should not interrupt the other add-student methods.
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [api, receiveImportJob, schedule.id])
+
+  useEffect(() => {
+    if (!importJobActive || !importJob) return
+    let cancelled = false
+    let timeoutId: number | undefined
+    const poll = async () => {
+      try {
+        const nextJob = await api<BackgroundJob>(`/jobs/${importJob.id}/`)
+        if (cancelled) return
+        receiveImportJob(nextJob)
+        if (nextJob.status === 'PENDING' || nextJob.status === 'RUNNING') {
+          timeoutId = window.setTimeout(() => void poll(), 1500)
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setMessage(`Import status could not be refreshed. Reopen this panel to check it. ${toErrorMessage(caughtError)}`)
+          timeoutId = window.setTimeout(() => void poll(), 3000)
+        }
+      }
+    }
+    timeoutId = window.setTimeout(() => void poll(), 750)
+    return () => {
+      cancelled = true
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [api, importJob, importJobActive, receiveImportJob])
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null
@@ -2199,7 +2280,7 @@ function AddStudentsModal({
   }
 
   async function importStudents() {
-    if (!importRows.length || importReplacementWarning) {
+    if (!importRows.length || importReplacementWarning || importJobActive) {
       return
     }
 
@@ -2217,15 +2298,27 @@ function AddStudentsModal({
         },
       )
 
-      const credentials = result.credentials ?? []
-      setNewCredentials(credentials)
-      if (credentials.length) downloadNewStudentCredentials(credentials)
-      setMessage(
-        `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
-      )
-      await refresh()
+      if (result.job) {
+        handledImportJobRef.current = null
+        receiveImportJob(result.job)
+        if (result.job.status === 'PENDING' || result.job.status === 'RUNNING') {
+          setMessage(`Importing ${result.job.progress} of ${result.job.total} students...`)
+        }
+      } else {
+        const credentials = result.credentials ?? []
+        setNewCredentials(credentials)
+        if (credentials.length) downloadNewStudentCredentials(credentials)
+        setMessage(
+          `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
+        )
+        await refresh()
+      }
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      setMessage(
+        caughtError instanceof TypeError
+          ? 'The server could not be reached. The import may still be running; reopen this panel to check its status.'
+          : toErrorMessage(caughtError),
+      )
     } finally {
       setSaving(false)
     }
@@ -2241,6 +2334,7 @@ function AddStudentsModal({
     setImportEncodingNotice('')
     setImportReplacementWarning('')
     setNewCredentials([])
+    if (!importJobActive) setImportJob(null)
     setMessage('')
 
     try {
@@ -2533,6 +2627,7 @@ function AddStudentsModal({
               <span>Student list CSV</span>
               <input
                 accept=".csv,text/csv,text/plain"
+                disabled={importJobActive}
                 onChange={(event) => void readImportFile(event.target.files?.[0] ?? null)}
                 type="file"
               />
@@ -2546,15 +2641,27 @@ function AddStudentsModal({
             {importRows.length ? (
               <button
                 className="button button--secondary"
-                disabled={saving || !importPreview?.valid || Boolean(importReplacementWarning)}
+                disabled={saving || importJobActive || !importPreview?.valid || Boolean(importReplacementWarning)}
                 onClick={() => void importStudents()}
                 type="button"
               >
                 <Icon name="upload" />
-                <span>{saving ? 'Importing...' : `Import ${importRows.length} students`}</span>
+                <span>{saving ? 'Starting import...' : importJobActive ? 'Import in progress' : `Import ${importRows.length} students`}</span>
               </button>
             ) : null}
           </div>
+
+          {importJobActive && importJob ? (
+            <div aria-live="polite" className="class-import-job" role="status">
+              <strong>
+                {importJob.progress >= importJob.total
+                  ? 'Finalizing roster import...'
+                  : `Importing ${importJob.progress} of ${importJob.total} students...`}
+              </strong>
+              <progress max={Math.max(importJob.total, 1)} value={importJob.progress} />
+              <span>You can close this window. The import will continue in the background.</span>
+            </div>
+          ) : null}
 
           {importPreview ? (
             <div className="class-import-preview" aria-label="Roster import preview">
@@ -3215,6 +3322,10 @@ function downloadNewStudentCredentials(credentials: Array<{ student_number: stri
   link.download = 'new-student-credentials.csv'
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function rosterImportAcknowledgedKey(scheduleId: number) {
+  return `aralforge:roster-import-acknowledged:${scheduleId}`
 }
 
 function normalizeImportHeader(value: string) {
