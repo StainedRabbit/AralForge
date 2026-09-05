@@ -10,138 +10,159 @@ async function openStudents(page: Page) {
   await expect(page.getByRole('heading', { name: 'Students' })).toBeVisible()
 }
 
-test('edits a student account and profile', async ({ page }) => {
-  let exposeLegacyDamagedName = true
-  await page.route('**/api/accounts/users/?*', async (route) => {
-    const response = await route.fetch()
-    const payload = await response.json() as {
-      results?: Array<{ first_name: string; username: string }>
-    }
-    if (exposeLegacyDamagedName) {
-      const student = payload.results?.find((user) => user.username === 'E2E-001')
-      if (student) student.first_name = 'Espa\ufffdol'
-    }
-    await route.fulfill({ response, json: payload })
-  })
+test('directory loads only students, then edits account and profile independently', async ({ page }) => {
+  const requests: string[] = []
+  page.on('request', (request) => requests.push(request.url()))
   await openStudents(page)
-
-  const accounts = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'User Accounts' }),
-  })
-  const accountForm = accounts.locator('.admin-form')
-  const accountRow = accounts.getByRole('row').filter({ hasText: 'E2E-001' })
-
-  await expect(accountRow.getByText('Name needs correction.')).toBeVisible()
-  await accountRow.getByRole('button', { name: 'Edit User' }).click()
-  await expect(accountForm.getByText('Edit User', { exact: true })).toBeVisible()
-  await expect(accountForm.getByLabel('Username')).toBeFocused()
-  await expect(accountForm.getByLabel('First name')).toHaveAttribute('aria-invalid', 'true')
-  await expect(accountForm.getByRole('button', { name: 'Save changes' })).toBeDisabled()
-  await accountForm.getByLabel('First name').fill('Edited')
-  await expect(accountForm.getByLabel('First name')).toHaveAttribute('aria-invalid', 'false')
-  await expect(accountForm.getByRole('button', { name: 'Save changes' })).toBeEnabled()
-  exposeLegacyDamagedName = false
-
-  const accountSave = page.waitForResponse((response) =>
-    response.request().method() === 'PATCH'
-    && /\/api\/accounts\/users\/\d+\/$/.test(new URL(response.url()).pathname),
-  )
-  await accountForm.getByRole('button', { name: 'Save changes' }).click()
-  expect((await accountSave).ok()).toBe(true)
-  await expect(accountForm.getByText('User saved.', { exact: true })).toBeVisible()
-  await expect(accountRow).toContainText('Edited Rivera')
-
-  const profiles = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'Student Profiles' }),
-  })
-  const profileForm = profiles.locator('.admin-form')
-  const profileRow = profiles.getByRole('row').filter({ hasText: 'E2E-001' })
-
-  await profileRow.getByRole('button', { name: 'Edit Student profile' }).click()
-  await expect(profileForm.getByText('Edit Student profile', { exact: true })).toBeVisible()
-  await expect(profileForm.getByLabel('Student number')).toBeFocused()
-  await expect(profileForm.getByLabel('Section')).toHaveCount(0)
-  await expect(profileForm.getByLabel('Year level')).toHaveCount(0)
-
-  const profileSave = page.waitForResponse((response) =>
-    response.request().method() === 'PATCH'
-    && /\/api\/accounts\/students\/\d+\/$/.test(new URL(response.url()).pathname),
-  )
-  await profileForm.getByRole('button', { name: 'Save changes' }).click()
-  expect((await profileSave).ok()).toBe(true)
-  await expect(profileForm.getByText('Student profile saved.', { exact: true })).toBeVisible()
-  await expect(profileRow).toContainText('E2E-001')
-})
-
-test('creates a student with student-number credentials in one request', async ({ page }) => {
-  await openStudents(page)
-
-  const quickSetup = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'Quick Student Setup' }),
-  })
-  await expect(quickSetup.getByLabel('Username')).toHaveCount(0)
-  await expect(quickSetup.getByLabel('Password', { exact: true })).toHaveCount(0)
-  await expect(quickSetup.getByLabel('Section')).toHaveCount(0)
-  await expect(quickSetup.getByLabel('Year level')).toHaveCount(0)
-  await quickSetup.getByLabel('First name').fill('Quick')
-  await quickSetup.getByLabel('Last name').fill('Student')
-  await quickSetup.getByLabel('Email').fill('quick.student@example.test')
-  await quickSetup.getByLabel('Student number').fill('E2E-QUICK-01')
-
-  const created = page.waitForResponse((response) =>
-    response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/api/accounts/students/',
-  )
-  await quickSetup.getByRole('button', { name: 'Create student' }).click()
-  const response = await created
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'User Accounts' })).toHaveCount(0)
+  expect(requests.some((url) => /\/api\/accounts\/users\/\?/.test(url))).toBe(false)
+  await page.getByLabel('Search students', { exact: true }).fill('E2E-001')
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  const account = dialog.getByRole('form', { name: 'Account details' })
+  await account.getByLabel('Middle name (optional)').fill('De Leon')
+  const saved = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/accounts\/users\/\d+\/$/.test(new URL(response.url()).pathname))
+  await account.getByRole('button', { name: 'Save changes' }).click()
+  const response = await saved
   expect(response.ok()).toBe(true)
-  expect(response.request().postDataJSON()).toEqual({
-    email: 'quick.student@example.test',
-    first_name: 'Quick',
-    is_active: true,
-    last_name: 'Student',
-    student_number: 'E2E-QUICK-01',
-  })
-  await expect(quickSetup).toContainText(
-    'The initial username and password are the student number.',
-  )
+  expect(response.request().postDataJSON()).toMatchObject({ middle_name: 'De Leon' })
+  expect(response.request().postDataJSON()).not.toHaveProperty('student_number')
+  await expect(account.getByText('Account details saved.')).toBeVisible()
+  const profile = dialog.getByRole('form', { name: 'Student profile' })
+  await profile.getByLabel('Profile active').uncheck()
+  await profile.getByRole('button', { name: 'Save changes' }).click()
+  await expect(profile.getByText('Student profile saved.')).toBeVisible()
+  await expect(account.getByLabel('Account active (can sign in)')).toBeChecked()
+  await profile.getByLabel('Profile active').check()
+  await profile.getByRole('button', { name: 'Save changes' }).click()
+  await expect(profile.getByText('Student profile saved.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close student panel' }).click()
+  await expect(page.getByLabel('Search students', { exact: true })).toHaveValue('E2E-001')
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeFocused()
+  await expect(page.locator('.students-table')).toContainText('De Leon')
 })
 
-test('brings the student edit form into view on stacked layouts', async ({ page }) => {
+test('create validation preserves inputs and success shows credentials; number changes use profile endpoint', async ({ page }) => {
+  await openStudents(page)
+  await page.getByRole('button', { name: 'Add student', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add student' })
+  await dialog.getByLabel('Student number', { exact: true }).fill('E2E-001')
+  await dialog.getByLabel('First name', { exact: true }).fill('New')
+  await dialog.getByLabel('Middle name (optional)').fill('Middle')
+  await dialog.getByLabel('Last name', { exact: true }).fill('Student')
+  await dialog.getByRole('button', { name: 'Create student' }).click()
+  await expect(dialog.getByLabel('Student number', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await expect(dialog.getByLabel('First name', { exact: true })).toHaveValue('New')
+  await dialog.getByLabel('Student number', { exact: true }).fill('E2E-DIRECTORY-NEW')
+  await dialog.getByRole('button', { name: 'Create student' }).click()
+  await expect(dialog.getByRole('heading', { name: 'Student account created' })).toBeVisible()
+  await expect(dialog.locator('dd')).toHaveText('E2E-DIRECTORY-NEW')
+  await dialog.getByRole('button', { name: 'Close student panel' }).click()
+  await page.getByLabel('Search students', { exact: true }).fill('E2E-DIRECTORY-NEW')
+  await page.getByRole('button', { name: 'View E2E-DIRECTORY-NEW', exact: true }).click()
+  const profile = page.getByRole('form', { name: 'Student profile' })
+  await expect(profile).toContainText('temporary password will also become the new student number')
+  await profile.getByLabel('Student number', { exact: true }).fill('E2E-DIRECTORY-RENAMED')
+  await profile.getByRole('button', { name: 'Save changes' }).click()
+  await expect(profile.getByText('Student profile saved.')).toBeVisible()
+  await expect(page.locator('.students-identity')).toContainText('E2E-DIRECTORY-RENAMED')
+})
+
+test('server pagination and profile filtering preserve distinct account status', async ({ page }) => {
+  let pageTwo = false
+  const profile = (id: number, active: boolean) => ({ id, user: id, student_number: `TEST-${id}`, is_active: active, joined_at: '',
+    user_detail: { id, username: `TEST-${id}`, first_name: 'Test', middle_name: 'Middle', last_name: String(id), full_name: `Test Middle ${id}`, email: '', role: 'STUDENT', is_active: false } })
+  await page.route('**/api/accounts/students/?*', async (route) => {
+    const url = new URL(route.request().url())
+    const search = url.searchParams.get('search')
+    const inactive = url.searchParams.get('status') === 'inactive'
+    const cursor = url.searchParams.get('cursor')
+    if (cursor === 'page-two') pageTwo = true
+    const results = search === 'missing' ? [] : search ? [profile(31, true)] : inactive ? [profile(32, false)] : cursor ? [profile(31, true)] : Array.from({ length: 30 }, (_, index) => profile(index + 1, true))
+    await route.fulfill({ json: { count: 31, previous: null, next: !search && !inactive && !cursor ? 'http://127.0.0.1:8001/api/accounts/students/?pagination=cursor&cursor=page-two' : null, results } })
+  })
+  await openStudents(page)
+  await expect(page.getByRole('button', { name: 'View TEST-30', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Load more', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'View TEST-31', exact: true })).toBeVisible()
+  expect(pageTwo).toBe(true)
+  await page.getByLabel('Search students', { exact: true }).fill('Middle 31')
+  await expect(page.locator('.students-table tbody tr')).toHaveCount(1)
+  await expect(page.locator('td[data-label="Profile"]')).toHaveText('Active')
+  await expect(page.locator('td[data-label="Account"]')).toHaveText('Inactive')
+  await page.getByLabel('Search students', { exact: true }).fill('missing')
+  await expect(page.getByRole('heading', { name: 'No matching students' })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await page.getByLabel('Profile status').selectOption('inactive')
+  await expect(page.getByRole('button', { name: 'View TEST-32', exact: true })).toBeVisible()
+})
+
+test('mobile detail panel contains focus and protects unsaved edits', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await openStudents(page)
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByLabel('First name', { exact: true }).fill('Unsaved')
+  page.once('dialog', (prompt) => prompt.dismiss())
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('First name', { exact: true })).toHaveValue('Unsaved')
+  page.once('dialog', (prompt) => prompt.dismiss())
+  await dialog.getByRole('tab', { name: 'Modules', exact: true }).click()
+  await expect(dialog.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await dialog.getByRole('button', { name: 'Close student panel' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/students-mobile.png' })
+  page.once('dialog', (prompt) => prompt.accept())
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeFocused()
+})
 
-  const profiles = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'Student Profiles' }),
-  })
-  const profileForm = profiles.locator('.admin-form')
-  const profileRow = profiles.getByRole('row').filter({ hasText: 'E2E-001' })
-
-  await profileRow.getByRole('button', { name: 'Edit Student profile' }).click()
-  await expect(profileForm.getByText('Edit Student profile', { exact: true })).toBeVisible()
-  await expect(profileForm).toBeInViewport()
-  await expect(profileForm.getByLabel('Student number')).toBeFocused()
+test('selected-student enrollments and Advanced tools remain available', async ({ page }) => {
+  await openStudents(page)
+  await page.getByRole('button', { name: 'View E2E-002', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  const enrollmentRequest = page.waitForRequest((request) => /\/api\/subjects\/schedule-students\//.test(request.url()) && request.method() === 'GET')
+  await dialog.getByRole('tab', { name: 'Enrollments', exact: true }).click()
+  const studentId = new URL((await enrollmentRequest).url()).searchParams.get('student')
+  await expect(dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option')).not.toHaveCount(1)
+  const available = await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option').nth(1).getAttribute('value')
+  await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).selectOption(available!)
+  const saved = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/subjects/schedule-students/'))
+  await dialog.getByRole('button', { name: 'Save enrollment' }).click()
+  const response = await saved
+  expect(response.request().postDataJSON().student).toBe(Number(studentId))
+  expect(response.ok()).toBe(true)
+  await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Edit enrollment' }).last().click()
+  await dialog.getByLabel('Enrollment active').uncheck()
+  const updated = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/api\/subjects\/schedule-students\/\d+\/$/.test(new URL(response.url()).pathname))
+  await dialog.getByRole('button', { name: 'Save enrollment' }).click()
+  const update = await updated
+  expect(update.ok()).toBe(true)
+  expect(update.request().postDataJSON()).toMatchObject({ student: Number(studentId), is_active: false })
+  await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close student panel' }).click()
+  await page.getByRole('tab', { name: 'Advanced tools', exact: true }).click()
+  for (const title of ['User Accounts', 'Student Profiles', 'Class Enrollments', 'Module Access Grants', 'Bulk Module Access']) {
+    await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  }
+  await page.getByRole('tab', { name: 'Students', exact: true }).click()
+  await page.screenshot({ path: 'test-results/students-desktop.png', fullPage: true })
 })
 
 test('activates, revokes, and renews module access without payment fields', async ({ page }) => {
   await openStudents(page)
 
-  const bulkAccess = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'Bulk Module Access' }),
-  })
-  await expect(bulkAccess.getByLabel('Amount')).toHaveCount(0)
-  await expect(bulkAccess.getByLabel('Reference')).toHaveCount(0)
-
-  const studentAccess = page.locator('.admin-resource').filter({
-    has: page.getByRole('heading', { name: 'Student Module Access' }),
-  })
-  await studentAccess.getByLabel('Search student').fill('Jamie')
-  const studentResult = studentAccess.getByRole('combobox', { name: 'Student', exact: true })
-  await expect(studentResult.getByRole('option', { name: 'Jamie Santos (E2E-002)' })).toHaveCount(1)
-  await studentResult.selectOption({ label: 'Jamie Santos (E2E-002)' })
-  await studentAccess.getByRole('button', { name: 'Manage Modules' }).click()
-
-  const dialog = page.getByRole('dialog', { name: 'Module Access' })
+  await page.getByLabel('Search students', { exact: true }).fill('E2E-002')
+  await page.getByRole('button', { name: 'View E2E-002', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByRole('tab', { name: 'Modules', exact: true }).click()
   await expect(dialog).toBeVisible()
   await expect(dialog.getByLabel('Amount paid')).toHaveCount(0)
   await expect(dialog.getByLabel('Receipt / reference')).toHaveCount(0)
@@ -160,7 +181,7 @@ test('activates, revokes, and renews module access without payment fields', asyn
   expect(activationResponse.request().postDataJSON()).not.toHaveProperty('payment_status')
   expect(activationResponse.request().postDataJSON()).not.toHaveProperty('payment_reference')
   await expect(dialog).toContainText('Module access activated.')
-  await expect(dialog.getByText('Active', { exact: true })).toBeVisible()
+  await expect(dialog.locator('.status-pill').filter({ hasText: /^Active$/ })).toBeVisible()
 
   const revoked = page.waitForResponse((response) =>
     response.request().method() === 'PATCH'
@@ -177,5 +198,64 @@ test('activates, revokes, and renews module access without payment fields', asyn
   )
   await dialog.getByRole('button', { name: 'Activate Access' }).click()
   expect((await renewed).ok()).toBe(true)
-  await expect(dialog.getByText('Active', { exact: true })).toBeVisible()
+  await expect(dialog.locator('.status-pill').filter({ hasText: /^Active$/ })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/students-modules-mobile.png', fullPage: true })
+})
+
+test('damaged names are visible and cannot be saved until corrected', async ({ page }) => {
+  await page.route('**/api/accounts/students/**', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const response = await route.fetch()
+    const payload = await response.json()
+    const profiles = payload.results ?? [payload]
+    for (const profile of profiles) {
+      if (profile.student_number === 'E2E-001') {
+        profile.user_detail.first_name = 'Espa\ufffdol'
+        profile.user_detail.full_name = 'Espa\ufffdol Rivera'
+      }
+    }
+    await route.fulfill({ response, json: payload })
+  })
+  await openStudents(page)
+  await expect(page.locator('.students-table').getByText('Name needs correction.')).toBeVisible()
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const form = page.getByRole('form', { name: 'Account details' })
+  await expect(form.getByLabel('First name', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+  await expect(form.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+  await form.getByLabel('First name', { exact: true }).fill('Corrected')
+  await expect(form.getByLabel('First name', { exact: true })).toHaveAttribute('aria-invalid', 'false')
+  await expect(form.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+})
+
+test('directory exposes retry and an empty state without hiding creation', async ({ page }) => {
+  let fail = true
+  await page.route('**/api/accounts/students/?*', async (route) => {
+    await route.fulfill(fail ? { status: 400, json: { detail: 'Students could not load.' } }
+      : { json: { count: 0, next: null, previous: null, results: [] } })
+  })
+  await openStudents(page)
+  await expect(page.getByRole('alert')).toContainText('Students could not load.')
+  fail = false
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Your student directory starts here' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add student', exact: true }).first()).toBeEnabled()
+})
+
+test('Advanced tools account edits refresh the student directory', async ({ page }) => {
+  await openStudents(page)
+  await expect(page.getByRole('button', { name: 'View E2E-003', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Advanced tools', exact: true }).click()
+  const accounts = page.locator('.admin-resource').filter({ has: page.getByRole('heading', { name: 'User Accounts', exact: true }) })
+  await accounts.getByRole('row').filter({ hasText: 'E2E-003' }).getByRole('button', { name: 'Edit User', exact: true }).click()
+  await accounts.getByLabel('Middle name', { exact: true }).fill('Advanced')
+  page.once('dialog', (prompt) => prompt.dismiss())
+  await page.getByRole('tab', { name: 'Students', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Advanced tools', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(accounts.getByLabel('Middle name', { exact: true })).toHaveValue('Advanced')
+  await accounts.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(accounts.getByText('User saved.', { exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Students', exact: true }).click()
+  await expect(page.locator('.students-table').getByText('Morgan Advanced Lee', { exact: true })).toBeVisible()
 })

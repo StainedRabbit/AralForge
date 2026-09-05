@@ -62,6 +62,8 @@ type AdminResourcePanelProps<TItem extends { id: number }> = {
   items?: TItem[]
   noun: string
   onRefresh: () => Promise<void>
+  onChanged?: () => Promise<void>
+  onFormStateChange?: (state: { dirty: boolean; busy: boolean } | null) => void
   title: string
   serverSide?: boolean
 }
@@ -75,6 +77,8 @@ export function AdminResourcePanel<TItem extends { id: number }>({
   items = [],
   noun,
   onRefresh,
+  onChanged,
+  onFormStateChange,
   title,
   serverSide = false,
 }: AdminResourcePanelProps<TItem>) {
@@ -111,6 +115,11 @@ export function AdminResourcePanel<TItem extends { id: number }>({
     return errors
   }, {})
   const hasValidationErrors = Object.keys(validationErrors).length > 0
+  const dirty = JSON.stringify(draft) !== JSON.stringify(createDraft(fields, editing ?? undefined))
+  useEffect(() => {
+    onFormStateChange?.({ dirty, busy: saving })
+    return () => onFormStateChange?.(null)
+  }, [dirty, saving, onFormStateChange])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -137,6 +146,10 @@ export function AdminResourcePanel<TItem extends { id: number }>({
   }, [getSearchText, query, serverItems, serverSide])
 
   async function refreshPanel() {
+    if (onChanged) {
+      await onChanged()
+      return
+    }
     if (serverSide) {
       await queryClient.invalidateQueries({
         predicate: (candidate) => (

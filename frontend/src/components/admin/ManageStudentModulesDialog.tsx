@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { Module, ModuleAccess } from '../../types'
@@ -15,6 +15,9 @@ export function ManageStudentModulesDialog({
   onClose,
   studentId,
   studentName,
+  embedded = false,
+  onFormStateChange,
+  onSaved,
 }: {
   api: AuthedRequest
   data: RouteData
@@ -22,6 +25,9 @@ export function ManageStudentModulesDialog({
   onClose: () => void
   studentId: number
   studentName: string
+  embedded?: boolean
+  onFormStateChange?: (state: { dirty: boolean; busy: boolean }) => void
+  onSaved?: () => Promise<void>
 }) {
   const enrollmentsQuery = usePaginatedResource<ScheduleStudent>(
     api,
@@ -52,9 +58,13 @@ export function ManageStudentModulesDialog({
   )
   const [expiresAt, setExpiresAt] = useState(defaultExpiryValue())
   const [notes, setNotes] = useState('')
+  const [baseline, setBaseline] = useState(() => JSON.stringify([moduleId, expiresAt, '']))
   const [message, setMessage] = useState('')
   const [savingId, setSavingId] = useState<number | 'new' | null>(null)
   const [grantUpdates, setGrantUpdates] = useState<ModuleAccess[]>([])
+  useEffect(() => {
+    onFormStateChange?.({ dirty: JSON.stringify([moduleId, expiresAt, notes]) !== baseline, busy: savingId !== null })
+  }, [moduleId, expiresAt, notes, baseline, savingId, onFormStateChange])
   const grants = useMemo(
     () => studentModuleGrants(
       [
@@ -114,8 +124,10 @@ export function ManageStudentModulesDialog({
         },
       )
       setGrantUpdates((current) => upsertGrant(current, saved))
+      setBaseline(JSON.stringify([moduleId, expiresAt, notes]))
       setMessage('Module access activated.')
       await grantsQuery.refetch()
+      await onSaved?.()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -134,6 +146,7 @@ export function ManageStudentModulesDialog({
       setGrantUpdates((current) => upsertGrant(current, saved))
       setMessage('Module access revoked.')
       await grantsQuery.refetch()
+      await onSaved?.()
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -150,19 +163,19 @@ export function ManageStudentModulesDialog({
 
   return (
     <div
-      aria-labelledby="manage-student-modules-title"
-      aria-modal="true"
-      className="attendance-modal"
-      role="dialog"
+      aria-labelledby={embedded ? undefined : 'manage-student-modules-title'}
+      aria-modal={embedded ? undefined : true}
+      className={embedded ? 'students-modules' : 'attendance-modal'}
+      role={embedded ? undefined : 'dialog'}
     >
-      <button
+      {!embedded ? <button
         aria-label="Close module access"
         className="attendance-modal__backdrop"
         onClick={onClose}
         type="button"
-      />
-      <div className="attendance-modal__panel attendance-modal__panel--wide student-module-access-dialog">
-        <div className="attendance-modal__header">
+      /> : null}
+      <div className={embedded ? 'students-modules__content' : 'attendance-modal__panel attendance-modal__panel--wide student-module-access-dialog'}>
+        {!embedded ? <div className="attendance-modal__header">
           <div>
             <strong id="manage-student-modules-title">Module Access</strong>
             <span>{studentName}</span>
@@ -170,7 +183,10 @@ export function ManageStudentModulesDialog({
           <button className="icon-button" onClick={onClose} title="Close" type="button">
             <Icon name="close" />
           </button>
-        </div>
+        </div> : null}
+
+        {enrollmentsQuery.isPending || grantsQuery.isPending ? <p role="status">Loading module access...</p> : null}
+        {enrollmentsQuery.isError || grantsQuery.isError ? <div role="alert"><p>{toErrorMessage(enrollmentsQuery.error ?? grantsQuery.error)}</p><button className="button button--secondary" type="button" onClick={() => { void enrollmentsQuery.refetch(); void grantsQuery.refetch() }}>Retry module access</button></div> : null}
 
         <section className="student-module-access-section">
           <div>
@@ -220,6 +236,7 @@ export function ManageStudentModulesDialog({
             <label className="admin-field">
               <span>Module</span>
               <select
+                disabled={savingId !== null || enrollmentsQuery.isPending || grantsQuery.isPending || enrollmentsQuery.isError || grantsQuery.isError}
                 onChange={(event) => setModuleId(event.target.value)}
                 required
                 value={moduleId}
@@ -235,6 +252,7 @@ export function ManageStudentModulesDialog({
             <label className="admin-field">
               <span>Access expires</span>
               <input
+                disabled={savingId !== null}
                 onChange={(event) => setExpiresAt(event.target.value)}
                 required
                 type="datetime-local"
@@ -244,18 +262,19 @@ export function ManageStudentModulesDialog({
             <label className="admin-field admin-field--wide">
               <span>Note</span>
               <input
+                disabled={savingId !== null}
                 onChange={(event) => setNotes(event.target.value)}
                 type="text"
                 value={notes}
               />
             </label>
-            <button className="button button--primary" disabled={savingId !== null} type="submit">
+            <button className="button button--primary" disabled={savingId !== null || enrollmentsQuery.isPending || grantsQuery.isPending || enrollmentsQuery.isError || grantsQuery.isError} type="submit">
               <Icon name="shield" />
               <span>{savingId ? 'Saving...' : 'Activate Access'}</span>
             </button>
           </form>
 
-          {message ? <p className="admin-message">{message}</p> : null}
+          {message ? <p className="admin-message" role="status">{message}</p> : null}
 
           <div className="student-module-access-list">
             {grants.map((grant) => {

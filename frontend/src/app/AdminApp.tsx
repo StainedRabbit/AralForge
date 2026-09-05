@@ -38,7 +38,7 @@ const mobileMore: NavItem[] = [
   { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' },
 ]
 
-const STUDENTS: WorkspaceResource[] = ['subjects','modules']
+const STUDENTS: WorkspaceResource[] = []
 const CLASSES: WorkspaceResource[] = ['subjects','schoolYears','terms','modules']
 const MODULES: WorkspaceResource[] = ['subjects','modules']
 const MODULE_EDITOR: WorkspaceResource[] = MODULES
