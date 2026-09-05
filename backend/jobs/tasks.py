@@ -1,9 +1,28 @@
+from datetime import timedelta
+
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
 from .models import BackgroundJob
+
+
+def expire_pending_roster_imports(queryset):
+    """Release abandoned roster jobs; a conditional claim prevents late execution."""
+    cutoff = timezone.now() - timedelta(seconds=settings.ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS)
+    return queryset.filter(
+        job_type=BackgroundJob.Type.IMPORT,
+        idempotency_key__startswith='roster-import:',
+        status=BackgroundJob.Status.PENDING,
+        created_at__lte=cutoff,
+    ).update(
+        status=BackgroundJob.Status.FAILED,
+        error='The import did not start in time. Ask your administrator to check the background worker, then preview and import the file again. No students were imported.',
+        payload={},
+        finished_at=timezone.now(),
+    )
 
 
 def mark_running(job):
@@ -99,6 +118,7 @@ def enqueue(
     payload = payload or {}
     with transaction.atomic():
         if idempotency_key:
+            expire_pending_roster_imports(BackgroundJob.objects.filter(idempotency_key=idempotency_key))
             existing = BackgroundJob.objects.select_for_update().filter(
                 idempotency_key=idempotency_key,
                 status__in=(BackgroundJob.Status.PENDING, BackgroundJob.Status.RUNNING),

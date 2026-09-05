@@ -2302,7 +2302,7 @@ function AddStudentsModal({
         handledImportJobRef.current = null
         receiveImportJob(result.job)
         if (result.job.status === 'PENDING' || result.job.status === 'RUNNING') {
-          setMessage(`Importing ${result.job.progress} of ${result.job.total} students...`)
+          setMessage('')
         }
       } else {
         const credentials = result.credentials ?? []
@@ -2654,12 +2654,16 @@ function AddStudentsModal({
           {importJobActive && importJob ? (
             <div aria-live="polite" className="class-import-job" role="status">
               <strong>
-                {importJob.progress >= importJob.total
+                {importJob.status === 'PENDING'
+                  ? 'Waiting for the import worker...'
+                  : importJob.progress >= importJob.total
                   ? 'Finalizing roster import...'
-                  : `Importing ${importJob.progress} of ${importJob.total} students...`}
+                  : `Preparing ${importJob.progress} of ${importJob.total} students...`}
               </strong>
-              <progress max={Math.max(importJob.total, 1)} value={importJob.progress} />
-              <span>You can close this window. The import will continue in the background.</span>
+              <progress max={Math.max(importJob.total, 1)} value={importJob.status === 'PENDING' ? undefined : importJob.progress} />
+              <span>{importJob.status === 'PENDING'
+                ? 'Your file is queued; processing has not started. If no worker picks it up in time, this import will fail safely so you can try again.'
+                : 'Accounts and enrollments are saved together after preparation. You can close this window and return to check the result.'}</span>
             </div>
           ) : null}
 

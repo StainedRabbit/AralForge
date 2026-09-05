@@ -38,6 +38,8 @@ celery -A config worker --loglevel=info --concurrency=1
 
 Provision Redis and start the worker before deploying frontend code that submits background roster imports. Without a reachable broker, the import job is recorded as failed and the UI will report that no students were imported.
 
+A reachable Redis service does not mean a worker is running. If a roster import stays queued, check the worker deployment and confirm it uses the API's Redis and database configuration. Pending roster imports expire after `ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS` (default 300 seconds), checked when their status is requested, another import is submitted for the class, or the worker receives the task. Expired jobs release the class for a fresh preview/import and clear the uploaded rows; delayed deliveries cannot import them afterward. This queue timeout does not cancel a running import. Deploy the API and worker from the same commit before retrying abandoned jobs.
+
 ## Staging frontend and API connection
 
 1. In the Railway staging API service, open **Settings > Networking > Public Networking**, select **Generate Domain**, and copy the generated HTTPS URL. Do not guess it or use `api-staging.aralforge.com` until that custom domain resolves and passes the health check.

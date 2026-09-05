@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import time, timedelta
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,6 +10,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -121,6 +122,33 @@ class SubjectScheduleTests(TestCase):
 
 
 class SubjectScheduleApiTests(APITestCase):
+    def test_roster_task_ignores_failed_running_and_completed_deliveries(self):
+        for job_status in (BackgroundJob.Status.FAILED, BackgroundJob.Status.RUNNING, BackgroundJob.Status.SUCCEEDED):
+            job = BackgroundJob.objects.create(
+                job_type=BackgroundJob.Type.IMPORT, status=job_status,
+                payload={}, result={'existing': True},
+            )
+            with patch('subjects.tasks.prepare_password_hashes') as prepare:
+                self.assertEqual(import_roster_job.run(str(job.id)), {'existing': True})
+            prepare.assert_not_called()
+            job.refresh_from_db()
+            self.assertEqual(job.status, job_status)
+            self.assertEqual(job.attempts, 0)
+
+    def test_late_roster_task_expires_without_creating_students(self):
+        job = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.IMPORT,
+            idempotency_key='roster-import:late', payload={'rows': []},
+        )
+        BackgroundJob.objects.filter(pk=job.pk).update(created_at=timezone.now() - timedelta(hours=2))
+        with patch('subjects.tasks.prepare_password_hashes') as prepare:
+            import_roster_job.run(str(job.id))
+        prepare.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertEqual(job.attempts, 0)
+        self.assertEqual(job.payload, {})
+
     def setUp(self):
         user_model = get_user_model()
         self.teacher = user_model.objects.create_user(

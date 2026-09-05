@@ -1,8 +1,9 @@
 from celery import shared_task
 from django.utils import timezone
+from django.db.models import F
 
 from jobs.models import BackgroundJob
-from jobs.tasks import mark_running
+from jobs.tasks import expire_pending_roster_imports
 
 from .models import SubjectSchedule
 from .roster_import import (
@@ -26,10 +27,18 @@ def _finish_failed(job_id, message, *, result=None):
 
 @shared_task(bind=True)
 def import_roster_job(self, job_id):
+    queryset = BackgroundJob.objects.filter(pk=job_id)
+    expire_pending_roster_imports(queryset)
+    claimed = queryset.filter(status=BackgroundJob.Status.PENDING).update(
+        status=BackgroundJob.Status.RUNNING,
+        attempts=F('attempts') + 1,
+        started_at=timezone.now(),
+        finished_at=None,
+        error='',
+    )
     job = BackgroundJob.objects.get(pk=job_id)
-    if job.status == BackgroundJob.Status.SUCCEEDED:
+    if not claimed:
         return job.result
-    mark_running(job)
     schedule_id = job.payload['schedule_id']
     actor_id = job.payload['actor_id']
     rows = job.payload['rows']

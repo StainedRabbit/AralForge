@@ -16,7 +16,7 @@ from accounts.services import (
 from config.cache import CachedReferenceListMixin
 from jobs.models import BackgroundJob
 from jobs.serializers import BackgroundJobSerializer
-from jobs.tasks import enqueue
+from jobs.tasks import enqueue, expire_pending_roster_imports
 
 from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
 from .serializers import (
@@ -433,6 +433,10 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='roster-import-status')
     def roster_import_status(self, request, pk=None):
         schedule = self.get_object()
+        expire_pending_roster_imports(BackgroundJob.objects.filter(
+            owner=request.user,
+            idempotency_key=f'roster-import:{schedule.id}',
+        ))
         cutoff = timezone.now() - timedelta(days=1)
         job = BackgroundJob.objects.filter(
             job_type=BackgroundJob.Type.IMPORT,
