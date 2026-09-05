@@ -1074,6 +1074,27 @@ function ClassRoster({
     }
   }
 
+  async function exportDetailedGrades() {
+    if (!selectedSchedule || exportingRoster) return
+    setExportingRoster(true)
+    setRosterMessage('Preparing detailed grades CSV...')
+    try {
+      const params = new URLSearchParams({ status: rosterStatus, search: normalizedRosterQuery })
+      const blob = await api<Blob>(`/subjects/subject-schedules/${selectedSchedule.id}/detailed-grades-csv/?${params}`)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${selectedSchedule.subject_code}-${selectedSchedule.section || 'class'}-detailed-grades.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+      setRosterMessage('Exported detailed grades for the complete filtered roster.')
+    } catch (caughtError) {
+      setRosterMessage(`Detailed grades export failed: ${toErrorMessage(caughtError)}`)
+    } finally {
+      setExportingRoster(false)
+    }
+  }
+
   const classModules = selectedSchedule
     ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
@@ -1155,6 +1176,7 @@ function ClassRoster({
               gradebookTo={selectedSchedule ? gradebookUrl(selectedSchedule.id) : null}
               moduleProgressTo={moduleProgressUrl}
               onExport={() => void exportFilteredRoster()}
+              onExportDetailed={() => void exportDetailedGrades()}
             />
           </div>
         }
@@ -1469,12 +1491,14 @@ function RosterActionsMenu({
   gradebookTo,
   moduleProgressTo,
   onExport,
+  onExportDetailed,
 }: {
   attendanceReportsTo: string | null
   exportDisabled: boolean
   gradebookTo: string | null
   moduleProgressTo: string | null
   onExport: () => void
+  onExportDetailed: () => void
 }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1561,6 +1585,10 @@ function RosterActionsMenu({
           >
             <Icon name="file" />
             <span>Export roster CSV</span>
+          </button>
+          <button disabled={exportDisabled} onClick={() => { onExportDetailed(); closeMenu() }} role="menuitem" type="button">
+            <Icon name="file" />
+            <span>Export detailed grades CSV</span>
           </button>
           {gradebookTo ? (
             <Link onClick={closeMenu} role="menuitem" to={gradebookTo}>

@@ -144,6 +144,7 @@ function createHeaders(options: RequestOptions, accessToken?: string) {
 async function parseResponse<T>(response: Response) {
   const contentType = response.headers.get('content-type') ?? ''
   if (
+    contentType.includes('text/csv') ||
     contentType.includes('application/pdf') ||
     contentType.includes('application/octet-stream')
   ) {

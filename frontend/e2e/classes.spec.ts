@@ -29,6 +29,53 @@ async function selectClass(page: Page, code: string) {
   await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
 }
 
+test('downloads detailed grades from roster More actions and reports failures', async ({ page }) => {
+  let fail = false
+  let requests = 0
+  let release: (() => void) | undefined
+  const csv = '\ufeffStudent,Student number,Prelim period grade,Overall course grade\r\nMary De Leon Cruz,CSV-001,0,85\r\n'
+  await page.route('**/detailed-grades-csv/**', async (route) => {
+    requests += 1
+    const url = new URL(route.request().url())
+    expect(url.searchParams.get('status')).toBe('active')
+    expect(url.searchParams.get('search')).toBe('')
+    if (fail) {
+      await route.fulfill({ status: 500, json: { detail: 'Export unavailable' } })
+      return
+    }
+    await new Promise<void>((resolve) => { release = resolve })
+    await route.fulfill({ status: 200, contentType: 'text/csv; charset=utf-8', body: csv })
+  })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  for (const width of [1280, 320, 390, 640, 768, 900]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.getByRole('button', { name: 'More actions', exact: true }).click()
+    const item = page.getByRole('menuitem', { name: 'Export detailed grades CSV', exact: true })
+    await expect(item).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Export roster CSV', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+  }
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Export detailed grades CSV', exact: true }).click()
+  await expect(page.getByText('Preparing detailed grades CSV...', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Export detailed grades CSV', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect.poll(() => Boolean(release)).toBe(true)
+  const downloaded = page.waitForEvent('download')
+  release!()
+  const download = await downloaded
+  expect(download.suggestedFilename()).toContain('detailed-grades.csv')
+  expect(await readFile((await download.path())!, 'utf8')).toBe(csv)
+  expect(requests).toBe(1)
+  await expect(page.getByText('Exported detailed grades for the complete filtered roster.', { exact: true })).toBeVisible()
+  fail = true
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Export detailed grades CSV', exact: true }).click()
+  await expect(page.getByText(/Detailed grades export failed:/)).toBeVisible()
+})
+
 async function startNewSchedule(page: Page) {
   const newButton = page.locator('.class-form').getByRole('button', { name: 'New' })
   if (/schedule=/.test(page.url())) {

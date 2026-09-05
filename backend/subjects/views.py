@@ -8,7 +8,7 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from accounts.permissions import IsAdminTeacherOrReadOnly
+from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
 from accounts.models import StudentProfile, User
 from accounts.services import (
     create_student_account,
@@ -165,28 +165,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         # to the parent schedule selected by this detail action.
         schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
         self.check_object_permissions(request, schedule)
-        queryset = schedule.students.select_related('student__student_profile')
-        enrollment_status = request.query_params.get('status', '').strip().lower()
-        search = request.query_params.get('search', '').strip()
-
-        if enrollment_status == 'active':
-            queryset = queryset.filter(is_active=True)
-        elif enrollment_status == 'inactive':
-            queryset = queryset.filter(is_active=False)
-        if search:
-            queryset = queryset.filter(
-                Q(student__first_name__icontains=search) | Q(student__middle_name__icontains=search)
-                | Q(student__last_name__icontains=search)
-                | Q(student__username__icontains=search)
-                | Q(student__email__icontains=search)
-                | Q(student__student_profile__student_number__icontains=search),
-            )
-
-        queryset = queryset.order_by(
-            'student__last_name',
-            'student__first_name',
-            'student__username',
-        )
+        queryset = self.filtered_roster(schedule, request)
         total_count = schedule.students.count()
         active_count = schedule.students.filter(is_active=True).count()
         count = queryset.count()
@@ -210,6 +189,39 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             'previous': max(offset - limit, 0) if offset else None,
             'results': results,
         })
+
+    @staticmethod
+    def filtered_roster(schedule, request):
+        queryset = schedule.students.select_related('student__student_profile')
+        enrollment_status = request.query_params.get('status', '').strip().lower()
+        search = request.query_params.get('search', '').strip()
+
+        if enrollment_status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif enrollment_status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        if search:
+            queryset = queryset.filter(
+                Q(student__first_name__icontains=search) | Q(student__middle_name__icontains=search)
+                | Q(student__last_name__icontains=search)
+                | Q(student__username__icontains=search)
+                | Q(student__email__icontains=search)
+                | Q(student__student_profile__student_number__icontains=search),
+            )
+
+        queryset = queryset.order_by(
+            'student__last_name',
+            'student__first_name',
+            'student__username',
+        )
+        return queryset
+
+    @action(detail=True, methods=['get'], url_path='detailed-grades-csv', permission_classes=[IsAdminTeacher])
+    def detailed_grades_csv(self, request, pk=None):
+        from .grade_export import detailed_grades_csv
+        schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
+        self.check_object_permissions(request, schedule)
+        return detailed_grades_csv(schedule, self.filtered_roster(schedule, request))
 
     @action(detail=True, methods=['get'], url_path='workspace')
     def workspace(self, request, pk=None):
