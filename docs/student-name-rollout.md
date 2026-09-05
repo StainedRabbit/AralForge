@@ -24,8 +24,9 @@ fields. They never infer a middle name from a new first name.
    student/enrollment/grade/attendance counts with the backup. Check roster and
    attendance exports retain full middle names while screens show initials.
 6. Verify API health and worker Redis connection, then resume imports. Confirm a
-   small explicit three-field import completes and does not rename an existing
-   student. Check recorded pending jobs before resubmitting imports.
+   small explicit three-field import completes and updates an existing
+   student's supplied name fields. Blank name fields preserve saved values.
+   Check recorded pending jobs before resubmitting imports.
 
 ## Reversal
 

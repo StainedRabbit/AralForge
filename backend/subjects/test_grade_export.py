@@ -65,15 +65,40 @@ class DetailedGradesExportTests(APITestCase):
         self.assertEqual(row['Student'], 'Élise De Leon Student 000')
         score_key = next(key for key in row if f'item {self.items[0].id},' in key and key.endswith('/ Score'))
         self.assertEqual(float(row[score_key]), 0)
-        self.assertEqual(row[score_key.replace('/ Score', '/ Status')], 'GRADED')
-        self.assertIn('EXCUSED', row.values())
-        self.assertIn('PENDING', row.values())
+        self.assertEqual(row['Student number'], 'CSV-000')
+        raw_rows = list(csv.reader(StringIO(response.content.decode('utf-8-sig'))))
+        headers = raw_rows[0]
+        self.assertEqual(len(headers), 2 + len(self.items) + 4 * len(self.categories) + 4 + 1)
+        self.assertEqual(len(headers), len(set(headers)))
+        self.assertTrue(all(len(values) == len(headers) for values in raw_rows[1:]))
+        for removed in ('Email', 'Status', 'Subject', 'Section', 'Term', 'Remarks'):
+            self.assertNotIn(removed, headers)
+        self.assertFalse(any('status' in header.lower() for header in headers))
+        self.assertTrue(all(value not in ('GRADED', 'PENDING', 'EXCUSED', 'COMPLETE')
+                            for values in raw_rows[1:] for value in values[2:]))
+        for item in self.items:
+            key = next(key for key in row if f'item {item.id},' in key)
+            self.assertIn('Same, "title"', key)
+            if item != self.items[0]:
+                self.assertEqual(row[key], '')
+        category = self.categories[0]
+        prefix = f'Prelim / {category.name} [{category.id}]'
+        for suffix, expected in (('Earned total', 0), ('Possible total', 20),
+                                 ('Transmuted grade', 60), ('Weighted grade (100.00%)', 60)):
+            self.assertEqual(float(row[f'{prefix} / {suffix}']), expected)
+        self.assertTrue(all(value == '' for value in raw_rows[-1][2:]))
         for i, label in enumerate(('Prelim', 'Midterm', 'Prefinal', 'Final')):
             self.assertEqual(float(row[f'{label} period grade']), 80+i)
         self.assertEqual(float(row['Overall course grade']), 81.5)
-        self.assertEqual(row['Remarks'], "'=unsafe")
-        self.assertEqual(rows[-1]['Status'], 'Inactive')
         self.assertEqual(rows[-1]['Overall course grade'], '')
+
+    def test_student_identification_is_escaped_for_spreadsheets(self):
+        student = self.students[0]
+        student.first_name = '=SUM(1,2)'
+        student.save(update_fields=['first_name'])
+        response = self.client.get(self.url, {'search': student.username})
+        rows = list(csv.DictReader(StringIO(response.content.decode('utf-8-sig'))))
+        self.assertEqual(rows[0]['Student'], "'=SUM(1,2) De Leon Student 000")
 
     def test_filters_and_permissions(self):
         for params, expected in (({'status': 'active'}, 50), ({'status': 'inactive'}, 1),

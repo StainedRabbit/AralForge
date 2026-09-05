@@ -790,7 +790,7 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(damaged_import.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(StudentProfile.objects.filter(student_number='2027-DAMAGED-1').exists())
 
-    def test_import_roster_does_not_overwrite_existing_student_names(self):
+    def test_import_roster_updates_existing_student_names(self):
         schedule = self.create_schedule()
         existing = get_user_model().objects.create_user(
             username='existing-name',
@@ -815,9 +815,41 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
         self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
         existing.refresh_from_db()
-        self.assertEqual(existing.first_name, 'Existing')
-        self.assertEqual(existing.middle_name, 'De Leon')
-        self.assertEqual(existing.last_name, 'Student')
+        self.assertEqual(existing.first_name, 'Replacement')
+        self.assertEqual(existing.middle_name, 'Replacement')
+        self.assertEqual(existing.last_name, 'Name')
+
+    def test_import_roster_updates_already_enrolled_names_and_preserves_blank_fields(self):
+        schedule = self.create_schedule()
+        self.student.first_name = 'Mary'
+        self.student.middle_name = 'Old'
+        self.student.last_name = 'Cruz'
+        self.student.save()
+        original_password = self.student.password
+        StudentProfile.objects.create(user=self.student, student_number='NAME-FIX')
+        enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        rows = [{'student_number': 'NAME-FIX', 'middle_name': 'de leon'}]
+        preview = validate_roster_rows(schedule, rows).preview
+        self.assertEqual(preview['update_name_count'], 1)
+        self.assertEqual(preview['rows'][0]['previous_full_name'], 'Mary Old Cruz')
+        self.assertEqual(preview['rows'][0]['student_full_name'], 'Mary De Leon Cruz')
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.middle_name, 'Old')
+        self.client.force_authenticate(self.teacher)
+        response, job = self.queue_and_run_roster_import(
+            reverse('subjects:subject-schedule-import-roster', args=[schedule.id]), rows,
+        )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.get_full_name(), 'Mary De Leon Cruz')
+        self.assertEqual(self.student.password, original_password)
+        self.assertEqual(ScheduleStudent.objects.get(schedule=schedule, student=self.student).pk, enrollment.pk)
+        self.assertEqual(validate_roster_rows(schedule, rows).preview['update_name_count'], 0)
+        blank = validate_roster_rows(schedule, [{'student_number': 'NAME-FIX', 'middle_name': ''}])
+        self.assertEqual(blank.preview['update_name_count'], 0)
+        invalid = validate_roster_rows(schedule, [{'student_number': 'NAME-FIX', 'middle_name': 'A' * 151}])
+        self.assertFalse(invalid.preview['valid'])
 
     def test_import_roster_requires_names_for_new_students_and_rolls_back_all_rows(self):
         schedule = self.create_schedule()

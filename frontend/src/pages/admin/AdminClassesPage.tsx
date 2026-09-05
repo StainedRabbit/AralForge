@@ -76,6 +76,9 @@ type ImportPreview = {
   rows: Array<{
     row: number
     student_number?: string
+    previous_full_name?: string
+    student_full_name?: string
+    name_updated?: boolean
     student_name?: string
     status: 'create' | 'enroll' | 'reactivate' | 'already_enrolled' | 'error'
     error?: string
@@ -85,6 +88,7 @@ type ImportPreview = {
   reactivate_count?: number
   added_count?: number
   reactivated_count?: number
+  update_name_count?: number
   already_active_count?: number
   created_count?: number
   credentials?: Array<{ student_number: string; temporary_password: string }>
@@ -97,6 +101,7 @@ type RosterImportJobResult = {
   created_student_numbers?: string[]
   added_count?: number
   reactivated_count?: number
+  update_name_count?: number
   already_active_count?: number
   preview?: ImportPreview
 }
@@ -2020,7 +2025,7 @@ function AddStudentsModal({
       setNewCredentials(credentials)
       if (credentials.length) downloadNewStudentCredentials(credentials)
       setMessage(
-        `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
+        `${result.update_name_count ?? 0} names updated, ${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
       )
       void refresh()
       return
@@ -2342,7 +2347,7 @@ function AddStudentsModal({
         setNewCredentials(credentials)
         if (credentials.length) downloadNewStudentCredentials(credentials)
         setMessage(
-          `${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
+          `${result.update_name_count ?? 0} names updated, ${result.created_count ?? 0} accounts created, ${result.added_count ?? 0} enrolled, ${result.reactivated_count ?? 0} reactivated.`,
         )
         await refresh()
       }
@@ -2704,14 +2709,16 @@ function AddStudentsModal({
           {importPreview ? (
             <div className="class-import-preview" aria-label="Roster import preview">
               <strong>{importPreview.ready_count} of {importPreview.row_count} rows ready</strong>
+              <span>Names in this file update existing students matched by student number. Blank name fields keep their saved values.</span>
               <span>
-                {importPreview.create_count ?? 0} create · {importPreview.enroll_count ?? 0} enroll · {importPreview.reactivate_count ?? 0} reactivate · {importPreview.already_active_count ?? 0} already enrolled
+                {importPreview.update_name_count ?? 0} name updates / {importPreview.create_count ?? 0} create · {importPreview.enroll_count ?? 0} enroll · {importPreview.reactivate_count ?? 0} reactivate · {importPreview.already_active_count ?? 0} already enrolled
               </span>
               <ul>
                 {importPreview.rows.map((row) => (
                   <li className={row.status === 'error' ? 'is-error' : ''} key={`${row.row}-${row.student_number ?? 'missing'}`}>
                     Row {row.row}{row.student_number ? ` (${row.student_number})` : ''}: {row.error ?? importStatusLabel(row.status)}
                     {!row.error && row.student_name ? ` - ${row.student_name}` : ''}
+                    {row.name_updated ? ` - Update name: ${row.previous_full_name} to ${row.student_full_name}` : ''}
                   </li>
                 ))}
               </ul>

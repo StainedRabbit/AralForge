@@ -88,6 +88,7 @@ def validate_roster_rows(schedule, rows, *, lock=False):
     row_results = []
     has_errors = False
     summary = {
+        'update_name_count': 0,
         'create_count': 0,
         'enroll_count': 0,
         'reactivate_count': 0,
@@ -150,6 +151,16 @@ def validate_roster_rows(schedule, rows, *, lock=False):
             has_errors = True
             continue
 
+        if any(len(name) > 150 for name in (first_name, middle_name, last_name)):
+            row_results.append({
+                'row': index,
+                'student_number': student_number,
+                'status': 'error',
+                'error': 'First, middle, and last names must each be 150 characters or fewer.',
+            })
+            has_errors = True
+            continue
+
         profile = profiles_by_number.get(normalized)
         if profile and (
             profile.user.role != User.Role.STUDENT
@@ -176,12 +187,30 @@ def validate_roster_rows(schedule, rows, *, lock=False):
             else:
                 row_status = 'enroll'
                 summary['enroll_count'] += 1
-            entries.append({'profile': profile, 'enrollment': enrollment, 'status': row_status})
+            name_updates = {
+                field: value
+                for field, value in (
+                    ('first_name', first_name), ('middle_name', middle_name), ('last_name', last_name)
+                )
+                if value and value != getattr(profile.user, field)
+            }
+            proposed_user = User(**{
+                field: name_updates.get(field, getattr(profile.user, field))
+                for field in ('first_name', 'middle_name', 'last_name')
+            })
+            summary['update_name_count'] += bool(name_updates)
+            entries.append({
+                'profile': profile, 'enrollment': enrollment, 'status': row_status,
+                'name_updates': name_updates,
+            })
             row_results.append({
                 'row': index,
                 'student_number': profile.student_number,
                 'student_id': profile.user_id,
-                'student_name': profile.user.get_display_name(),
+                'student_name': proposed_user.get_display_name(),
+                'previous_full_name': profile.user.get_full_name(),
+                'student_full_name': proposed_user.get_full_name(),
+                'name_updated': bool(name_updates),
                 'status': row_status,
             })
             continue
@@ -201,16 +230,6 @@ def validate_roster_rows(schedule, rows, *, lock=False):
                 'student_number': student_number,
                 'status': 'error',
                 'error': 'First name and last name are required for a new student.',
-            })
-            has_errors = True
-            continue
-
-        if any(len(name) > 150 for name in (first_name, middle_name, last_name)):
-            row_results.append({
-                'row': index,
-                'student_number': student_number,
-                'status': 'error',
-                'error': 'First, middle, and last names must each be 150 characters or fewer.',
             })
             has_errors = True
             continue
@@ -310,6 +329,16 @@ def commit_roster_import(*, schedule_id, rows, actor_id, password_hashes, job):
     StudentProfile.objects.bulk_create(created_profiles, batch_size=200)
     profiles_by_number = {profile.student_number.casefold(): profile for profile in created_profiles}
 
+    updated_users = []
+    for entry in validation.entries:
+        if entry.get('name_updates'):
+            user = entry['profile'].user
+            for field, value in entry['name_updates'].items():
+                setattr(user, field, value)
+            updated_users.append(user)
+    if updated_users:
+        User.objects.bulk_update(updated_users, ('first_name', 'middle_name', 'last_name'), batch_size=200)
+
     now = timezone.now()
     new_enrollments = []
     reactivated = []
@@ -361,6 +390,7 @@ def commit_roster_import(*, schedule_id, rows, actor_id, password_hashes, job):
         'added_count': len(new_enrollments),
         'reactivated_count': len(reactivated),
         'already_active_count': validation.preview['already_active_count'],
+        'update_name_count': validation.preview['update_name_count'],
     }
     job.status = job.Status.SUCCEEDED
     job.progress = len(rows)
