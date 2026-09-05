@@ -266,14 +266,21 @@
   }
 
   .class-list {
+    grid-auto-rows: max-content;
     height: auto;
     max-height: min(48vh, 480px);
   }
 
   .class-list__item {
+    grid-auto-rows: max-content;
     min-height: 82px;
     height: auto;
     overflow: visible;
+  }
+
+  .class-list__item > span:not(.class-list__top) {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .stat-grid,
