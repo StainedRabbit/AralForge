@@ -1648,8 +1648,8 @@ function RosterRow({
 
   return (
     <>
-    <tr>
-      <td>
+    <tr className="roster-student-row">
+      <td className="roster-cell--name">
         <span className="student-name-with-warning">
           <strong>{row.studentName}</strong>
           {nameReplacementCount ? (
@@ -1659,19 +1659,19 @@ function RosterRow({
           ) : null}
         </span>
       </td>
-      <td>{row.studentNumber}</td>
-      <td>{row.email}</td>
-      <td><GradeCell value={row.grades.prelim} /></td>
-      <td><GradeCell value={row.grades.midterm} /></td>
-      <td><GradeCell value={row.grades.prefinal} /></td>
-      <td><GradeCell value={row.grades.finalPeriod} /></td>
-      <td><GradeCell value={row.grades.overall} strong /></td>
-      <td>
+      <td className="roster-cell--number">{row.studentNumber}</td>
+      <td className="roster-cell--detail">{row.email}</td>
+      <td className="roster-cell--detail"><GradeCell value={row.grades.prelim} /></td>
+      <td className="roster-cell--detail"><GradeCell value={row.grades.midterm} /></td>
+      <td className="roster-cell--detail"><GradeCell value={row.grades.prefinal} /></td>
+      <td className="roster-cell--detail"><GradeCell value={row.grades.finalPeriod} /></td>
+      <td className="roster-cell--overall"><GradeCell value={row.grades.overall} strong /></td>
+      <td className="roster-cell--status">
         <span className={enrollment.is_active ? 'roster-status roster-status--active' : 'roster-status'}>
           {enrollment.is_active ? 'Active' : 'Inactive'}
         </span>
       </td>
-      <td>
+      <td className="roster-cell--actions">
         <div className="roster-row-actions">
           <button
             className="button button--secondary button--compact"
@@ -1766,6 +1766,7 @@ function GradeDetailsModal({
         </div>
 
         <div className="grade-modal-meta">
+          <span className="grade-modal-email">Email: {row.email || 'None'}</span>
           <span className={row.enrollment.is_active ? 'roster-status roster-status--active' : 'roster-status'}>
             {row.enrollment.is_active ? 'Active enrollment' : 'Inactive enrollment'}
           </span>

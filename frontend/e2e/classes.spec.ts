@@ -854,7 +854,75 @@ test('creates adjacent and overlapping schedules', async ({ page }) => {
   await expect(page).toHaveURL(/schedule=\d+/)
 })
 
+test('fits compact mobile roster cards and paginates 51 students', async ({ page }) => {
+  const students = Array.from({ length: 51 }, (_, index) => ({
+    id: 5000 + index, student: 6000 + index, is_active: true,
+    student_name: index === 0 ? 'Alexandria VeryLongUnbrokenFamilyNameForWrapping Rivera' : `Mobile Student ${index + 1}`,
+    student_number: `MOBILE-${index + 1}`, email: index === 0 ? 'mobile@example.test' : '',
+    grade_summary: {},
+  }))
+  await page.route(/\/subjects\/subject-schedules\/\d+\/roster\/.*/, async (route) => {
+    const url = new URL(route.request().url())
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    const limit = Number(url.searchParams.get('limit') ?? 10)
+    const search = (url.searchParams.get('search') ?? '').toLowerCase()
+    const inactive = url.searchParams.get('status') === 'inactive'
+    const filtered = students.filter((student) => `${student.student_name} ${student.student_number}`.toLowerCase().includes(search))
+    await route.fulfill({ json: {
+      count: filtered.length, total_count: 52, active_count: 51, inactive_count: 1,
+      next: offset + limit < filtered.length ? offset + limit : null, previous: offset || null,
+      results: filtered.slice(offset, offset + limit).map((student) => ({ ...student,
+        schedule: Number(url.pathname.match(/subject-schedules\/(\d+)/)?.[1]),
+        is_active: !inactive, subject: 1, subject_code: 'E2E101',
+      })),
+    } })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  const cards = page.locator('.roster-student-row')
+  await expect(cards.first()).toContainText(students[0].student_name)
+  for (const width of [320, 390, 640, 768, 900]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(cards.first().locator('.roster-cell--detail').first()).toBeHidden()
+    const geometry = await cards.first().evaluate((row) => ({
+      overflow: row.scrollWidth > row.clientWidth + 1,
+      nameClipped: row.querySelector('.roster-cell--name')!.scrollHeight > row.querySelector('.roster-cell--name')!.clientHeight + 1,
+      nameSize: getComputedStyle(row.querySelector('.roster-cell--name')!).fontSize,
+      buttonHeights: [...row.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height),
+    }))
+    expect(geometry.overflow).toBe(false)
+    expect(geometry.nameClipped).toBe(false)
+    expect(geometry.nameSize).toBe('14px')
+    expect(geometry.buttonHeights.every((height) => height >= 44)).toBe(true)
+  }
+  await cards.first().getByRole('button', { name: 'Grades', exact: true }).click()
+  const details = page.getByRole('dialog', { name: 'Grade details' })
+  await expect(details).toContainText('Email: mobile@example.test')
+  await expect(details).toContainText('Prelim')
+  await details.getByRole('button', { name: 'Close', exact: true }).click()
+  const pagination = page.locator('.class-roster-pagination')
+  for (let batch = 0; batch < 6 && await cards.count() < 51; batch += 1) {
+    await pagination.scrollIntoViewIfNeeded()
+    const previousCount = await cards.count()
+    const loadMore = pagination.getByRole('button', { name: 'Load more', exact: true })
+    if (await loadMore.isVisible()) await loadMore.click()
+    await expect.poll(() => cards.count()).toBeGreaterThan(previousCount)
+  }
+  await expect(cards).toHaveCount(51)
+  await cards.last().getByRole('button', { name: /More actions/ }).click()
+  await expect(page.getByRole('menuitem', { name: 'Remove from roster' })).toBeInViewport()
+  await page.keyboard.press('Escape')
+  await page.getByPlaceholder('Search roster by name or student number').fill('MOBILE-51')
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first()).toContainText('Mobile Student 51')
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(cards.first().locator('.roster-cell--detail').first()).toBeVisible()
+  await expect(page.locator('.class-roster-table')).toHaveCSS('display', 'table')
+})
+
 test('supports keyboard row actions and safe roster removal', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   await openClasses(page)
   await selectClass(page, 'E2E101')
 

@@ -692,8 +692,8 @@ a.teacher-recent-item:focus-visible {
 
   .class-roster-table tbody {
     display: grid;
-    gap: 12px;
-    padding: 10px;
+    gap: 8px;
+    padding: 8px;
   }
 
   .class-roster-table tr {
@@ -704,34 +704,76 @@ a.teacher-recent-item:focus-visible {
   }
 
   .class-roster-table td {
-    display: grid;
-    grid-template-columns: minmax(100px, 0.45fr) minmax(0, 1fr);
-    gap: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 12px;
   }
 
   .class-roster-table td:last-child {
     border-bottom: 0;
   }
 
-  .class-roster-table td::before {
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 850;
-    text-transform: uppercase;
+  .class-roster-table .roster-student-row {
+    display: grid;
+    grid-template-columns: minmax(56px, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name name status'
+      'number number status'
+      'overall actions actions';
+    align-items: start;
+    gap: 4px 8px;
   }
 
-  .class-roster-table td:nth-child(1)::before { content: 'Student'; }
-  .class-roster-table td:nth-child(2)::before { content: 'Student number'; }
-  .class-roster-table td:nth-child(3)::before { content: 'Email'; }
-  .class-roster-table td:nth-child(4)::before { content: 'Prelim'; }
-  .class-roster-table td:nth-child(5)::before { content: 'Midterm'; }
-  .class-roster-table td:nth-child(6)::before { content: 'Prefinal'; }
-  .class-roster-table td:nth-child(7)::before { content: 'Final'; }
-  .class-roster-table td:nth-child(8)::before { content: 'Overall'; }
-  .class-roster-table td:nth-child(9)::before { content: 'Status'; }
-  .class-roster-table td:nth-child(10)::before { content: 'Actions'; }
+  .class-roster-table .roster-cell--name { grid-area: name; font-size: 14px; }
+  .class-roster-table .roster-cell--number { grid-area: number; color: var(--text-muted); }
+  .class-roster-table .roster-cell--status { grid-area: status; width: auto; justify-self: end; }
+  .class-roster-table .roster-cell--detail { display: none; }
+  .class-roster-table .roster-cell--overall { grid-area: overall; }
+  .class-roster-table .roster-cell--actions { grid-area: actions; }
+
+  .class-roster-table :is(.roster-cell--overall, .roster-cell--actions) {
+    align-self: center;
+    margin-top: 8px;
+  }
+
+  .class-roster-table .roster-cell--overall::before {
+    content: 'Overall';
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+  }
+
+  .class-roster-table .roster-row-actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .class-roster-table .roster-row-actions > .button > .icon {
+    display: none;
+  }
+
+  .class-roster-table .roster-row-actions > .button,
+  .class-roster-table .roster-actions-menu > .button {
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .class-roster-table .roster-row-menu__popover :is(a, button) {
+    min-height: 44px;
+  }
+
+  .class-roster-table .student-name-with-warning,
+  .class-roster-table .name-correction-warning {
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .class-roster-table .roster-row-error {
+    max-width: 180px;
+  }
 }
 
 .class-list__item {
@@ -1156,6 +1198,20 @@ a.teacher-recent-item:focus-visible {
   max-height: min(68vh, 680px);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+@media (max-width: 900px) {
+  .class-roster-table { min-width: 0; }
+  .class-roster-scroll {
+    max-height: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+  .class-roster-table .roster-row-menu__popover {
+    top: auto;
+    bottom: calc(100% + 6px);
+  }
+  .grade-modal-email { overflow-wrap: anywhere; max-width: 100%; }
 }
 
 .class-roster-table thead th {
