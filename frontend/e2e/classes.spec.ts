@@ -887,15 +887,48 @@ test('fits compact mobile roster cards and paginates 51 students', async ({ page
     await expect(cards.first().locator('.roster-cell--detail').first()).toBeHidden()
     const geometry = await cards.first().evaluate((row) => ({
       overflow: row.scrollWidth > row.clientWidth + 1,
+      cells: [...row.children].map((cell) => [cell.className, cell.clientWidth, cell.scrollWidth]),
       nameClipped: row.querySelector('.roster-cell--name')!.scrollHeight > row.querySelector('.roster-cell--name')!.clientHeight + 1,
       nameSize: getComputedStyle(row.querySelector('.roster-cell--name')!).fontSize,
       buttonHeights: [...row.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height),
     }))
-    expect(geometry.overflow).toBe(false)
+    expect(geometry.overflow, JSON.stringify({ width, geometry })).toBe(false)
     expect(geometry.nameClipped).toBe(false)
     expect(geometry.nameSize).toBe('14px')
     expect(geometry.buttonHeights.every((height) => height >= 44)).toBe(true)
+    for (const card of [cards.first(), cards.nth(4), cards.nth(await cards.count() - 1)]) {
+      const more = card.getByRole('button', { name: /More actions/ })
+      await more.click()
+      const menu = page.getByRole('menu')
+      await expect(menu).toBeVisible()
+      expect(await menu.evaluate((element) => element.parentElement === document.body)).toBe(true)
+      const bounds = await menu.boundingBox()
+      expect(bounds!.y).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844)
+      for (const label of await menu.locator('span').all()) {
+        expect(await label.evaluate((element) => {
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          return range.getClientRects().length
+        })).toBe(1)
+      }
+      await page.keyboard.press('Escape')
+      await expect(more).toBeFocused()
+      await expect(card.getByRole('button', { name: 'Grades', exact: true })).toHaveCSS('white-space', 'nowrap')
+    }
   }
+  await cards.first().getByRole('button', { name: /More actions/ }).click()
+  await page.setViewportSize({ width: 640, height: 320 })
+  await page.getByRole('menu').getByRole('menuitem').first().press('End')
+  await expect(page.getByRole('menuitem', { name: 'Remove from roster' })).toBeInViewport()
+  await page.mouse.wheel(0, 100)
+  const shortBounds = await page.getByRole('menu').boundingBox()
+  expect(shortBounds!.y).toBeGreaterThanOrEqual(0)
+  expect(shortBounds!.y + shortBounds!.height).toBeLessThanOrEqual(320)
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 390, height: 844 })
   await cards.first().getByRole('button', { name: 'Grades', exact: true }).click()
   const details = page.getByRole('dialog', { name: 'Grade details' })
   await expect(details).toContainText('Email: mobile@example.test')

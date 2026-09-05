@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -2799,14 +2799,59 @@ function RosterRowMenu({
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  useLayoutEffect(() => {
+    if (!open) return
+    function positionMenu() {
+      const button = buttonRef.current
+      const menu = menuRef.current
+      if (!button || !menu) return
+      const viewport = window.visualViewport
+      const leftEdge = (viewport?.offsetLeft ?? 0) + 8
+      const rightEdge = (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth) - 8
+      let topEdge = (viewport?.offsetTop ?? 0) + 8
+      let bottomEdge = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight) - 8
+      const header = document.querySelector('.mobile-header')?.getBoundingClientRect()
+      const tabs = document.querySelector('.mobile-tabbar')?.getBoundingClientRect()
+      if (header && header.height && header.bottom > topEdge && header.top < bottomEdge) topEdge = header.bottom + 8
+      if (tabs && tabs.height && tabs.top < bottomEdge && tabs.bottom > topEdge) bottomEdge = tabs.top - 8
+      const bounds = button.getBoundingClientRect()
+      menu.style.width = `${Math.min(230, rightEdge - leftEdge)}px`
+      const available = Math.max(44, bottomEdge - topEdge)
+      const below = Math.max(0, bottomEdge - Math.max(topEdge, bounds.bottom + 6))
+      const above = Math.max(0, Math.min(bottomEdge, bounds.top - 6) - topEdge)
+      const naturalHeight = menu.scrollHeight + 2
+      const useBelow = below >= naturalHeight || below >= above
+      const height = Math.min(naturalHeight, Math.max(44, useBelow ? below : above), available)
+      menu.style.maxHeight = `${height}px`
+      const desiredTop = useBelow ? bounds.bottom + 6 : bounds.top - 6 - height
+      menu.style.top = `${Math.max(topEdge, Math.min(desiredTop, bottomEdge - height))}px`
+      menu.style.left = `${Math.max(leftEdge, Math.min(bounds.right - menu.getBoundingClientRect().width, rightEdge - menu.getBoundingClientRect().width))}px`
+    }
+    positionMenu()
+    window.addEventListener('scroll', positionMenu, true)
+    window.addEventListener('resize', positionMenu)
+    window.visualViewport?.addEventListener('resize', positionMenu)
+    window.visualViewport?.addEventListener('scroll', positionMenu)
+    return () => {
+      window.removeEventListener('scroll', positionMenu, true)
+      window.removeEventListener('resize', positionMenu)
+      window.visualViewport?.removeEventListener('resize', positionMenu)
+      window.visualViewport?.removeEventListener('scroll', positionMenu)
+    }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true })
 
     function handlePointerDown(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
+      if (!containerRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false)
     }
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Tab') {
+        setOpen(false)
+        buttonRef.current?.focus({ preventScroll: true })
+      }
       if (event.key === 'Escape') {
         setOpen(false)
         buttonRef.current?.focus()
@@ -2822,6 +2867,7 @@ function RosterRowMenu({
 
   function closeAndRun(action: () => void) {
     setOpen(false)
+    buttonRef.current?.focus({ preventScroll: true })
     action()
   }
 
@@ -2858,8 +2904,8 @@ function RosterRowMenu({
         <Icon name="more" />
         <span>More</span>
       </button>
-      {open ? (
-        <div className="roster-actions-menu__popover roster-row-menu__popover" onKeyDown={handleMenuKeyDown} ref={menuRef} role="menu">
+      {open ? createPortal(
+        <div className="roster-actions-menu__popover roster-row-menu__popover roster-row-menu__popover--floating" onKeyDown={handleMenuKeyDown} ref={menuRef} role="menu">
           <Link onClick={() => setOpen(false)} role="menuitem" to={gradebookUrl(enrollment.schedule, enrollment.student)}>
             <Icon name="edit" />
             <span>Record score</span>
@@ -2876,7 +2922,8 @@ function RosterRowMenu({
             <Icon name="trash" />
             <span>Remove from roster</span>
           </button>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )
