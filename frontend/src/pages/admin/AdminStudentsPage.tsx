@@ -165,7 +165,12 @@ function Feedback({ error, retry }: { error: unknown; retry: () => void }) {
 function StudentDialog({ title, subtitle, children, onClose }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
   const states = useRef(new Map<string, FormState>())
-  const report = useCallback((id: string, state: FormState | null) => { if (state) states.current.set(id, state); else states.current.delete(id) }, [])
+  const [busy, setBusy] = useState(false)
+  const report = useCallback((id: string, state: FormState | null) => {
+    if (state) states.current.set(id, state)
+    else states.current.delete(id)
+    setBusy([...states.current.values()].some((form) => form.busy))
+  }, [])
   const titleId = useId()
   const canLeave = useCallback(() => {
     const values = [...states.current.values()]
@@ -195,7 +200,7 @@ function StudentDialog({ title, subtitle, children, onClose }: { title: string; 
   return <GuardContext.Provider value={report}><LeaveContext.Provider value={canLeave}>
     <dialog ref={ref} className="students-drawer" aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); if (canLeave()) onClose() }}>
       <header className="students-drawer__header"><div><h2 id={titleId}>{title}</h2>{subtitle ? <span>{subtitle}</span> : null}</div>
-        <button type="button" className="icon-button" aria-label="Close student panel" onClick={() => { if (canLeave()) onClose() }}><Icon name="close" /></button></header>
+        <button type="button" className="icon-button" aria-label="Close student panel" disabled={busy} onClick={() => { if (canLeave()) onClose() }}><Icon name="close" /></button></header>
       <div className="students-drawer__body">{children}</div>
     </dialog>
   </LeaveContext.Provider></GuardContext.Provider>
@@ -274,8 +279,9 @@ function StudentForm({ title, description, fields, initial, api, endpoint, metho
       const value = await api<Record<string, unknown>>(endpoint, { method, body: JSON.stringify(draft) })
       const saved = Object.fromEntries(Object.entries(draft).map(([key, old]) => [key,
         typeof value[key] === 'string' || typeof value[key] === 'boolean' ? value[key] as string | boolean : old]))
-      setDraft(saved); setBaseline(saved); setMessage(success)
+      setDraft(saved); setBaseline(saved)
       await onSaved(value)
+      setMessage(success)
     } catch (error) {
       const nextErrors = fieldErrors(error)
       setErrors(nextErrors)
@@ -339,7 +345,7 @@ function StudentEnrollments({ api, studentId, onSaved }: { api: AuthedRequest; s
     setBusy(true); setMessage('')
     try {
       await api(`/subjects/schedule-students/${editing ? `${editing.id}/` : ''}`, { method: editing ? 'PATCH' : 'POST', body: JSON.stringify({ student: studentId, schedule: Number(schedule), is_active: active }) })
-      reset(); setMessage('Enrollment saved.'); await query.refetch(); await onSaved()
+      reset(); await query.refetch(); await onSaved(); setMessage('Enrollment saved.')
     } catch (error) { setMessage(Object.values(fieldErrors(error)).join(' ') || toErrorMessage(error)) } finally { setBusy(false) }
   }
   const options = asArray(schedules.data ?? []).filter((option) =>

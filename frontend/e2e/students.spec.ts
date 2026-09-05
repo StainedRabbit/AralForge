@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 
 async function openStudents(page: Page) {
@@ -125,35 +126,60 @@ test('mobile detail panel contains focus and protects unsaved edits', async ({ p
 
 test('selected-student enrollments and Advanced tools remain available', async ({ page }) => {
   await openStudents(page)
-  await page.getByRole('button', { name: 'View E2E-002', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Student details' })
-  const enrollmentRequest = page.waitForRequest((request) => /\/api\/subjects\/schedule-students\//.test(request.url()) && request.method() === 'GET')
-  await dialog.getByRole('tab', { name: 'Enrollments', exact: true }).click()
-  const studentId = new URL((await enrollmentRequest).url()).searchParams.get('student')
-  await expect(dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option')).not.toHaveCount(1)
-  const available = await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option').nth(1).getAttribute('value')
-  await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).selectOption(available!)
-  const saved = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/subjects/schedule-students/'))
-  await dialog.getByRole('button', { name: 'Save enrollment' }).click()
-  const response = await saved
-  expect(response.request().postDataJSON().student).toBe(Number(studentId))
-  expect(response.ok()).toBe(true)
-  await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
-  await dialog.getByRole('button', { name: 'Edit enrollment' }).last().click()
-  await dialog.getByLabel('Enrollment active').uncheck()
-  const updated = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/api\/subjects\/schedule-students\/\d+\/$/.test(new URL(response.url()).pathname))
-  await dialog.getByRole('button', { name: 'Save enrollment' }).click()
-  const update = await updated
-  expect(update.ok()).toBe(true)
-  expect(update.request().postDataJSON()).toMatchObject({ student: Number(studentId), is_active: false })
-  await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
-  await dialog.getByRole('button', { name: 'Close student panel' }).click()
-  await page.getByRole('tab', { name: 'Advanced tools', exact: true }).click()
-  for (const title of ['User Accounts', 'Student Profiles', 'Class Enrollments', 'Module Access Grants', 'Bulk Module Access']) {
-    await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  const token = await page.evaluate(() => JSON.parse(localStorage.getItem('aralforge.session') ?? '{}').access as string)
+  const headers = { Authorization: `Bearer ${token}` }
+  const studentNumber = `E2E-ENR-${randomUUID().slice(0, 12)}`
+  const created = await page.request.post('http://127.0.0.1:8001/api/accounts/students/', {
+    headers, data: { student_number: studentNumber, first_name: 'Enrollment', last_name: 'Fixture' },
+  })
+  expect(created.ok()).toBe(true)
+  const profile = await created.json() as { user: number }
+  let releaseRefresh = () => {}
+  try {
+    await page.getByLabel('Search students', { exact: true }).fill(studentNumber)
+    await page.getByRole('button', { name: `View ${studentNumber}`, exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Student details' })
+    const enrollmentRequest = page.waitForRequest((request) => /\/api\/subjects\/schedule-students\//.test(request.url()) && request.method() === 'GET')
+    await dialog.getByRole('tab', { name: 'Enrollments', exact: true }).click()
+    const studentId = new URL((await enrollmentRequest).url()).searchParams.get('student')
+    await expect(dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option')).not.toHaveCount(1)
+    const available = await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).locator('option').nth(1).getAttribute('value')
+    await dialog.getByRole('combobox', { name: 'Class schedule', exact: true }).selectOption(available!)
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve })
+    await page.route('**/api/subjects/schedule-students/?*', async (route) => {
+      await refreshGate
+      await route.continue()
+    })
+    const saved = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/subjects/schedule-students/'))
+    await dialog.getByRole('button', { name: 'Save enrollment' }).click()
+    const response = await saved
+    expect(response.request().postDataJSON().student).toBe(Number(studentId))
+    expect(response.ok()).toBe(true)
+    await expect(dialog.getByRole('button', { name: 'Close student panel' })).toBeDisabled()
+    await expect(dialog.getByText('Enrollment saved.')).toHaveCount(0)
+    releaseRefresh()
+    await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Edit enrollment' }).last().click()
+    await dialog.getByLabel('Enrollment active').uncheck()
+    const updated = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/api\/subjects\/schedule-students\/\d+\/$/.test(new URL(response.url()).pathname))
+    await dialog.getByRole('button', { name: 'Save enrollment' }).click()
+    const update = await updated
+    expect(update.ok()).toBe(true)
+    expect(update.request().postDataJSON()).toMatchObject({ student: Number(studentId), is_active: false })
+    await expect(dialog.getByText('Enrollment saved.')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Close student panel' }).click()
+    await expect(dialog).toBeHidden()
+    await page.getByRole('tab', { name: 'Advanced tools', exact: true }).click()
+    for (const title of ['User Accounts', 'Student Profiles', 'Class Enrollments', 'Module Access Grants', 'Bulk Module Access']) {
+      await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
+    }
+    await page.getByRole('tab', { name: 'Students', exact: true }).click()
+    await page.screenshot({ path: 'test-results/students-desktop.png', fullPage: true })
+  } finally {
+    releaseRefresh()
+    const deleted = await page.request.delete(`http://127.0.0.1:8001/api/accounts/users/${profile.user}/`, { headers })
+    expect(deleted.ok()).toBe(true)
   }
-  await page.getByRole('tab', { name: 'Students', exact: true }).click()
-  await page.screenshot({ path: 'test-results/students-desktop.png', fullPage: true })
 })
 
 test('activates, revokes, and renews module access without payment fields', async ({ page }) => {
