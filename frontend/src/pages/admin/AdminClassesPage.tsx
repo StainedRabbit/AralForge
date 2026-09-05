@@ -33,7 +33,7 @@ import { toOptions } from '../../admin/adminHelpers'
 import { formatTime, numeric, toErrorMessage } from '../../utils/format'
 import { cleanImportedPersonName } from '../../utils/importCleaning'
 import { modulesForSubject as allModulesForSubject } from '../../utils/modules'
-import { fullName } from '../../utils/student'
+import { fullName, fullRecordName } from '../../utils/student'
 import {
   compatibilityEncodingNotice,
   countReplacementCharacters,
@@ -130,7 +130,7 @@ type CreateStudentConflict = {
   student?: ExistingRosterStudent
 }
 
-type CreateStudentField = 'email' | 'first_name' | 'last_name' | 'student_number'
+type CreateStudentField = 'email' | 'first_name' | 'middle_name' | 'last_name' | 'student_number'
 type CreateStudentErrors = Partial<Record<CreateStudentField, string>>
 
 type RosterApiItem = ScheduleStudent & {
@@ -152,6 +152,7 @@ type RosterRowData = {
   enrollment: ScheduleStudent
   grades: PrimaryGradeSummary
   studentName: string
+  studentFullName?: string
   studentNumber: string
 }
 
@@ -1610,7 +1611,7 @@ function RosterRow({
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
   const [message, setMessage] = useState('')
   const { enrollment } = row
-  const nameReplacementCount = countReplacementCharacters(row.studentName)
+  const nameReplacementCount = countReplacementCharacters(row.studentFullName || row.studentName)
 
   async function toggleEnrollment() {
     setSaving(true)
@@ -1944,6 +1945,7 @@ function AddStudentsModal({
   const [createStudentNumber, setCreateStudentNumber] = useState('')
   const [createFirstName, setCreateFirstName] = useState('')
   const [createLastName, setCreateLastName] = useState('')
+  const [createMiddleName, setCreateMiddleName] = useState('')
   const [createEmail, setCreateEmail] = useState('')
   const [createdStudent, setCreatedStudent] = useState<CreatedRosterStudent | null>(null)
   const [existingStudent, setExistingStudent] = useState<ExistingRosterStudent | null>(null)
@@ -2212,6 +2214,7 @@ function AddStudentsModal({
           body: JSON.stringify({
             student_number: createStudentNumber,
             first_name: createFirstName,
+            middle_name: createMiddleName,
             last_name: createLastName,
             email: createEmail,
           }),
@@ -2262,6 +2265,7 @@ function AddStudentsModal({
   function resetCreateStudent() {
     setCreateStudentNumber('')
     setCreateFirstName('')
+    setCreateMiddleName('')
     setCreateLastName('')
     setCreateEmail('')
     setCreatedStudent(null)
@@ -2585,6 +2589,7 @@ function AddStudentsModal({
                   <label className="admin-field"><span>Student number</span><input aria-describedby={createErrors.student_number ? 'create-student-number-error' : undefined} aria-invalid={Boolean(createErrors.student_number)} autoComplete="off" disabled={saving} maxLength={30} onChange={(event) => { setCreateStudentNumber(event.target.value); setCreateErrors((current) => ({ ...current, student_number: undefined })) }} ref={createStudentNumberRef} required type="text" value={createStudentNumber} />{createErrors.student_number ? <small className="student-create-field-error" id="create-student-number-error">{createErrors.student_number}</small> : null}</label>
                   <label className="admin-field"><span>Email <small>Optional</small></span><input aria-describedby={createErrors.email ? 'create-student-email-error' : undefined} aria-invalid={Boolean(createErrors.email)} autoComplete="email" disabled={saving} onChange={(event) => { setCreateEmail(event.target.value); setCreateErrors((current) => ({ ...current, email: undefined })) }} type="email" value={createEmail} />{createErrors.email ? <small className="student-create-field-error" id="create-student-email-error">{createErrors.email}</small> : null}</label>
                   <label className="admin-field"><span>First name</span><input aria-describedby={createErrors.first_name ? 'create-first-name-error' : undefined} aria-invalid={Boolean(createErrors.first_name)} autoComplete="given-name" disabled={saving} maxLength={150} onChange={(event) => { setCreateFirstName(event.target.value); setCreateErrors((current) => ({ ...current, first_name: undefined })) }} required type="text" value={createFirstName} />{createErrors.first_name ? <small className="student-create-field-error" id="create-first-name-error">{createErrors.first_name}</small> : null}</label>
+                  <label className="admin-field"><span>Middle name <small>Optional</small></span><input aria-invalid={Boolean(createErrors.middle_name)} autoComplete="additional-name" disabled={saving} maxLength={150} onChange={(event) => setCreateMiddleName(event.target.value)} type="text" value={createMiddleName} />{createErrors.middle_name ? <small className="student-create-field-error">{createErrors.middle_name}</small> : null}</label>
                   <label className="admin-field"><span>Last name</span><input aria-describedby={createErrors.last_name ? 'create-last-name-error' : undefined} aria-invalid={Boolean(createErrors.last_name)} autoComplete="family-name" disabled={saving} maxLength={150} onChange={(event) => { setCreateLastName(event.target.value); setCreateErrors((current) => ({ ...current, last_name: undefined })) }} required type="text" value={createLastName} />{createErrors.last_name ? <small className="student-create-field-error" id="create-last-name-error">{createErrors.last_name}</small> : null}</label>
                 </div>
                 <button className="button button--primary student-create-form__submit" disabled={saving} type="submit"><Icon name="plus" /><span>{saving ? 'Creating and adding...' : 'Create and add student'}</span></button>
@@ -3013,6 +3018,7 @@ function getRosterRow(enrollment: ScheduleStudent, data: RouteData): RosterRowDa
     enrollment,
     grades: getPrimaryGradeSummary(data, enrollment.schedule, enrollment.student),
     studentName: enrollment.student_name || fullName(user ?? null),
+    studentFullName: enrollment.student_full_name || (user ? fullRecordName(user) : enrollment.student_name),
     studentNumber: enrollment.student_number || profile?.student_number || 'None',
   }
 }
@@ -3129,7 +3135,7 @@ function exportRosterCsv(
     'Status',
   ]
   const csvRows = rows.map((row) => [
-    row.studentName,
+    row.studentFullName || row.studentName,
     row.studentNumber,
     row.email,
     row.grades.prelim,
@@ -3175,6 +3181,7 @@ function apiRosterRow(enrollment: RosterApiItem): RosterRowData {
       remarks: typeof summary.remarks === 'string' ? summary.remarks : '',
     },
     studentName: enrollment.student_name,
+    studentFullName: enrollment.student_full_name || enrollment.student_name,
     studentNumber: enrollment.student_number || 'None',
   }
 }
@@ -3343,7 +3350,7 @@ function isCreateStudentConflict(value: unknown): value is CreateStudentConflict
 function createStudentFieldErrors(value: unknown): CreateStudentErrors {
   if (!value || typeof value !== 'object') return {}
   const payload = value as Record<string, unknown>
-  const fields: CreateStudentField[] = ['student_number', 'first_name', 'last_name', 'email']
+  const fields: CreateStudentField[] = ['student_number', 'first_name', 'middle_name', 'last_name', 'email']
   return fields.reduce<CreateStudentErrors>((errors, field) => {
     const fieldValue = payload[field]
     if (typeof fieldValue === 'string') errors[field] = fieldValue

@@ -6,11 +6,12 @@ from .models import StudentProfile, User
 
 @admin.register(User)
 class AralForgeUserAdmin(UserAdmin):
+    search_fields = UserAdmin.search_fields + ('middle_name',)
     fieldsets = UserAdmin.fieldsets + (
-        ('AralForge', {'fields': ('role', 'must_change_password')}),
+        ('AralForge', {'fields': ('role', 'must_change_password', 'middle_name')}),
     )
     add_fieldsets = UserAdmin.add_fieldsets + (
-        ('AralForge', {'fields': ('role', 'must_change_password')}),
+        ('AralForge', {'fields': ('role', 'must_change_password', 'middle_name')}),
     )
     list_display = (
         'username',
@@ -28,4 +29,4 @@ class AralForgeUserAdmin(UserAdmin):
 class StudentProfileAdmin(admin.ModelAdmin):
     list_display = ('student_number', 'user', 'is_active')
     list_filter = ('is_active',)
-    search_fields = ('student_number', 'user__username', 'user__first_name', 'user__last_name')
+    search_fields = ('student_number', 'user__username', 'user__first_name', 'user__middle_name', 'user__last_name')

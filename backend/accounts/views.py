@@ -18,7 +18,7 @@ from .serializers import (
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
-    search_fields = ('username', 'first_name', 'last_name', 'email', 'student_profile__student_number')
+    search_fields = ('username', 'first_name', 'middle_name', 'last_name', 'email', 'student_profile__student_number')
     cursor_ordering = ('last_name', 'first_name', 'id')
 
     def get_queryset(self):
@@ -90,7 +90,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
         if search:
             queryset = queryset.filter(
-                Q(first_name__icontains=search)
+                Q(first_name__icontains=search) | Q(middle_name__icontains=search)
                 | Q(last_name__icontains=search)
                 | Q(username__icontains=search)
                 | Q(email__icontains=search)
@@ -114,7 +114,7 @@ class UserViewSet(viewsets.ModelViewSet):
 class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
-    search_fields = ('student_number', 'user__username', 'user__first_name', 'user__last_name')
+    search_fields = ('student_number', 'user__username', 'user__first_name', 'user__middle_name', 'user__last_name')
     cursor_ordering = ('student_number', 'id')
 
     def get_queryset(self):

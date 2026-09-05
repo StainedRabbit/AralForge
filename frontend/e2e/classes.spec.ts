@@ -364,6 +364,7 @@ test('loads the roster ten students at a time and exports the complete filtered 
     email: `paged-${index + 1}@example.test`,
     grade_summary: {},
     student_name: `Paged Student ${String(index + 1).padStart(2, '0')}`,
+    student_full_name: `Paged Middle Student ${String(index + 1).padStart(2, '0')}`,
     student_number: `PAGE-${String(index + 1).padStart(3, '0')}`,
   }))
 
@@ -461,6 +462,8 @@ test('loads the roster ten students at a time and exports the complete filtered 
   expect(downloadPath).not.toBeNull()
   const csv = await readFile(downloadPath!, 'utf8')
   expect(csv.trim().split('\n')).toHaveLength(13)
+  expect(csv).toContain('Paged Middle Student 01')
+  expect(csv).toContain('Paged Middle Student 12')
   expect(rosterRequests).toContainEqual({ limit: 100, offset: 0, search: '', status: 'active' })
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1054,6 +1057,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await createTab.click()
   await createStudentNumberInput.fill(createdStudentNumber)
   await dialog.getByLabel('First name').fill('Direct')
+  await dialog.getByLabel('Middle name').fill('De Leon')
   await dialog.getByLabel('Last name').fill('Student')
   await dialog.getByLabel('Email').fill('direct.student@example.com')
   let directCreateRequests = 0
@@ -1062,7 +1066,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   })
   await dialog.getByRole('button', { name: 'Create and add student' }).dblclick()
   const createSuccess = dialog.getByRole('status', { name: 'Student created' })
-  await expect(createSuccess).toContainText('Direct Student')
+  await expect(createSuccess).toContainText('Direct D. Student')
   await expect(createSuccess).toContainText(createdStudentNumber)
   expect(directCreateRequests).toBe(1)
   await createSuccess.getByRole('button', { name: 'Copy credentials' }).click()
@@ -1077,7 +1081,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await expect(createSuccess).toContainText('Second Student')
   await createSuccess.getByRole('button', { name: 'Done' }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('row').filter({ hasText: 'Direct Student' })).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: 'Direct D. Student' })).toBeVisible()
   await expect(page.getByRole('row').filter({ hasText: 'Second Student' })).toBeVisible()
 
   const activeJamieRow = page.getByRole('row').filter({ hasText: 'Jamie Santos' })
@@ -1195,7 +1199,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
     buffer: Buffer.from(`\uFEFFStudent Number,Last Name,First Name,Middle Name,Email,Section\r\n${importedStudentNumber},young,robin   mae,ann-marie,ignored@example.com,Ignored\r\n`),
   })
   await expect(importDialog.getByLabel('Roster import preview')).toContainText('Create account')
-  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Robin Mae Ann-Marie Young')
+  await expect(importDialog.getByLabel('Roster import preview')).toContainText('Robin Mae A. Young')
   const credentialsDownloadPromise = page.waitForEvent('download')
   await importDialog.getByRole('button', { name: 'Import 1 students' }).click()
   const credentialsDownload = await credentialsDownloadPromise
@@ -1220,7 +1224,7 @@ test('searches, selects, and reactivates students with the streamlined picker', 
   await page.getByLabel('Confirm new password').fill('StudentSecurePass!482')
   await page.getByRole('button', { name: 'Set password and continue' }).click()
   await expect(page).toHaveURL(/\/$/)
-  await expect(page.getByRole('heading', { name: 'Welcome back, Robin Mae Ann-Marie.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Welcome back, Robin Mae.' })).toBeVisible()
 })
 
 test('continues a roster import after the dialog closes and reconnects to progress', async ({ page }) => {
@@ -1304,7 +1308,7 @@ test('continues a roster import after the dialog closes and reconnects to progre
     ),
   })
   await dialog.getByRole('button', { name: 'Import 2 students' }).click()
-  await expect(dialog.getByRole('status')).toContainText(/Importing [01] of 2 students/)
+  await expect(dialog.getByRole('status')).toContainText(/Preparing [01] of 2 students/)
   await expect(dialog.getByRole('tab', { name: 'Choose students' })).toBeEnabled()
   await expect(dialog.getByTitle('Close')).toBeEnabled()
   await dialog.getByTitle('Close').click()
@@ -1314,7 +1318,7 @@ test('continues a roster import after the dialog closes and reconnects to progre
   await page.getByRole('button', { name: 'Add students' }).click()
   dialog = page.getByRole('dialog', { name: 'Add students' })
   await dialog.getByRole('tab', { name: 'Import CSV' }).click()
-  await expect(dialog.getByRole('status')).toContainText('Importing 1 of 2 students')
+  await expect(dialog.getByRole('status')).toContainText('Preparing 1 of 2 students')
   const credentialsDownload = await credentialsDownloadPromise
   expect(credentialsDownload.suggestedFilename()).toBe('new-student-credentials.csv')
   await expect(dialog).toContainText('2 accounts created, 2 enrolled, 0 reactivated.')

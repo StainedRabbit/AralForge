@@ -66,7 +66,7 @@ class GradeItemAdmin(admin.ModelAdmin):
 class StudentGradeItemScoreAdmin(admin.ModelAdmin):
     list_display = ('grade_item', 'student', 'raw_score', 'total_score', 'computed_at')
     list_filter = ('grade_item__grade_category__subject', 'grade_item__grade_category__grading_period')
-    search_fields = ('student__username', 'student__first_name', 'student__last_name', 'grade_item__title')
+    search_fields = ('student__username', 'student__first_name', 'student__middle_name', 'student__last_name', 'grade_item__title')
 
 
 @admin.register(StudentCategoryGrade)
@@ -82,7 +82,7 @@ class StudentCategoryGradeAdmin(admin.ModelAdmin):
         'weighted_score',
     )
     list_filter = ('subject', 'grade_category__grading_period', 'grade_category__category')
-    search_fields = ('student__username', 'student__first_name', 'student__last_name', 'subject__code')
+    search_fields = ('student__username', 'student__first_name', 'student__middle_name', 'student__last_name', 'subject__code')
 
 
 @admin.register(PeriodGrade)

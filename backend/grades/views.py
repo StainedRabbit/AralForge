@@ -248,7 +248,7 @@ class TeacherGradebookView(APIView):
             enrollment_queryset = enrollment_queryset.filter(student_id=int(requested_student))
         if search:
             enrollment_queryset = enrollment_queryset.filter(
-                Q(student__first_name__icontains=search)
+                Q(student__first_name__icontains=search) | Q(student__middle_name__icontains=search)
                 | Q(student__last_name__icontains=search)
                 | Q(student__username__icontains=search)
                 | Q(student__student_profile__student_number__icontains=search)
@@ -1059,7 +1059,8 @@ def score_sheet_row(student, is_active, score):
     profile = getattr(student, 'student_profile', None)
     return {
         'student': student.id,
-        'student_name': student.get_full_name() or student.username,
+        'student_full_name': student.get_full_name() or student.username,
+        'student_name': student.get_display_name() or student.username,
         'student_number': profile.student_number if profile else '',
         'is_active': is_active,
         'score_id': score.id if score else None,

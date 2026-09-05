@@ -9,6 +9,8 @@ from .services import create_student_account, update_student_profile, validate_p
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
     is_admin_teacher = serializers.BooleanField(read_only=True)
+    display_name = serializers.CharField(source='get_display_name', read_only=True)
+    full_name = serializers.CharField(source='get_full_name', read_only=True)
 
     class Meta:
         model = User
@@ -18,9 +20,12 @@ class UserSerializer(serializers.ModelSerializer):
             'password',
             'email',
             'first_name',
+            'middle_name',
             'last_name',
             'role',
             'is_admin_teacher',
+            'display_name',
+            'full_name',
             'is_active',
             'must_change_password',
         )
@@ -55,7 +60,7 @@ class UserSerializer(serializers.ModelSerializer):
                     'role': 'Create student accounts through the student endpoint.'
                 })
 
-        for field in ('first_name', 'last_name'):
+        for field in ('first_name', 'middle_name', 'last_name'):
             value = attrs.get(field, getattr(self.instance, field, ''))
             try:
                 validate_person_name(value)
@@ -135,7 +140,7 @@ class AvailableStudentSerializer(serializers.ModelSerializer):
         )
 
     def get_display_name(self, instance):
-        return instance.get_full_name().strip() or instance.username
+        return instance.get_display_name()
 
     def get_enrollment_status(self, instance):
         return 'inactive' if getattr(instance, 'has_inactive_enrollment', False) else 'not_enrolled'
@@ -144,6 +149,7 @@ class AvailableStudentSerializer(serializers.ModelSerializer):
 class StudentProfileSerializer(serializers.ModelSerializer):
     user_detail = UserSerializer(source='user', read_only=True)
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    middle_name = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=150)
     last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
 
@@ -155,6 +161,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'user_detail',
             'student_number',
             'first_name',
+            'middle_name',
             'last_name',
             'email',
             'is_active',
@@ -164,7 +171,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is not None:
-            account_fields = {'first_name', 'last_name', 'email'} & attrs.keys()
+            account_fields = {'first_name', 'middle_name', 'last_name', 'email'} & attrs.keys()
             if account_fields:
                 raise serializers.ValidationError({
                     field: 'Edit account details through the user endpoint.'
@@ -172,7 +179,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
                 })
 
         if self.instance is None:
-            for field in ('first_name', 'last_name'):
+            for field in ('first_name', 'middle_name', 'last_name'):
                 try:
                     validate_person_name(attrs.get(field, ''))
                 except DjangoValidationError as error:

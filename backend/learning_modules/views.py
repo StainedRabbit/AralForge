@@ -618,7 +618,7 @@ class ModuleViewSet(viewsets.ModelViewSet):
         search = request.query_params.get('search', '').strip()
         if search:
             students = students.filter(
-                Q(first_name__icontains=search)
+                Q(first_name__icontains=search) | Q(middle_name__icontains=search)
                 | Q(last_name__icontains=search)
                 | Q(username__icontains=search)
                 | Q(email__icontains=search)
@@ -712,7 +712,8 @@ class ModuleViewSet(viewsets.ModelViewSet):
 
             rows.append({
                 'student_id': student.id,
-                'student_name': student.get_full_name() or student.username,
+                'student_full_name': student.get_full_name() or student.username,
+                'student_name': student.get_display_name() or student.username,
                 'username': student.username,
                 'email': student.email,
                 'is_enrolled': enrollment is not None,
@@ -2139,7 +2140,8 @@ def serialize_submission_review(submission, request):
     ).data
     return {
         **serialized,
-        'student_name': submission.student.get_full_name().strip() or submission.student.username,
+        'student_full_name': submission.student.get_full_name().strip() or submission.student.username,
+        'student_name': submission.student.get_display_name().strip() or submission.student.username,
         'student_username': submission.student.username,
         'activity_title': activity.title,
         'activity_type': activity.activity_type,

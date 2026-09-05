@@ -154,7 +154,8 @@ def teacher_dashboard(request):
         {
             'id': submission.id,
             'student_id': submission.student_id,
-            'student_name': submission.student.get_full_name().strip() or submission.student.username,
+            'student_full_name': submission.student.get_full_name().strip() or submission.student.username,
+            'student_name': submission.student.get_display_name().strip() or submission.student.username,
             'activity_id': submission.activity_id,
             'activity_title': submission.activity.title,
             'module_id': submission.activity.module_id,
@@ -208,7 +209,7 @@ def teacher_recent_activity(today):
         'student',
     ).order_by('-submitted_at', '-id')[:6]
     for attempt in attempts:
-        student_name = attempt.student.get_full_name().strip() or attempt.student.username
+        student_name = attempt.student.get_display_name().strip() or attempt.student.username
         events.append({
             'kind': 'ACTIVITY_ATTEMPT',
             'id': attempt.id,
@@ -228,7 +229,7 @@ def teacher_recent_activity(today):
         'student',
     ).order_by('-graded_at', '-id')[:6]
     for submission in reviewed:
-        student_name = submission.student.get_full_name().strip() or submission.student.username
+        student_name = submission.student.get_display_name().strip() or submission.student.username
         events.append({
             'kind': 'SUBMISSION_REVIEW',
             'id': submission.id,

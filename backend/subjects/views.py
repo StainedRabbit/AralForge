@@ -175,7 +175,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_active=False)
         if search:
             queryset = queryset.filter(
-                Q(student__first_name__icontains=search)
+                Q(student__first_name__icontains=search) | Q(student__middle_name__icontains=search)
                 | Q(student__last_name__icontains=search)
                 | Q(student__username__icontains=search)
                 | Q(student__email__icontains=search)
@@ -362,6 +362,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         profile = create_student_account(
             student_number=student_number,
             first_name=serializer.validated_data['first_name'],
+            middle_name=serializer.validated_data.get('middle_name', ''),
             last_name=serializer.validated_data['last_name'],
             email=serializer.validated_data.get('email', ''),
             is_active=True,
@@ -511,7 +512,7 @@ def schedule_dependency_counts(schedule):
 def roster_student_metadata(profile, enrollment_status):
     return {
         'id': profile.user_id,
-        'display_name': profile.user.get_full_name().strip() or profile.student_number,
+        'display_name': profile.user.get_display_name(),
         'student_number': profile.student_number,
         'enrollment_status': enrollment_status,
     }

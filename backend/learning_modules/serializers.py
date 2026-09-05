@@ -311,6 +311,7 @@ class ModuleSummarySerializer(ModuleSerializer):
 class ModuleAccessSerializer(serializers.ModelSerializer):
     module_title = serializers.CharField(source='module.title', read_only=True)
     student_name = serializers.SerializerMethodField()
+    student_full_name = serializers.CharField(source='student.get_full_name', read_only=True)
     activated_by_name = serializers.SerializerMethodField()
     is_available = serializers.BooleanField(read_only=True)
     status = serializers.CharField(read_only=True)
@@ -322,7 +323,7 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
             'module',
             'module_title',
             'student',
-            'student_name',
+            'student_name', 'student_full_name',
             'activated_by',
             'activated_by_name',
             'access_type',
@@ -343,7 +344,7 @@ class ModuleAccessSerializer(serializers.ModelSerializer):
         )
 
     def get_student_name(self, obj):
-        return obj.student.get_full_name() or obj.student.username
+        return obj.student.get_display_name() or obj.student.username
 
     def get_activated_by_name(self, obj):
         if not obj.activated_by:
@@ -1127,14 +1128,15 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
 
 class ModuleActivityExtensionSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
+    student_full_name = serializers.CharField(source='student.get_full_name', read_only=True)
 
     class Meta:
         model = ModuleActivityExtension
-        fields = ('id', 'activity', 'student', 'student_name', 'due_at', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'activity', 'student_name', 'created_at', 'updated_at')
+        fields = ('id', 'activity', 'student', 'student_name', 'student_full_name', 'due_at', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'activity', 'student_name', 'student_full_name', 'created_at', 'updated_at')
 
     def get_student_name(self, obj):
-        full_name = obj.student.get_full_name().strip()
+        full_name = obj.student.get_display_name().strip()
         return full_name or obj.student.username
 
 

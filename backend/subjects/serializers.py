@@ -114,6 +114,7 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
 class RosterStudentCreateSerializer(serializers.Serializer):
     student_number = serializers.CharField(max_length=30, trim_whitespace=True)
     first_name = serializers.CharField(max_length=150, trim_whitespace=True)
+    middle_name = serializers.CharField(max_length=150, trim_whitespace=True, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, trim_whitespace=True)
     email = serializers.EmailField(allow_blank=True, required=False)
 
@@ -124,6 +125,9 @@ class RosterStudentCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(error.messages) from error
 
     def validate_first_name(self, value):
+        return validate_roster_person_name(value)
+
+    def validate_middle_name(self, value):
         return validate_roster_person_name(value)
 
     def validate_last_name(self, value):
@@ -140,6 +144,7 @@ def validate_roster_person_name(value):
 class ScheduleStudentSerializer(serializers.ModelSerializer):
     student_number = serializers.SerializerMethodField()
     student_name = serializers.SerializerMethodField()
+    student_full_name = serializers.CharField(source='student.get_full_name', read_only=True)
     subject = serializers.IntegerField(source='schedule.subject_id', read_only=True)
     subject_code = serializers.CharField(source='schedule.subject.code', read_only=True)
     subject_name = serializers.CharField(source='schedule.subject.name', read_only=True)
@@ -157,7 +162,7 @@ class ScheduleStudentSerializer(serializers.ModelSerializer):
             'schedule_display',
             'student',
             'student_number',
-            'student_name',
+            'student_name', 'student_full_name',
             'subject',
             'subject_code',
             'subject_name',
@@ -176,7 +181,7 @@ class ScheduleStudentSerializer(serializers.ModelSerializer):
             'id',
             'schedule_display',
             'student_number',
-            'student_name',
+            'student_name', 'student_full_name',
             'subject',
             'subject_code',
             'subject_name',
@@ -199,7 +204,7 @@ class ScheduleStudentSerializer(serializers.ModelSerializer):
         return getattr(getattr(obj.student, 'student_profile', None), 'student_number', '')
 
     def get_student_name(self, obj):
-        return obj.student.get_full_name() or obj.student.username
+        return obj.student.get_display_name() or obj.student.username
 
     def validate(self, attrs):
         student = attrs.get('student', getattr(self.instance, 'student', None))

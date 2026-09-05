@@ -193,7 +193,7 @@ class ModuleActivityAttemptAdmin(admin.ModelAdmin):
 class ModuleActivityExtensionAdmin(admin.ModelAdmin):
     list_display = ('activity', 'student', 'due_at', 'granted_by', 'updated_at')
     list_filter = ('activity__module', 'due_at')
-    search_fields = ('activity__title', 'student__username', 'student__first_name', 'student__last_name')
+    search_fields = ('activity__title', 'student__username', 'student__first_name', 'student__middle_name', 'student__last_name')
     autocomplete_fields = ('activity', 'student', 'granted_by')
 
 

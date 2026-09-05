@@ -1,9 +1,10 @@
+import { fullRecordName } from '../../utils/student'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { Icon } from '../../components/Icon'
 import { AttendanceSessionDetails } from '../../components/admin/AttendanceSessionDetails'
-import { studentDisplayName, summarizeAttendance } from '../../components/admin/attendanceHelpers'
+import { summarizeAttendance } from '../../components/admin/attendanceHelpers'
 import { Page, PageHeader, SectionHeading } from '../../components/ui'
 import type { AttendanceSession, SubjectSchedule } from '../../types'
 import { formatDate, percent } from '../../utils/format'
@@ -158,7 +159,7 @@ function exportAttendance(data: RouteData, sessions: AttendanceSession[]) {
   sessions.forEach((session) => {
     data.attendanceRecords.filter((record) => record.session === session.id).forEach((record) => {
       const student = data.users.find((user) => user.id === record.student)
-      rows.push([session.date, sessionClassLabel(data, session), session.title || 'Class meeting', student ? studentDisplayName(student) : 'Unknown student', record.status, record.points_earned, record.remarks])
+      rows.push([session.date, sessionClassLabel(data, session), session.title || 'Class meeting', student ? fullRecordName(student) : 'Unknown student', record.status, record.points_earned, record.remarks])
     })
   })
   const blob = new Blob([rows.map((row) => row.map(escapeCsv).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })

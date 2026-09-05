@@ -28,6 +28,9 @@ export type User = {
   username: string
   email: string
   first_name: string
+  middle_name?: string
+  display_name?: string
+  full_name?: string
   last_name: string
   role: Role
   is_admin_teacher: boolean
@@ -101,6 +104,7 @@ export type ScheduleStudent = {
   student: number
   student_number: string
   student_name: string
+  student_full_name?: string
   subject: number
   subject_code: string
   subject_name: string
@@ -266,6 +270,7 @@ export type ModuleAccess = {
   module_title: string
   student: number
   student_name: string
+  student_full_name?: string
   activated_by: number | null
   activated_by_name: string
   access_type: 'ENROLLED' | 'ADVANCE_STUDY'
@@ -530,6 +535,7 @@ export type ModuleTeacherSummaryAccessStatus =
 export type ModuleTeacherSummaryStudent = {
   student_id: number
   student_name: string
+  student_full_name?: string
   username: string
   email: string
   is_enrolled: boolean

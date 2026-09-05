@@ -10,6 +10,18 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
     must_change_password = models.BooleanField(default=False)
+    middle_name = models.CharField(max_length=150, blank=True, default='')
+
+    def get_full_name(self):
+        middle = self.middle_name if self.role == self.Role.STUDENT else ''
+        return ' '.join(part.strip() for part in (self.first_name, middle, self.last_name) if part.strip())
+
+    def get_display_name(self):
+        if self.role != self.Role.STUDENT:
+            return self.get_full_name() or self.username
+        middle = self.middle_name.strip()
+        initial = f'{middle[0].upper()}.' if middle else ''
+        return ' '.join(part.strip() for part in (self.first_name, initial, self.last_name) if part.strip()) or self.username
 
     class Meta(AbstractUser.Meta):
         indexes = [

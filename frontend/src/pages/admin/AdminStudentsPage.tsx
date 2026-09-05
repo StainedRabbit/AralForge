@@ -27,7 +27,7 @@ import {
   toOptions,
 } from '../../admin/adminHelpers'
 import { toErrorMessage } from '../../utils/format'
-import { fullName } from '../../utils/student'
+import { fullName, fullRecordName } from '../../utils/student'
 import { countReplacementCharacters, replacementCharacterWarning } from '../../utils/textFile'
 
 export function AdminStudentsPage({
@@ -72,7 +72,7 @@ export function AdminStudentsPage({
         endpoint="/accounts/users/"
         fields={userFields}
         getSearchText={(user) =>
-          `${user.username} ${user.email} ${user.first_name} ${user.last_name} ${user.role}`
+          `${user.username} ${user.email} ${user.first_name} ${user.middle_name ?? ''} ${user.last_name} ${user.role}`
         }
         items={data.users}
         noun="User"
@@ -92,7 +92,7 @@ export function AdminStudentsPage({
         endpoint="/accounts/students/"
         fields={profileFields}
         getSearchText={(profile) =>
-          `${profile.student_number} ${fullName(profile.user_detail ?? null)}`
+          `${profile.student_number} ${fullRecordName(profile.user_detail ?? null)}`
         }
         items={data.profiles}
         noun="Student profile"
@@ -246,6 +246,7 @@ function QuickStudentSetupPanel({
   const [email, setEmail] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [middleName, setMiddleName] = useState('')
   const [studentNumber, setStudentNumber] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -260,6 +261,7 @@ function QuickStudentSetupPanel({
         body: JSON.stringify({
           email,
           first_name: firstName,
+          middle_name: middleName,
           is_active: true,
           last_name: lastName,
           student_number: studentNumber,
@@ -269,6 +271,7 @@ function QuickStudentSetupPanel({
 
       setEmail('')
       setFirstName('')
+      setMiddleName('')
       setLastName('')
       setStudentNumber('')
       setMessage('Student account created. The initial username and password are the student number.')
@@ -291,6 +294,10 @@ function QuickStudentSetupPanel({
             type="text"
             value={firstName}
           />
+        </label>
+        <label className="admin-field">
+          <span>Middle name (optional)</span>
+          <input maxLength={150} onChange={(event) => setMiddleName(event.target.value)} type="text" value={middleName} />
         </label>
         <label className="admin-field">
           <span>Last name</span>
@@ -443,6 +450,7 @@ const userFields: AdminField<User>[] = [
   { label: 'Password', name: 'password', type: 'password' },
   { label: 'Email', name: 'email', type: 'text' },
   { label: 'First name', name: 'first_name', type: 'text', validate: validateStudentNameField },
+  { label: 'Middle name', name: 'middle_name', type: 'text', validate: validateStudentNameField },
   { label: 'Last name', name: 'last_name', type: 'text', validate: validateStudentNameField },
   {
     defaultValue: 'TEACHER',
@@ -467,7 +475,7 @@ function validateStudentNameField(value: boolean | File | null | string | string
 }
 
 function StudentAccountName({ user }: { user: User }) {
-  const replacementCount = countReplacementCharacters(`${user.first_name}${user.last_name}`)
+  const replacementCount = countReplacementCharacters(`${user.first_name}${user.middle_name ?? ''}${user.last_name}`)
   return (
     <span className="student-name-with-warning">
       <strong>{fullName(user)}</strong>

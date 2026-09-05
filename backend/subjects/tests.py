@@ -710,7 +710,8 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(job.result['created_student_numbers'], ['2027-NEW-1'])
         profile = StudentProfile.objects.select_related('user').get(student_number='2027-NEW-1')
         self.assertEqual(profile.user.email, '')
-        self.assertEqual(profile.user.first_name, 'New Middle')
+        self.assertEqual(profile.user.first_name, 'New')
+        self.assertEqual(profile.user.middle_name, 'Middle')
         self.assertEqual(profile.user.last_name, 'Learner')
         self.assertEqual(profile.user.username, '2027-NEW-1')
         self.assertTrue(profile.user.must_change_password)
@@ -735,7 +736,7 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(preview.status_code, status.HTTP_200_OK)
         self.assertEqual(
             preview.data['rows'][0]['student_name'],
-            "Élise MarIA Ana-MaE O'Connor",
+            "Élise MarIA A. O'Connor",
         )
         self.assertEqual(preview.data['rows'][0]['student_number'], '2027-mIxEd-01')
 
@@ -746,7 +747,8 @@ class SubjectScheduleApiTests(APITestCase):
         profile = StudentProfile.objects.select_related('user').get(
             student_number='2027-mIxEd-01',
         )
-        self.assertEqual(profile.user.first_name, 'Élise MarIA Ana-MaE')
+        self.assertEqual(profile.user.first_name, 'Élise MarIA')
+        self.assertEqual(profile.user.middle_name, 'Ana-MaE')
         self.assertEqual(profile.user.last_name, "O'Connor")
 
     def test_import_roster_accepts_unicode_names_and_rejects_replacement_characters(self):
@@ -793,6 +795,7 @@ class SubjectScheduleApiTests(APITestCase):
         existing = get_user_model().objects.create_user(
             username='existing-name',
             first_name='Existing',
+            middle_name='De Leon',
             last_name='Student',
             role='STUDENT',
         )
@@ -804,6 +807,7 @@ class SubjectScheduleApiTests(APITestCase):
             [{
                 'student_number': '2027-KEEP-NAME',
                 'first_name': 'replacement',
+                'middle_name': 'Replacement',
                 'last_name': 'name',
             }],
         )
@@ -812,6 +816,7 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
         existing.refresh_from_db()
         self.assertEqual(existing.first_name, 'Existing')
+        self.assertEqual(existing.middle_name, 'De Leon')
         self.assertEqual(existing.last_name, 'Student')
 
     def test_import_roster_requires_names_for_new_students_and_rolls_back_all_rows(self):

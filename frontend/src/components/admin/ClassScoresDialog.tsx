@@ -1,3 +1,4 @@
+import { fullName } from '../../utils/student'
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../../app/types'
@@ -889,7 +890,7 @@ function normalizeSearch(value: string) {
 
 function apiRowToDraft(row: ScoreSheetResponse['rows'][number], data: RouteData): ScoreDraft {
   const user = data.users.find((candidate) => candidate.id === row.student)
-  const displayName = user ? [user.last_name, user.first_name].filter(Boolean).join(', ') || row.student_name : row.student_name
+  const displayName = user ? fullName(user) : row.student_name
   const saved = row.score_id == null ? null : { rawScore: row.raw_score ?? '', remarks: row.remarks, status: row.status }
   return { isActive: row.is_active, rawScore: saved?.rawScore ?? '', remarks: saved?.remarks ?? '', saved, scoreId: row.score_id, status: saved?.status ?? 'GRADED', student: row.student, studentName: displayName, studentNumber: row.student_number }
 }

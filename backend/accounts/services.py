@@ -11,6 +11,8 @@ REPLACEMENT_CHARACTER = '\ufffd'
 
 def validate_person_name(value):
     name = str(value or '')
+    if len(name.strip()) > 150:
+        raise ValidationError('Name must be 150 characters or fewer.')
     replacement_count = name.count(REPLACEMENT_CHARACTER)
     if replacement_count:
         suffix = '' if replacement_count == 1 else 's'
@@ -57,6 +59,7 @@ def create_student_account(
     *,
     student_number,
     first_name='',
+    middle_name='',
     last_name='',
     email='',
     is_active=True,
@@ -64,11 +67,13 @@ def create_student_account(
     student_number = clean_student_number(student_number)
     validate_student_number_available(student_number)
     first_name = validate_person_name(first_name)
+    middle_name = validate_person_name(middle_name)
     last_name = validate_person_name(last_name)
 
     user = User(
         username=student_number,
         first_name=first_name.strip(),
+        middle_name=middle_name.strip(),
         last_name=last_name.strip(),
         email=str(email or '').strip(),
         role=User.Role.STUDENT,

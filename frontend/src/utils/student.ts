@@ -199,7 +199,8 @@ export function fullName(user: User | null) {
     return 'Loading account'
   }
 
-  return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username
+  const middle = user.role === 'STUDENT' ? user.middle_name?.trim() : ''
+  return user.display_name || [user.first_name, middle ? `${Array.from(middle)[0].toUpperCase()}.` : '', user.last_name].filter(Boolean).join(' ') || user.username
 }
 
 export function initials(user: User | null) {
@@ -210,4 +211,9 @@ export function initials(user: User | null) {
     .join('')
     .slice(0, 2)
     .toUpperCase()
+}
+
+export function fullRecordName(user: User | null) {
+  if (!user) return 'Loading account'
+  return user.full_name || [user.first_name, user.role === 'STUDENT' ? user.middle_name : '', user.last_name].filter(Boolean).join(' ') || user.username
 }

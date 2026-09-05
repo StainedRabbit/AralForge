@@ -653,7 +653,7 @@ function summarizeDrafts(students: User[], drafts: Record<number, AttendanceDraf
 }
 
 function studentDisplayName(user: User) {
-  return [user.last_name, user.first_name].filter(Boolean).join(', ') || fullName(user)
+  return fullName(user)
 }
 
 function studentNameLength(name: string) {

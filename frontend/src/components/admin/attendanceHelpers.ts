@@ -2,7 +2,7 @@ import type { AttendanceRecord, User } from '../../types'
 import { fullName } from '../../utils/student'
 
 export function studentDisplayName(user: User) {
-  return [user.last_name, user.first_name].filter(Boolean).join(', ') || fullName(user)
+  return fullName(user)
 }
 
 export function summarizeAttendance(records: AttendanceRecord[]) {

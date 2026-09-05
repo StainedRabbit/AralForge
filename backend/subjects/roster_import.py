@@ -181,7 +181,7 @@ def validate_roster_rows(schedule, rows, *, lock=False):
                 'row': index,
                 'student_number': profile.student_number,
                 'student_id': profile.user_id,
-                'student_name': profile.user.get_full_name() or profile.student_number,
+                'student_name': profile.user.get_display_name(),
                 'status': row_status,
             })
             continue
@@ -205,19 +205,19 @@ def validate_roster_rows(schedule, rows, *, lock=False):
             has_errors = True
             continue
 
-        account_first_name = ' '.join(part for part in (first_name, middle_name) if part)
-        if len(account_first_name) > 150 or len(last_name) > 150:
+        if any(len(name) > 150 for name in (first_name, middle_name, last_name)):
             row_results.append({
                 'row': index,
                 'student_number': student_number,
                 'status': 'error',
-                'error': 'The combined first and middle name, and the last name, must each be 150 characters or fewer.',
+                'error': 'First, middle, and last names must each be 150 characters or fewer.',
             })
             has_errors = True
             continue
 
         entry = {
-            'first_name': account_first_name,
+            'first_name': first_name,
+            'middle_name': middle_name,
             'last_name': last_name,
             'student_number': student_number,
             'status': 'create',
@@ -227,7 +227,7 @@ def validate_roster_rows(schedule, rows, *, lock=False):
         row_results.append({
             'row': index,
             'student_number': student_number,
-            'student_name': f'{account_first_name} {last_name}',
+            'student_name': User(first_name=first_name, middle_name=middle_name, last_name=last_name).get_display_name(),
             'status': 'create',
         })
 
@@ -288,6 +288,7 @@ def commit_roster_import(*, schedule_id, rows, actor_id, password_hashes, job):
         created_users.append(User(
             username=entry['student_number'],
             first_name=entry['first_name'],
+            middle_name=entry['middle_name'],
             last_name=entry['last_name'],
             email='',
             role=User.Role.STUDENT,
