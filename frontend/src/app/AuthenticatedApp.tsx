@@ -33,7 +33,7 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
   const navigation = useQuery({ queryKey: queryKeys.navigation, queryFn: ({ signal }) => api<Navigation>('/overview/navigation/', { signal }), staleTime: 30_000, enabled: Boolean(identity.data) })
 
   if (identity.isPending) return <main className="app-main"><Page><SkeletonList count={4} /></Page></main>
-  if (!identity.data || identity.error) return <main className="app-main"><Page><StatusBanner tone="warning" title="Account could not load" message="Please sign in again." /></Page></main>
+  if (!identity.data || identity.error) return <main className="app-main"><Page><StatusBanner tone="warning" title="Account could not load" message="Please try loading your account again." /><button className="button button--secondary" type="button" disabled={identity.isFetching} onClick={() => void identity.refetch()}>{identity.isFetching ? 'Retrying…' : 'Retry'}</button></Page></main>
   const { user, student_profile: profile } = identity.data
   const pendingCount = navigation.data?.pending_count ?? 0
   if (user.is_admin_teacher || user.role === 'ADMIN') return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} /></Suspense>

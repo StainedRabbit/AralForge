@@ -20,19 +20,23 @@ export function useAuthenticatedRequest(
           throw caughtError
         }
 
+        let refreshed: { access: string }
         try {
           refreshInFlight ??= refreshToken(session.refresh).finally(() => {
             refreshInFlight = null
           })
-          const refreshed = await refreshInFlight
-          const nextSession = { ...session, access: refreshed.access }
-          saveSession(nextSession)
-          setSession(nextSession)
-          return await requestWithToken<T>(path, nextSession.access, options)
+          refreshed = await refreshInFlight
         } catch (refreshError) {
-          onLogout()
+          if (refreshError instanceof ApiError && refreshError.status === 401) {
+            onLogout()
+          }
           throw refreshError
         }
+
+        const nextSession = { ...session, access: refreshed.access }
+        saveSession(nextSession)
+        setSession(nextSession)
+        return requestWithToken<T>(path, nextSession.access, options)
       }
     },
     [onLogout, session, setSession],
