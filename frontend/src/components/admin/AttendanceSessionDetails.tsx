@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, User } from '../../types'
 import { numeric, percent, toErrorMessage } from '../../utils/format'
+import { compareStudentsByLastName } from '../../utils/student'
 import { studentDisplayName, summarizeAttendance } from './attendanceHelpers'
 
 type AttendanceStatus = AttendanceRecord['status']
@@ -145,5 +146,5 @@ function historyStudents(data: RouteData, session: AttendanceSession, records: A
   }
   return data.users
     .filter((user) => studentIds.has(user.id))
-    .sort((first, second) => studentDisplayName(first).localeCompare(studentDisplayName(second), undefined, { sensitivity: 'base' }))
+    .sort(compareStudentsByLastName)
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, SubjectSchedule, User } from '../../types'
 import { formatDate, percent, toErrorMessage } from '../../utils/format'
-import { fullName } from '../../utils/student'
+import { compareStudentsByLastName, fullName } from '../../utils/student'
 import { Icon } from '../Icon'
 import { AttendanceSessionDetails } from './AttendanceSessionDetails'
 import { summarizeAttendance } from './attendanceHelpers'
@@ -623,7 +623,7 @@ function ClassAttendanceHistory({ api, data, refresh, schedule }: {
 function getScheduleStudents(data: RouteData, scheduleId: number) {
   const studentIds = new Set(data.enrollments.filter((item) => item.schedule === scheduleId && item.is_active).map((item) => item.student))
   return data.users.filter((user) => user.role === 'STUDENT' && studentIds.has(user.id))
-    .sort((first, second) => studentDisplayName(first).localeCompare(studentDisplayName(second), undefined, { sensitivity: 'base' }))
+    .sort(compareStudentsByLastName)
 }
 
 function getSessionStudents(data: RouteData, session: AttendanceSession) {
@@ -631,7 +631,7 @@ function getSessionStudents(data: RouteData, session: AttendanceSession) {
     ? new Set(session.roster_students)
     : new Set(data.enrollments.filter((item) => item.schedule === session.schedule && item.is_active).map((item) => item.student))
   return data.users.filter((user) => user.role === 'STUDENT' && studentIds.has(user.id))
-    .sort((first, second) => studentDisplayName(first).localeCompare(studentDisplayName(second), undefined, { sensitivity: 'base' }))
+    .sort(compareStudentsByLastName)
 }
 
 function findNextUnmarked(students: User[], drafts: Record<number, AttendanceDraft>, currentIndex: number) {

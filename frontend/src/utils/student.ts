@@ -194,6 +194,13 @@ export function greeting(user: User | null) {
   return `Welcome back, ${name}.`
 }
 
+export function compareStudentsByLastName(first: User, second: User) {
+  const options = { sensitivity: 'base' } as const
+  return first.last_name.trim().localeCompare(second.last_name.trim(), undefined, options)
+    || first.first_name.trim().localeCompare(second.first_name.trim(), undefined, options)
+    || first.id - second.id
+}
+
 export function fullName(user: User | null) {
   if (!user) {
     return 'Loading account'

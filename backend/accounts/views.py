@@ -1,4 +1,4 @@
-from django.db.models import BooleanField, Exists, OuterRef, Q, Value
+from django.db.models import BooleanField, Exists, F, OuterRef, Q, Value
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -115,13 +115,17 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
     search_fields = ('student_number', 'user__username', 'user__first_name', 'user__middle_name', 'user__last_name')
-    cursor_ordering = ('student_number', 'id')
+    cursor_ordering = ('sort_last_name', 'sort_first_name', 'id')
 
     def get_queryset(self):
+        queryset = StudentProfile.objects.select_related('user').annotate(
+            sort_last_name=F('user__last_name'),
+            sort_first_name=F('user__first_name'),
+        ).order_by(*self.cursor_ordering)
         if self.request.user.is_admin_teacher:
-            return StudentProfile.objects.select_related('user')
+            return queryset
 
-        return StudentProfile.objects.select_related('user').filter(user=self.request.user)
+        return queryset.filter(user=self.request.user)
 
 
 def bounded_int(value, default=0, maximum=None):
