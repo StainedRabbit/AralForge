@@ -4,6 +4,7 @@ import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { PasswordInput } from '../components/PasswordInput'
 import { EmptyState, MetaStrip, Page, PageHeader, SectionHeading } from '../components/ui'
+import { LegalLinks } from '../legal/LegalLinks'
 import { formatDateTime, toErrorMessage } from '../utils/format'
 import { fullName, initials } from '../utils/student'
 
@@ -134,6 +135,14 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
               <span>{savingPassword ? 'Changing password...' : 'Change password'}</span>
             </button>
           </form>
+        </div>
+
+        <div className="section-block profile-legal-panel">
+          <SectionHeading
+            subtitle="Review how AralForge handles protected personal data and the rules for using the service."
+            title="Legal and privacy"
+          />
+          <LegalLinks />
         </div>
       </section>
     </Page>
