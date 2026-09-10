@@ -27,10 +27,41 @@ test('publishes every legal document without requiring an account', async ({ pag
     await expect(page.getByText('Version 2026-09-10')).toBeVisible()
     await expect(page.getByText('Launch draft', { exact: true })).toBeVisible()
     const footer = page.locator('.legal-site__footer')
-    await expect(footer.getByRole('link', { name: 'support@example.invalid' })).toBeVisible()
-    await expect(footer.getByRole('link', { name: 'privacy@example.invalid' })).toBeVisible()
+    await expect(footer).toContainText('your school administrator or established official school channel')
+    await expect(footer).toContainText('your school administrator or established official school privacy channel')
+    await expect(page.locator('a[href*="example.invalid"]')).toHaveCount(0)
+    await expect(page.locator('body')).not.toContainText('example.invalid')
     await expect(page.getByRole('link', { name: 'Return to AralForge' })).toBeVisible()
   }
+
+  await page.goto('/legal/privacy')
+  await expect(page.getByText('Service operator: AralForge')).toBeVisible()
+  await expect(page.getByText('Expected school/controller: Your participating school')).toBeVisible()
+  await expect(page.getByText('Service address:', { exact: false })).toHaveCount(0)
+})
+
+test('uses configured legal values instead of neutral fallbacks', async ({ page }) => {
+  const configuredValues = {
+    operatorName: process.env.VITE_LEGAL_OPERATOR_NAME ?? '',
+    schoolName: process.env.VITE_LEGAL_SCHOOL_NAME ?? '',
+    serviceAddress: process.env.VITE_LEGAL_SERVICE_ADDRESS ?? '',
+    supportEmail: process.env.VITE_LEGAL_SUPPORT_EMAIL ?? '',
+    privacyEmail: process.env.VITE_LEGAL_PRIVACY_EMAIL ?? '',
+    effectiveDate: process.env.VITE_LEGAL_EFFECTIVE_DATE ?? '',
+    retentionPolicy: process.env.VITE_LEGAL_RETENTION_POLICY ?? '',
+  }
+  test.skip(Object.values(configuredValues).some((value) => !value), 'Run with configured VITE_LEGAL_* values.')
+
+  await page.goto('/legal/privacy')
+  await expect(page.getByText(`Service operator: ${configuredValues.operatorName}`)).toBeVisible()
+  await expect(page.getByText(`Expected school/controller: ${configuredValues.schoolName}`)).toBeVisible()
+  await expect(page.getByText(`Service address: ${configuredValues.serviceAddress}`)).toBeVisible()
+  await expect(page.getByText(`Effective ${configuredValues.effectiveDate}`)).toBeVisible()
+  await expect(page.getByText(configuredValues.retentionPolicy)).toBeVisible()
+  await expect(page.getByRole('link', { name: configuredValues.supportEmail }).first()).toHaveAttribute('href', `mailto:${configuredValues.supportEmail}`)
+  await expect(page.getByRole('link', { name: configuredValues.privacyEmail }).first()).toHaveAttribute('href', `mailto:${configuredValues.privacyEmail}`)
+  await expect(page.locator('body')).not.toContainText('your school administrator or established official school channel')
+  await expect(page.locator('body')).not.toContainText('your school administrator or established official school privacy channel')
 })
 
 test('shows, acknowledges, and reopens the essential-storage notice', async ({ page }) => {

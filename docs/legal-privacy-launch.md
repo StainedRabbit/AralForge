@@ -1,6 +1,6 @@
 # AralForge Legal and Privacy Launch
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 Status: **First implementation slice complete. Production clearance remains blocked.**
 
@@ -46,7 +46,7 @@ The inventory describes education records as protected personal data. It does no
 
 - [x] Confirm launch boundaries and corrected legal positioning.
 - [x] Inventory current application data and browser storage.
-- [x] Add typed legal configuration with production validation.
+- [x] Add optional typed legal configuration with neutral, non-fabricated fallbacks.
 - [x] Add public Legal Center and six launch documents.
 - [x] Add logged-out, desktop, mobile, and profile legal links.
 - [x] Add a non-blocking, reopenable essential-storage notice.
@@ -86,11 +86,15 @@ The site is not cleared for production until all items below are completed and e
 
 ## Verification record
 
-Completed on 2026-09-10:
+Initial Slice 1 verification completed on 2026-09-10. The optional-configuration update was verified on 2026-09-11:
 
 - `npm run lint` — passed.
-- `npm run build` with complete non-placeholder test legal configuration — passed, including TypeScript compilation, Vite production output, and bundle budgets.
-- `npm run build` with `VITE_LEGAL_OPERATOR_NAME=replace-me` — rejected as expected by the production legal-configuration gate.
-- `npm run test:e2e -- legal.spec.ts mobile-navigation.spec.ts session-recovery.spec.ts rebrand.spec.ts` — 21 passed.
+- Plain `npm run build` with no `VITE_LEGAL_*` values — passed, including TypeScript compilation, Vite production output, and bundle budgets.
+- Public legal pages with no `VITE_LEGAL_*` values — verified to use neutral contact guidance and contain no placeholder or `example.invalid` text or links.
+- A targeted configured-value Playwright run — 1 passed, verifying that approved `VITE_LEGAL_*` values replace every neutral identity, contact, date, and retention fallback.
+- `npm run test:e2e -- legal.spec.ts mobile-navigation.spec.ts session-recovery.spec.ts rebrand.spec.ts` — 21 passed and 1 configured-only test skipped as designed.
+- `git diff --check` — passed.
+
+Legal identity values are recommended production inputs, not build requirements. Their absence does not remove the production blockers above or imply legal clearance.
 
 No backend schema or API code changed in Slice 1, so the backend test suite was not required for this slice.

@@ -63,8 +63,8 @@ function PrivacyNotice() {
       <LegalSection title="Who operates AralForge">
         <p>Service operator: {legalConfig.operatorName}</p>
         <p>Expected school/controller: {legalConfig.schoolName}</p>
-        <p>Service address: {legalConfig.serviceAddress}</p>
-        <p>Privacy contact: <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a></p>
+        {legalConfig.serviceAddress ? <p>Service address: {legalConfig.serviceAddress}</p> : null}
+        <p>Privacy contact: <PrivacyContact /></p>
       </LegalSection>
       <LegalSection title="Personal data we handle">
         <ul>
@@ -91,7 +91,7 @@ function PrivacyNotice() {
       </LegalSection>
       <LegalSection title="Your privacy rights">
         <p>Subject to applicable law and the school’s records obligations, individuals may request information, access, correction, portability, objection, or erasure/blocking and may file a complaint with the Philippine National Privacy Commission. Some records may need to be retained or handled by the school rather than deleted immediately.</p>
-        <p>Send a request to <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a>. The requester’s identity and authority may need to be verified before protected records are released or changed.</p>
+        <p>Submit requests through <PrivacyContact />. The requester’s identity and authority may need to be verified before protected records are released or changed.</p>
       </LegalSection>
     </LegalDocument>
   )
@@ -116,7 +116,7 @@ function TermsOfUse() {
         <p>The service is provided with reasonable care but without a promise of uninterrupted operation, perfect security, or particular academic results. Nothing in these terms excludes rights or liabilities that cannot lawfully be excluded.</p>
       </LegalSection>
       <LegalSection title="Questions and applicable rules">
-        <p>These terms are governed by applicable Philippine law together with controlling school policies and agreements. Concerns should first be sent to <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a>; privacy complaints may also be sent to <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a>. Statutory complaint and court rights remain available.</p>
+        <p>These terms are governed by applicable Philippine law together with controlling school policies and agreements. Service concerns should first be sent through <SupportContact />; privacy complaints should use <PrivacyContact />. Statutory complaint and court rights remain available.</p>
       </LegalSection>
     </LegalDocument>
   )
@@ -160,7 +160,7 @@ function AcceptableUse() {
         </ul>
       </LegalSection>
       <LegalSection title="Reports and enforcement">
-        <p>Report safety or security concerns to <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a>. Suspected violations may be preserved and referred to authorized school personnel, investigated proportionately, and handled under school procedures and applicable law.</p>
+        <p>Report safety or security concerns through <SupportContact />. Suspected violations may be preserved and referred to authorized school personnel, investigated proportionately, and handled under school procedures and applicable law.</p>
       </LegalSection>
     </LegalDocument>
   )
@@ -173,7 +173,7 @@ function CopyrightPolicy() {
         <p>AralForge branding, software, and original materials are protected by their respective rights. School, teacher, and student submissions remain owned by their lawful owners. Content may be used inside AralForge only as needed for authorized teaching, learning, review, storage, backup, and administration.</p>
       </LegalSection>
       <LegalSection title="Report a concern">
-        <p>Send a sufficiently detailed notice to <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a> identifying the protected work, the AralForge material or location at issue, your contact details, the basis of your claim, and any authority to act for the owner. Do not include unrelated personal data.</p>
+        <p>Send a sufficiently detailed notice through <SupportContact /> identifying the protected work, the AralForge material or location at issue, your contact details, the basis of your claim, and any authority to act for the owner. Do not include unrelated personal data.</p>
       </LegalSection>
       <LegalSection title="Review and response">
         <p>The operator may restrict access while reviewing a credible report, consult the school or uploader, request supporting information, restore material when appropriate, and preserve records needed to resolve the issue. Knowingly false or abusive notices may violate these terms or applicable law.</p>
@@ -189,11 +189,11 @@ function AccessibilityStatement() {
         <p>AralForge aims to support keyboard navigation, readable contrast, responsive layouts, clear labels, and assistive-technology semantics. This statement does not claim formal certification or that every page is free of barriers.</p>
       </LegalSection>
       <LegalSection title="Request assistance">
-        <p>If a feature, file, assessment, or legal document is difficult to access, contact <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a>. Include the page or task, the barrier encountered, and the format or accommodation that would help. Avoid emailing passwords or unnecessary protected records.</p>
+        <p>If a feature, file, assessment, or legal document is difficult to access, contact <SupportContact />. Include the page or task, the barrier encountered, and the format or accommodation that would help. Avoid sending passwords or unnecessary protected records.</p>
       </LegalSection>
       <LegalSection title="Other contacts">
-        <p>Service address: {legalConfig.serviceAddress}</p>
-        <p>Privacy matters: <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a></p>
+        {legalConfig.serviceAddress ? <p>Service address: {legalConfig.serviceAddress}</p> : null}
+        <p>Privacy matters: <PrivacyContact /></p>
       </LegalSection>
     </LegalDocument>
   )
@@ -222,9 +222,9 @@ function LegalDocument({ children, description, title }: LegalDocumentProps) {
       <footer className="legal-site__footer">
         <LegalLinks />
         <p>
-          Support: <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a>
+          Support: <SupportContact />
           {' · '}
-          Privacy: <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a>
+          Privacy: <PrivacyContact />
         </p>
         <p>© {new Date().getFullYear()} {legalConfig.operatorName}. Legal rights are reserved where applicable.</p>
       </footer>
@@ -238,4 +238,16 @@ function LegalSection({ children, title }: { children: ReactNode; title: string 
 
 function LegalCallout({ children }: { children: ReactNode }) {
   return <div className="legal-callout">{children}</div>
+}
+
+function SupportContact() {
+  return legalConfig.supportEmail
+    ? <a href={`mailto:${legalConfig.supportEmail}`}>{legalConfig.supportEmail}</a>
+    : <>your school administrator or established official school channel</>
+}
+
+function PrivacyContact() {
+  return legalConfig.privacyEmail
+    ? <a href={`mailto:${legalConfig.privacyEmail}`}>{legalConfig.privacyEmail}</a>
+    : <>your school administrator or established official school privacy channel</>
 }

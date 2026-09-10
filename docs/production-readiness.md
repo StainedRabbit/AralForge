@@ -28,7 +28,7 @@ Railway requires these values for each environment:
 - `SUPABASE_S3_SECRET_ACCESS_KEY`
 - `SUPABASE_STORAGE_BUCKET`
 
-Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. It also requires the public legal configuration below:
+Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. The public legal configuration below is optional at build time and recommended for a reviewed deployment:
 
 - `VITE_LEGAL_OPERATOR_NAME`
 - `VITE_LEGAL_SCHOOL_NAME`
@@ -38,7 +38,7 @@ Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backe
 - `VITE_LEGAL_EFFECTIVE_DATE`
 - `VITE_LEGAL_RETENTION_POLICY`
 
-Production builds reject missing, placeholder, insecure, or loopback configuration as applicable. The legal values must be approved for publication and must match the written school authorization and data-processing agreement. Keep separate frontend deployments for staging and production.
+When legal values are absent, the public documents use neutral operator/school wording, omit addresses and email links, and direct users to an established official school channel. That fallback permits deployment testing but does not provide legal production clearance. Before public production use, the legal values must be approved for publication and must match the written school authorization, final controller/processor allocation, and applicable data-processing agreement. Keep separate frontend deployments for staging and production.
 
 Each Railway environment also requires a worker service built from the same commit and configured with the same database, application, storage, and Redis variables as the API. Its start command is:
 
