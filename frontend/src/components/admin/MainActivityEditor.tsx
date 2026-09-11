@@ -354,6 +354,20 @@ export function MainActivityEditor({
     URL.revokeObjectURL(url)
   }
 
+  async function copyImportExample() {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      setMessage('Copy failed. You can still download the example MD.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(structuredImportExample)
+      setMessage('Example Markdown copied.')
+    } catch {
+      setMessage('Copy failed. You can still download the example MD.')
+    }
+  }
+
   function downloadRecoveryDraft(draft: RecoveredEditorDraft | Record<string, unknown>) {
     const blob = new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -682,6 +696,10 @@ export function MainActivityEditor({
             <button className="button button--secondary button--compact" onClick={downloadImportExample} type="button">
               <Icon name="file" />
               <span>Download Example MD</span>
+            </button>
+            <button className="button button--secondary button--compact" onClick={() => void copyImportExample()} type="button">
+              <Icon name="file" />
+              <span>Copy Example MD</span>
             </button>
             <label className="button button--secondary button--compact import-file-button">
               <Icon name="upload" />

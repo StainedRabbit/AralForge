@@ -41,6 +41,40 @@ async function findWorkflowLesson(page: Page) {
   })
 }
 
+test('copies the Main Activity structured-import example without changing the draft', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' })
+  await signIn(page)
+  const target = await findWorkflowLesson(page)
+  expect(target).toEqual({ lesson: expect.any(Number), module: expect.any(Number), topic: expect.any(Number) })
+
+  await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
+  const editor = page.locator('#lesson-editor-main-activity')
+  await editor.getByRole('button', { name: 'Import', exact: true }).click()
+  const importText = editor.getByRole('textbox')
+  await importText.fill('MCQ: Keep this draft unchanged')
+
+  await editor.getByRole('button', { name: 'Copy Example MD' }).click()
+  await expect(editor.getByText('Example Markdown copied.', { exact: true })).toBeVisible()
+  await expect(importText).toHaveValue('MCQ: Keep this draft unchanged')
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied).toContain('MCQ:')
+  expect(copied).toContain('TF:')
+  expect(copied).toContain('FILL:')
+  expect(copied).toContain('ORDER:')
+  expect(copied).toContain('MATCH:')
+  expect(copied).toContain('CODE:')
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { throw new Error('Clipboard unavailable') } },
+    })
+  })
+  await editor.getByRole('button', { name: 'Copy Example MD' }).click()
+  await expect(editor.getByText('Copy failed. You can still download the example MD.', { exact: true })).toBeVisible()
+  await expect(importText).toHaveValue('MCQ: Keep this draft unchanged')
+})
+
 test('bulk links a Main Activity and records score-only paper submissions', async ({ page }, testInfo) => {
   await signIn(page)
 
