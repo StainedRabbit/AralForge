@@ -180,7 +180,8 @@
 .storage-notice {
   position: fixed;
   inset: auto 18px 18px;
-  z-index: 100;
+  /* Keep the notice below application dialogs so it never blocks their controls. */
+  z-index: 40;
   width: min(calc(100% - 36px), 900px);
   margin-inline: auto;
   display: flex;
