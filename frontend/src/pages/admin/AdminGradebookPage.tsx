@@ -1295,7 +1295,7 @@ function PaperActivityScoreDialog({
 
         <div className="paper-score-dialog__body">
           {target.notice ? <p className="admin-message" role="status">{target.notice} {target.studentName}</p> : null}
-          <p>Enter the total from the checked printed copy. This records a paper submission against the same linked Main Activity.</p>
+          <p>Enter the total from the checked printed copy. This records a paper submission against the same linked Quiz.</p>
           <dl className="paper-score-dialog__context">
             <div><dt>Student</dt><dd>{target.studentName}</dd></div>
             <div><dt>Activity</dt><dd>{activity?.title ?? target.item.title}</dd></div>

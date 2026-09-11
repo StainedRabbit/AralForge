@@ -164,7 +164,7 @@ class Command(BaseCommand):
                     module=module,
                     topic=topic,
                     lesson=first_lesson_by_topic[topic.id],
-                    title='Performance Main Activity',
+                    title='Performance Quiz',
                     instructions='Submit a representative response.',
                     activity_type=ModuleActivity.ActivityType.INTERACTIVE,
                     points_possible=Decimal('100.00'),

@@ -290,7 +290,7 @@ class GradeItemSerializer(serializers.ModelSerializer):
                 ).exclude(pk=getattr(self.instance, 'pk', None)).exists()
             ):
                 raise serializers.ValidationError({
-                    required_field: 'This Main Activity is already linked to the selected class.',
+                    required_field: 'This Quiz is already linked to the selected class.',
                 })
 
         points_possible = attrs.get('points_possible', getattr(self.instance, 'points_possible', None))

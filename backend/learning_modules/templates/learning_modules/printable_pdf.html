@@ -411,7 +411,7 @@
           {% endfor %}
           {% if lesson.main_activity %}
             <article class="activity">
-              <p class="activity-meta">Main Activity</p>
+              <p class="activity-meta">Quiz</p>
               <h4>{{ lesson.main_activity.title }}</h4>
               <div class="section-body">{{ lesson.main_activity.instructions|safe }}</div>
               {% for question in lesson.main_activity.questions %}

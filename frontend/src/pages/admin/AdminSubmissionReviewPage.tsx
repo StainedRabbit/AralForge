@@ -121,7 +121,7 @@ export function AdminSubmissionReviewPage({ api }: { api: AuthedRequest }) {
           ) : (
             <div className="gradebook-link-status gradebook-link-status--warning">
               <Icon name="warning" />
-              <div><strong>Not linked to a gradebook item</strong><span>The score will remain on this submission.</span><Link to={settingsUrl}>Open Main Activity settings</Link></div>
+              <div><strong>Not linked to a gradebook item</strong><span>The score will remain on this submission.</span><Link to={settingsUrl}>Open Quiz settings</Link></div>
             </div>
           )}
 

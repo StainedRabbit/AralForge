@@ -165,7 +165,7 @@ def serialize_attempt_with_state(attempt, request, *, created=False):
 
 
 def reject_non_atomic_lesson_activity_edit(activity):
-    """Keep lesson Main Activity revisions behind the atomic editor contract."""
+    """Keep lesson quiz revisions behind the atomic editor contract."""
     if activity and activity.lesson_id:
         raise serializers.ValidationError({
             'detail': (
@@ -1055,7 +1055,7 @@ class ModuleLessonViewSet(viewsets.ModelViewSet):
     @decorators.action(detail=True, methods=['get'], url_path='main-activity-workspace')
     def main_activity_workspace(self, request, pk=None):
         if not request.user.is_admin_teacher:
-            raise PermissionDenied('Only teachers can open the Main Activity editor workspace.')
+            raise PermissionDenied('Only teachers can open the Quiz editor workspace.')
         lesson = self.get_object()
         activity = ModuleActivity.objects.filter(lesson=lesson).select_related(
             'module',
@@ -1243,7 +1243,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         if activity_id:
             activity = ModuleActivity.objects.select_for_update().filter(pk=activity_id).first()
             if not activity:
-                raise serializers.ValidationError({'id': 'Main Activity was not found.'})
+                raise serializers.ValidationError({'id': 'Quiz was not found.'})
             if 'expected_revision' not in payload:
                 raise serializers.ValidationError({
                     'expected_revision': 'Provide the activity revision being edited.',
@@ -1257,7 +1257,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             if expected_revision != activity.revision:
                 return response.Response(
                     {
-                        'detail': 'This Main Activity was changed in another editor.',
+                        'detail': 'This Quiz was changed in another editor.',
                         'current_revision': activity.revision,
                     },
                     status=status.HTTP_409_CONFLICT,

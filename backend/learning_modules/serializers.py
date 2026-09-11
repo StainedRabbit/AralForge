@@ -594,9 +594,9 @@ class ModuleLessonProgressSerializer(serializers.ModelSerializer):
                 requirement_met = not main_activity or state['requirement_met']
                 if main_activity and not requirement_met:
                     raise serializers.ValidationError(
-                        'Pass the Main Activity or finish all attempts before marking this lesson complete.'
+                        'Pass the Quiz or finish all attempts before marking this lesson complete.'
                         if main_activity.passing_score is not None
-                        else 'Finish the Main Activity before marking this lesson complete.'
+                        else 'Finish the Quiz before marking this lesson complete.'
                     )
         return attrs
 
@@ -702,7 +702,7 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
         due_at = attrs.get('due_at', getattr(self.instance, 'due_at', None))
         if lesson and not grading_period:
             raise serializers.ValidationError({
-                'grading_period': 'Select a grading period for this Main Activity.',
+                'grading_period': 'Select a grading period for this Quiz.',
             })
         if passing_score is not None and points_possible is not None and passing_score > points_possible:
             raise serializers.ValidationError({
@@ -1188,7 +1188,7 @@ class PaperActivityScoreBatchSerializer(serializers.Serializer):
             if row['student'].id not in active_student_ids:
                 errors['student'] = 'This student is not actively enrolled in the selected class.'
             if row['student'].id in online_student_ids:
-                errors['student'] = 'This student already submitted the Main Activity online.'
+                errors['student'] = 'This student already submitted the Quiz online.'
             if row['score'] > item.points_possible:
                 errors['score'] = f'Score must be between 0 and {item.points_possible}.'
             if errors:
@@ -1209,7 +1209,7 @@ class PaperActivityScoreUpdateSerializer(serializers.Serializer):
         activity = validate_paper_score_item(item)
         if attempt.activity_id != activity.id:
             raise serializers.ValidationError(
-                'This paper attempt does not belong to the linked Main Activity.'
+                'This paper attempt does not belong to the linked Quiz.'
             )
         if not ScheduleStudent.objects.filter(
             schedule=item.schedule,
@@ -1232,7 +1232,7 @@ class PaperActivityScoreUpdateSerializer(serializers.Serializer):
             schedule=item.schedule,
         ).exclude(pk=attempt.pk).exists():
             raise serializers.ValidationError(
-                'This student already submitted the Main Activity online.'
+                'This student already submitted the Quiz online.'
             )
         return value
 
@@ -1241,7 +1241,7 @@ def validate_paper_score_item(item):
     activity = item.module_activity if item else None
     if not item or item.source_type != GradeItemSourceType.MODULE_ACTIVITY or not activity:
         raise serializers.ValidationError({
-            'grade_item': 'Select a grade item linked to a Main Activity.',
+            'grade_item': 'Select a grade item linked to a Quiz.',
         })
     if (
         not item.schedule_id
@@ -1257,7 +1257,7 @@ def validate_paper_score_item(item):
         or not activity.is_published
     ):
         raise serializers.ValidationError({
-            'grade_item': 'The linked Main Activity must be published and interactive.',
+            'grade_item': 'The linked Quiz must be published and interactive.',
         })
     return activity
 

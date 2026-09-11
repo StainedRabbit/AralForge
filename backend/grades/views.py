@@ -696,7 +696,7 @@ class GradeItemViewSet(viewsets.ModelViewSet):
         activity_id = request.data.get('module_activity')
         assignments = request.data.get('assignments')
         if not activity_id:
-            raise serializers.ValidationError({'module_activity': 'A Main Activity is required.'})
+            raise serializers.ValidationError({'module_activity': 'A Quiz is required.'})
         if not isinstance(assignments, list) or not assignments:
             raise serializers.ValidationError({'assignments': 'Select at least one class assignment.'})
 
@@ -958,15 +958,15 @@ def require_teacher(request):
 def main_activity_readiness_errors(activity):
     errors = []
     if activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE or not activity.lesson_id:
-        errors.append('Only an interactive lesson Main Activity can be assigned.')
+        errors.append('Only an interactive lesson Quiz can be assigned.')
     if not activity.is_published:
-        errors.append('Publish the Main Activity before assigning it.')
+        errors.append('Publish the Quiz before assigning it.')
     if not activity.title.strip():
         errors.append('Add a title before assigning it.')
     if not activity.instructions.strip():
         errors.append('Add instructions before assigning it.')
     if not activity.grading_period:
-        errors.append('Select the Main Activity grading period before assigning it.')
+        errors.append('Select the Quiz grading period before assigning it.')
     if activity.points_possible <= 0:
         errors.append('Points possible must be greater than zero.')
     if not any(question.is_published for question in activity.questions.all()):
@@ -1020,14 +1020,14 @@ def validate_main_activity_assignments(activity, assignments):
         elif category.category != GradeCategoryChoices.QUIZ:
             errors['grade_category'] = 'Select an existing Quiz category.'
         elif category.grading_period != activity.grading_period:
-            errors['grade_category'] = 'The Quiz category must match the Main Activity grading period.'
+            errors['grade_category'] = 'The Quiz category must match the Quiz grading period.'
         if schedule and category and schedule.subject_id != category.subject_id:
             errors['grade_category'] = 'This Quiz category does not belong to the selected class subject.'
         if schedule and not (
             activity.module.subject_id == schedule.subject_id
             or activity.module.subjects.filter(pk=schedule.subject_id).exists()
         ):
-            errors['schedule'] = 'This class subject is not associated with the Main Activity module.'
+            errors['schedule'] = 'This class subject is not associated with the Quiz module.'
 
         linked_items = []
         if schedule:

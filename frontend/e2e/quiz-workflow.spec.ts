@@ -30,7 +30,7 @@ async function findWorkflowLesson(page: Page) {
       load('/modules/lessons/?limit=100'),
     ])
     const module = modules.find(
-      (candidate: { title: string }) => candidate.title === 'E2E Main Activity Workflow',
+      (candidate: { title: string }) => candidate.title === 'E2E Quiz Workflow',
     )
     const topic = topics.find((candidate: { module: number }) => candidate.module === module?.id)
     const lesson = lessons.find(
@@ -41,7 +41,7 @@ async function findWorkflowLesson(page: Page) {
   })
 }
 
-test('copies the Main Activity structured-import example without changing the draft', async ({ page }) => {
+test('copies the Quiz structured-import example without changing the draft', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' })
   await signIn(page)
   const target = await findWorkflowLesson(page)
@@ -75,7 +75,7 @@ test('copies the Main Activity structured-import example without changing the dr
   await expect(importText).toHaveValue('MCQ: Keep this draft unchanged')
 })
 
-test('bulk links a Main Activity and records score-only paper submissions', async ({ page }, testInfo) => {
+test('bulk links a Quiz and records score-only paper submissions', async ({ page }, testInfo) => {
   await signIn(page)
 
   const target = await page.evaluate(async () => {
@@ -97,7 +97,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
       load('/modules/topics/'),
       load('/modules/lessons/'),
     ])
-    const module = modules.find((candidate: { title: string }) => candidate.title === 'E2E Main Activity Workflow')
+    const module = modules.find((candidate: { title: string }) => candidate.title === 'E2E Quiz Workflow')
     const topic = topics.find((candidate: { module: number }) => candidate.module === module?.id)
     const lesson = lessons.find((candidate: { topic: number; title: string }) =>
       candidate.topic === topic?.id && candidate.title === 'Quiz Workflow Lesson')
@@ -113,7 +113,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   })
   await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
   const editor = page.locator('#lesson-editor-main-activity')
-  await expect(editor.getByRole('heading', { name: 'Main Activity' })).toBeVisible()
+  await expect(editor.getByRole('heading', { name: 'Quiz' })).toBeVisible()
   expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(0)
   expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`)).toBe(true)
   const forbiddenInitialCollections = [
@@ -154,7 +154,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   )
   await editor.getByRole('button', { name: /^Grading/ }).click()
   await gradingWorkspace
-  await expect(editor.getByRole('heading', { name: 'Count this Main Activity as a quiz' })).toBeVisible()
+  await expect(editor.getByRole('heading', { name: 'Count this Quiz in the gradebook' })).toBeVisible()
   await expect(editor.getByRole('heading', { name: 'Student extensions' })).toHaveCount(0)
   expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(1)
 
@@ -307,13 +307,13 @@ test('published editor conflict preserves recovery actions', async ({ page }, te
   })
   await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
   const editor = page.locator('#lesson-editor-main-activity')
-  await expect(editor.getByRole('heading', { name: 'Main Activity' })).toBeVisible()
+  await expect(editor.getByRole('heading', { name: 'Quiz' })).toBeVisible()
 
   await page.route('**/api/modules/activities/atomic-save/', async route => {
     if (route.request().method() === 'PUT') {
       await route.fulfill({
         body: JSON.stringify({
-          detail: 'This Main Activity was changed in another editor.',
+          detail: 'This Quiz was changed in another editor.',
           current_revision: 999,
         }),
         contentType: 'application/json',

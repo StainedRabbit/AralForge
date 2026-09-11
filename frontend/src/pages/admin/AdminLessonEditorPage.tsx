@@ -506,7 +506,7 @@ function AdminLessonEditorForm({
     }
 
     const confirmed = window.confirm(
-      `Delete "${editingLesson.title}"? This will also delete its examples, assets, main activity, and progress records.`,
+      `Delete "${editingLesson.title}"? This will also delete its examples, assets, quiz, and progress records.`,
     )
     if (!confirmed) {
       return
@@ -710,10 +710,10 @@ function AdminLessonEditorForm({
                 <section className="main-activity-editor">
                   <SectionHeading
                     subtitle="Save this lesson before adding website-based activity questions"
-                    title="Main Activity"
+                    title="Quiz"
                   />
                   <p className="admin-empty-line">
-                    Main Activity setup becomes available after the lesson is saved.
+                    Quiz setup becomes available after the lesson is saved.
                   </p>
                 </section>
               )}
@@ -1670,7 +1670,7 @@ function LessonEditorOutline({
 
       <div className="lesson-editor-outline__utility" aria-label="Lesson editor shortcuts">
         <button onClick={() => scrollToLessonEditorSection('lesson-editor-main-activity')} type="button">
-          Main Activity
+          Quiz
         </button>
         <button onClick={() => scrollToLessonEditorSection('lesson-editor-details')} type="button">
           Back to Top
@@ -1705,7 +1705,7 @@ function LessonEditorMobileOutline({
         onClick={() => scrollToLessonEditorSection('lesson-editor-main-activity')}
         type="button"
       >
-        Main Activity
+        Quiz
       </button>
       <button
         className="lesson-editor-mobile-outline__utility"

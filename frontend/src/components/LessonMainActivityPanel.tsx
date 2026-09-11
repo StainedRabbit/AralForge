@@ -249,7 +249,7 @@ export function LessonMainActivityPanel({
       }))
       setActiveAttemptId(submittedAttempt.id)
       setMessageTone('success')
-      setMessage('Main Activity submitted.')
+      setMessage('Quiz submitted.')
       await onSubmitted()
     } catch (caughtError) {
       setSubmissionFailed(true)
@@ -289,7 +289,7 @@ export function LessonMainActivityPanel({
     <section className="lesson-main-activity" id="main-activity">
       <div className="lesson-main-activity__header">
         <div>
-          <p className="eyebrow">Main Activity</p>
+          <p className="eyebrow">Quiz</p>
           <h2>{activity.title}</h2>
           <RichLessonText value={activity.instructions} />
         </div>
@@ -458,7 +458,7 @@ export function LessonMainActivityPanel({
       {!activeAttemptSummary && canStartAttempt ? (
         <button className="button button--primary" disabled={saving} onClick={() => void startNewAttempt()} type="button">
           <Icon name="send" />
-          <span>{saving ? 'Starting...' : 'Start Main Activity'}</span>
+          <span>{saving ? 'Starting...' : 'Start Quiz'}</span>
         </button>
       ) : null}
 
@@ -618,7 +618,7 @@ function ActivityQuestionForm({
         </div>
       ) : null}
       {questions.length > 1 ? (
-        <nav aria-label="Main Activity questions" className="activity-question-navigator">
+        <nav aria-label="Quiz questions" className="activity-question-navigator">
           <span className={`activity-question-navigator__save activity-question-navigator__save--${draftStatus}`}>
             {draftStatus === 'error' ? 'Save error' : draftStatus === 'saving' ? 'Saving' : draftStatus === 'unsaved' ? 'Unsaved' : 'Saved'}
           </span>

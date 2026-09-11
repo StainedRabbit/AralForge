@@ -85,7 +85,7 @@ const questionTypeOptions: Array<{ label: string; value: ModuleActivityQuestionT
   { label: 'Code output', value: 'code_output' },
 ]
 
-const structuredImportExample = `# Main Activity Import Example
+const structuredImportExample = `# Quiz Import Example
 
 MCQ: Which tool compiles Java source code?
 A. JVM
@@ -147,7 +147,7 @@ export function MainActivityEditor({
     !activity || recoveredDraft.baseRevision === undefined || recoveredDraft.baseRevision === activity.revision
   ) ? recoveredDraft : null
   const [staleRecovery, setStaleRecovery] = useState(Boolean(recoveredDraft && !recoverableDraft))
-  const [title, setTitle] = useState(recoverableDraft?.title ?? activity?.title ?? 'Main Activity')
+  const [title, setTitle] = useState(recoverableDraft?.title ?? activity?.title ?? 'Quiz')
   const [instructions, setInstructions] = useState(recoverableDraft?.instructions ?? activity?.instructions ?? '')
   const [maxAttempts, setMaxAttempts] = useState(recoverableDraft?.maxAttempts ?? String(activity?.max_attempts ?? 3))
   const [passingScore, setPassingScore] = useState(recoverableDraft?.passingScore ?? activity?.passing_score ?? '')
@@ -191,7 +191,7 @@ export function MainActivityEditor({
     questionDrafts,
   })
   const savedSignature = useRef(JSON.stringify({
-    title: activity?.title ?? 'Main Activity',
+    title: activity?.title ?? 'Quiz',
     instructions: activity?.instructions ?? '',
     maxAttempts: String(activity?.max_attempts ?? 3),
     passingScore: activity?.passing_score ?? '',
@@ -436,7 +436,7 @@ export function MainActivityEditor({
       return
     }
     if (!gradingPeriod) {
-      setMessage('Select a grading period before saving this Main Activity.')
+      setMessage('Select a grading period before saving this Quiz.')
       setActiveTab('setup')
       return
     }
@@ -475,7 +475,7 @@ export function MainActivityEditor({
         },
       )
       const savedActivity = workspace.activity
-      if (!savedActivity) throw new Error('The saved Main Activity was not returned.')
+      if (!savedActivity) throw new Error('The saved Quiz was not returned.')
       setSavedActivityId(savedActivity.id)
       setSavedRevision(savedActivity.revision)
       setRevisionConflict(false)
@@ -484,13 +484,13 @@ export function MainActivityEditor({
       setSaveState('saved')
       onWorkspaceSaved(workspace)
       setCurrentLinkedClassCount(workspace.linked_class_count)
-      if (!silent) setMessage('Main Activity saved atomically.')
+      if (!silent) setMessage('Quiz saved atomically.')
       if (nextTab) setActiveTab(nextTab)
     } catch (caughtError) {
       setSaveState('error')
       if (caughtError instanceof ApiError && caughtError.status === 409) {
         setRevisionConflict(true)
-        setMessage('This Main Activity changed in another editor. Your local draft was not overwritten.')
+        setMessage('This Quiz changed in another editor. Your local draft was not overwritten.')
       } else {
         setMessage(`Changes are still in this browser. ${toErrorMessage(caughtError)}`)
       }
@@ -511,11 +511,11 @@ export function MainActivityEditor({
   return (
     <section className="main-activity-editor">
       <SectionHeading
-        subtitle="Website-based, auto-graded lesson work. This Main Activity saves separately from the lesson."
-        title="Main Activity"
+        subtitle="Website-based, auto-graded lesson work. This Quiz saves separately from the lesson."
+        title="Quiz"
       />
 
-      <div className="activity-readiness-strip" aria-label="Main Activity readiness summary">
+      <div className="activity-readiness-strip" aria-label="Quiz readiness summary">
         <span className={!dirty && saveState === 'saved' ? 'status-badge status-badge--ready' : 'status-badge'}>
           {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : dirty && activity?.is_published ? 'Unpublished changes' : dirty ? 'Unsaved changes' : 'Saved'}
         </span>
@@ -568,7 +568,7 @@ export function MainActivityEditor({
         </section>
       ) : null}
 
-      <nav className="main-activity-tabs" aria-label="Main Activity editor sections">
+      <nav className="main-activity-tabs" aria-label="Quiz editor sections">
         {([
           ['setup', 'Setup'],
           ['questions', `Questions (${activeDrafts.length})`],
@@ -655,7 +655,7 @@ export function MainActivityEditor({
               />
             ))}
             {!activeDrafts.length ? (
-              <p className="admin-empty-line">No Main Activity questions yet.</p>
+              <p className="admin-empty-line">No Quiz questions yet.</p>
             ) : null}
           </div>
           <div className="lesson-editor__actions">
@@ -979,7 +979,7 @@ function ActivityGradingAssignmentsContent({
       <div className="activity-grading-heading">
         <div>
           <p className="eyebrow">Class gradebook links</p>
-          <h3>Count this Main Activity as a quiz</h3>
+          <h3>Count this Quiz in the gradebook</h3>
           <p>Select classes together, then review any per-class category overrides before applying.</p>
         </div>
         <span className={period ? 'status-badge status-badge--ready' : 'status-badge status-badge--error'}>
@@ -1449,8 +1449,8 @@ function ActivityPreview({
     <div className="activity-preview-surface">
       <div className="lesson-main-activity__header">
         <div>
-          <p className="eyebrow">Main Activity</p>
-          <h2>{title || 'Main Activity'}</h2>
+          <p className="eyebrow">Quiz</p>
+          <h2>{title || 'Quiz'}</h2>
           <p>{instructions || 'Student instructions will appear here.'}</p>
         </div>
         <span className={mode === 'review' ? 'status-pill status-pill--success' : 'status-pill'}>
@@ -1601,7 +1601,7 @@ function PeriodChangeDialog({
       <div className="attendance-modal__panel attendance-modal__panel--wide">
         <div className="attendance-modal__header">
           <div>
-            <span>Main Activity grading</span>
+            <span>Quiz grading</span>
             <strong id="period-change-title">Change period to {formatPeriod(dialog.targetPeriod)}</strong>
           </div>
           <button aria-label="Close" className="icon-button" onClick={onCancel} type="button">

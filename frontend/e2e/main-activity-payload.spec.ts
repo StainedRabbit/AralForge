@@ -92,7 +92,7 @@ test('failed final draft save blocks submission and preserves answers for retry'
   blockDraftSave = false
   await page.getByRole('button', { name: 'Retry submission' }).click()
 
-  await expect(page.getByText('Main Activity submitted.')).toBeVisible()
+  await expect(page.getByText('Quiz submitted.')).toBeVisible()
   expect(submitRequests).toBe(1)
   await expect(page.getByLabel('Answer for Question 1')).toHaveValue('Latest answer survives retry')
 })
@@ -102,7 +102,7 @@ test('question navigator focuses questions and stays horizontal on mobile', asyn
   const target = await signInAndFindTarget(page)
   await page.goto(`/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&context=PERSONAL`)
 
-  const navigator = page.getByRole('navigation', { name: 'Main Activity questions' })
+  const navigator = page.getByRole('navigation', { name: 'Quiz questions' })
   await expect(navigator).toBeVisible()
   const questionButtons = navigator.getByRole('button')
   await expect(questionButtons).toHaveCount(2)

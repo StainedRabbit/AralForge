@@ -768,7 +768,7 @@ function StudentLessonReader({
             ? 'Submitted - retry available'
             : 'Submitted'
           : 'Not started'
-    : 'No Main Activity'
+    : 'No Quiz'
   const challengeStatus = challengeSection
     ? mainActivity
       ? mainActivityReviewUnlocked
@@ -781,7 +781,7 @@ function StudentLessonReader({
     : completed
       ? 'Mark Incomplete'
       : completionBlocked
-        ? 'Finish Main Activity first'
+        ? 'Finish Quiz first'
         : 'Mark Complete'
   const displayedLessonSections = useMemo(
     () =>
@@ -815,7 +815,7 @@ function StudentLessonReader({
   const completionStatusLabel = completed
     ? 'Completed'
     : completionBlocked
-      ? 'Main Activity needed'
+      ? 'Quiz needed'
       : startedLessonIds.has(lesson.id)
         ? 'In progress'
         : 'Ready to start'
@@ -824,7 +824,7 @@ function StudentLessonReader({
       ? 'Next Lesson'
       : 'Review Module Contents'
     : completionBlocked
-      ? 'Go to Main Activity'
+      ? 'Go to Quiz'
       : mainActivityReviewUnlocked && challengeSection
         ? 'Go to Challenge'
         : 'Mark Complete'
@@ -886,8 +886,8 @@ function StudentLessonReader({
             <h2>Challenge Task</h2>
             <p>
               {mainActivity.passing_score !== null
-                ? 'Review Answers unlocks after reaching the passing score or after all Main Activity attempts are used.'
-                : 'Review Answers unlocks after a full score or after all Main Activity attempts are used.'}
+                ? 'Review Answers unlocks after reaching the passing score or after all Quiz attempts are used.'
+                : 'Review Answers unlocks after a full score or after all Quiz attempts are used.'}
             </p>
           </section>
         )
@@ -951,7 +951,7 @@ function StudentLessonReader({
       {mainActivity ? (
         <section className="lesson-progress-status">
           <div>
-            <p className="eyebrow">Main Activity status</p>
+            <p className="eyebrow">Quiz status</p>
             <h3>{mainActivityStatus}</h3>
             <p>
               {bestMainActivityAttempt
@@ -1058,7 +1058,7 @@ function StudentLessonReader({
               {completed
                 ? 'You can review this lesson anytime or continue to the next one.'
                 : completionBlocked
-                  ? 'Submit the Main Activity first, then come back here to finish the lesson.'
+                  ? 'Submit the Quiz first, then come back here to finish the lesson.'
                 : mainActivityReviewUnlocked && challengeSection
                     ? 'The optional Challenge is unlocked. Review it or mark this lesson complete when ready.'
                     : 'Mark this lesson complete when you have finished the examples and practice.'}
@@ -1076,7 +1076,7 @@ function StudentLessonReader({
           {completionBlocked ? (
             <div className="student-lesson-completion__hint">
               <Icon name="warning" />
-              <span>Submit the Main Activity before marking this lesson complete.</span>
+              <span>Submit the Quiz before marking this lesson complete.</span>
             </div>
           ) : null}
           {completed && nextLesson ? (

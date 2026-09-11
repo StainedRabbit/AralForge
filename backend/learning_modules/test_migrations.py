@@ -433,3 +433,60 @@ class MarkTopicPdfsOutdatedMigrationTests(TransactionTestCase):
             MigratedTopic.objects.get(pk=already_outdated_pdf.pk).pdf_is_outdated,
         )
         self.assertFalse(MigratedTopic.objects.get(pk=missing_pdf.pk).pdf_is_outdated)
+
+
+class RenameDefaultActivityTitleMigrationTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        self.latest_targets = executor.loader.graph.leaf_nodes()
+        old_targets = [
+            ('learning_modules', '0031_modulelessonexample_order_index')
+            if app_label == 'learning_modules'
+            else (app_label, migration_name)
+            for app_label, migration_name in self.latest_targets
+        ]
+        executor.migrate(old_targets)
+        self.old_apps = executor.loader.project_state(old_targets).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.latest_targets)
+        super().tearDown()
+
+    def test_renames_only_the_previous_default_title(self):
+        Module = self.old_apps.get_model('learning_modules', 'Module')
+        Activity = self.old_apps.get_model('learning_modules', 'ModuleActivity')
+
+        module = Module.objects.create(
+            title='Quiz title migration module',
+            slug='quiz-title-migration-module',
+        )
+        generated = Activity.objects.create(
+            module=module,
+            title='Main Activity',
+            instructions='Generated default title.',
+        )
+        custom = Activity.objects.create(
+            module=module,
+            title='Main Activity Worksheet',
+            instructions='Teacher-provided title.',
+        )
+        existing_quiz = Activity.objects.create(
+            module=module,
+            title='Quiz',
+            instructions='Already renamed.',
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.latest_targets)
+        apps = executor.loader.project_state(self.latest_targets).apps
+        MigratedActivity = apps.get_model('learning_modules', 'ModuleActivity')
+
+        self.assertEqual(MigratedActivity.objects.get(pk=generated.pk).title, 'Quiz')
+        self.assertEqual(
+            MigratedActivity.objects.get(pk=custom.pk).title,
+            'Main Activity Worksheet',
+        )
+        self.assertEqual(MigratedActivity.objects.get(pk=existing_quiz.pk).title, 'Quiz')

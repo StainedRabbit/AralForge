@@ -29,7 +29,7 @@ export function TopicPdfDownloads({
           <div className="locked-topic-download__copy">
             <small>{[topic.unit, topic.competency_code].filter(Boolean).join(' / ') || `Topic ${topic.order + 1}`}</small>
             <strong>{topic.title}</strong>
-            <span>Lessons and printable Main Activity questions</span>
+            <span>Lessons and printable Quiz questions</span>
           </div>
           <TopicPdfButton api={api} module={module} topic={topic} />
         </article>

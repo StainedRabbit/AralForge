@@ -243,7 +243,7 @@ class Command(BaseCommand):
                 ScheduleStudent.objects.create(schedule=schedule, student=student)
 
         workflow_module = Module.objects.create(
-            title='E2E Main Activity Workflow',
+            title='E2E Quiz Workflow',
             slug='e2e-main-activity-workflow',
             subject=workflow_subject,
             description='Browser fixture for bulk linking and score-only paper entry.',
@@ -260,7 +260,7 @@ class Command(BaseCommand):
             topic=workflow_topic,
             title='Quiz Workflow Lesson',
             order=1,
-            learning_targets='Complete the Main Activity.',
+            learning_targets='Complete the Quiz.',
             is_published=False,
         )
         Module.objects.filter(pk=workflow_module.pk).update(is_published=True)
@@ -270,7 +270,7 @@ class Command(BaseCommand):
             module=workflow_module,
             lesson=workflow_lesson,
             title='Paper Queue Quiz',
-            instructions='Complete the printed Main Activity for manual checking.',
+            instructions='Complete the printed Quiz for manual checking.',
             points_possible=10,
             grading_period=GradingPeriod.PRELIM,
             is_published=True,
@@ -330,7 +330,7 @@ class Command(BaseCommand):
         )
         hydration_lesson = ModuleLesson.objects.create(
             topic=hydration_topic,
-            title='Resume a Saved Main Activity',
+            title='Resume a Saved Quiz',
             order=1,
             learning_targets='Resume a saved answer without loading every attempt payload.',
             is_published=True,

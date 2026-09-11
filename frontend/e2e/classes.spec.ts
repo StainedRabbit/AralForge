@@ -334,13 +334,13 @@ test('activates and refreshes module access from the class roster without duplic
   const moduleSelect = dialog.locator('.student-module-grant-form select')
   let enrolledModuleRow = dialog.locator('.student-module-access-section').first()
     .locator('article')
-    .filter({ hasText: 'E2E Main Activity Workflow' })
+    .filter({ hasText: 'E2E Quiz Workflow' })
   let grantRow = dialog.locator('.student-module-access-section').nth(1)
     .locator('article')
-    .filter({ hasText: 'E2E Main Activity Workflow' })
+    .filter({ hasText: 'E2E Quiz Workflow' })
   await expect(moduleSelect).toHaveValue(/\d+/)
   await expect(moduleSelect.locator('option:checked')).toHaveText(
-    'E2EQ1 - E2E Main Activity Workflow',
+    'E2EQ1 - E2E Quiz Workflow',
   )
   await expect(enrolledModuleRow.getByText('Locked', { exact: true })).toBeVisible()
 
@@ -362,10 +362,10 @@ test('activates and refreshes module access from the class roster without duplic
   dialog = page.getByRole('dialog', { name: 'Module Access' })
   enrolledModuleRow = dialog.locator('.student-module-access-section').first()
     .locator('article')
-    .filter({ hasText: 'E2E Main Activity Workflow' })
+    .filter({ hasText: 'E2E Quiz Workflow' })
   grantRow = dialog.locator('.student-module-access-section').nth(1)
     .locator('article')
-    .filter({ hasText: 'E2E Main Activity Workflow' })
+    .filter({ hasText: 'E2E Quiz Workflow' })
   await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
   await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
 

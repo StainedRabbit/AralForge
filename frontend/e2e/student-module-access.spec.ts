@@ -39,7 +39,7 @@ test('locked enrolled module exposes topic downloads but no online content', asy
   await page.goto('/modules')
   await page.getByLabel('Subject').selectOption({ label: 'E2EQ1 - Quiz Workflow' })
 
-  await expect(page.getByRole('heading', { name: 'E2E Main Activity Workflow' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'E2E Quiz Workflow' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Topics available for download' })).toBeVisible()
   await expect(page.getByText('Quiz Workflow Topic', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()

@@ -1471,7 +1471,7 @@ class ModuleLessonProgressContinuationApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn('Finish the Main Activity', str(response.data))
+        self.assertIn('Finish the Quiz', str(response.data))
 
     def test_student_can_complete_lesson_after_main_activity_submission(self):
         activity = ModuleActivity.objects.create(
