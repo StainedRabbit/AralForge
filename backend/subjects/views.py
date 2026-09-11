@@ -1,14 +1,17 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from accounts.permissions import IsAdmin, IsAdminTeacher, IsAdminTeacherOrReadOnly
 from accounts.models import StudentProfile, User
 from accounts.services import (
     create_student_account,
@@ -18,12 +21,21 @@ from jobs.models import BackgroundJob
 from jobs.serializers import BackgroundJobSerializer
 from jobs.tasks import enqueue, expire_pending_roster_imports
 
-from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
+from .models import (
+    AdultRosterAttestation,
+    ScheduleInstructor,
+    ScheduleStudent,
+    SchoolYear,
+    SchoolYearSemester,
+    Subject,
+    SubjectSchedule,
+)
 from .serializers import (
     ScheduleStudentSerializer,
     SchoolYearSemesterSerializer,
     SchoolYearSerializer,
     RosterStudentCreateSerializer,
+    ScheduleInstructorSerializer,
     SubjectScheduleSerializer,
     SubjectSerializer,
 )
@@ -62,7 +74,12 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             'school_year_semester__school_year',
         )
 
-        if not self.request.user.is_admin_teacher:
+        if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            queryset = queryset.filter(
+                instructors__instructor=self.request.user,
+                instructors__is_active=True,
+            ).distinct()
+        elif not self.request.user.is_admin_teacher:
             queryset = queryset.filter(students__student=self.request.user).distinct()
 
         return queryset.order_by(
@@ -113,7 +130,23 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user, updated_by=self.request.user)
+        schedule = serializer.save(created_by=self.request.user, updated_by=self.request.user)
+        if settings.ADVANCED_PRIVACY_FEATURES and self.request.user.role == User.Role.TEACHER:
+            ScheduleInstructor.objects.create(
+                schedule=schedule,
+                instructor=self.request.user,
+                assigned_by=self.request.user,
+            )
+        elif settings.ADVANCED_PRIVACY_FEATURES:
+            # This launch has one teacher. Preserve the explicit assignment
+            # boundary while avoiding a separate teacher-management workflow.
+            teachers = User.objects.filter(role=User.Role.TEACHER, is_active=True)[:2]
+            if len(teachers) == 1:
+                ScheduleInstructor.objects.create(
+                    schedule=schedule,
+                    instructor=teachers[0],
+                    assigned_by=self.request.user,
+                )
 
     def perform_update(self, serializer):
         next_active = serializer.validated_data.get('is_active', serializer.instance.is_active)
@@ -324,6 +357,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='enroll-students')
     def enroll_students(self, request, pk=None):
         schedule = self.get_object()
+        require_adult_roster_attestation(schedule)
         student_ids = request.data.get('student_ids')
         if not isinstance(student_ids, list) or not student_ids:
             raise serializers.ValidationError({'student_ids': 'Select at least one student.'})
@@ -346,6 +380,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create_student(self, request, pk=None):
         schedule = self.get_object()
+        require_adult_roster_attestation(schedule)
         if not schedule.is_active:
             return Response(
                 {'detail': 'Restore this class before adding a new student.'},
@@ -400,6 +435,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='import-roster')
     def import_roster(self, request, pk=None):
         schedule = self.get_object()
+        require_adult_roster_attestation(schedule)
         rows = request.data.get('rows')
         dry_run = bool(request.data.get('dry_run', False))
         if not isinstance(rows, list) or not rows:
@@ -461,6 +497,50 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             'job': BackgroundJobSerializer(job).data if job else None,
         })
 
+    @action(detail=True, methods=['post'], url_path='attest-adult-roster', permission_classes=[IsAdmin])
+    def attest_adult_roster(self, request, pk=None):
+        if not settings.ADVANCED_PRIVACY_FEATURES:
+            raise Http404
+        schedule = self.get_object()
+        if request.data.get('confirmed') is not True:
+            raise serializers.ValidationError({
+                'confirmed': 'Confirm that every invited student in this class is institutionally verified as at least 18.',
+            })
+        attestation = AdultRosterAttestation.objects.filter(
+            schedule=schedule, revoked_at__isnull=True,
+        ).first()
+        if not attestation:
+            attestation = AdultRosterAttestation.objects.create(
+                schedule=schedule,
+                attested_by=request.user,
+            )
+        from .serializers import AdultRosterAttestationSerializer
+        return Response(AdultRosterAttestationSerializer(attestation).data)
+
+    @action(detail=True, methods=['post'], url_path='revoke-adult-roster-attestation', permission_classes=[IsAdmin])
+    def revoke_adult_roster_attestation(self, request, pk=None):
+        if not settings.ADVANCED_PRIVACY_FEATURES:
+            raise Http404
+        schedule = self.get_object()
+        reason = str(request.data.get('reason', '')).strip()
+        if len(reason) < 10:
+            raise serializers.ValidationError({'reason': 'Provide a reason for revoking the adult-roster attestation.'})
+        attestation = get_object_or_404(
+            AdultRosterAttestation,
+            schedule=schedule,
+            revoked_at__isnull=True,
+        )
+        attestation.revoked_at = timezone.now()
+        attestation.revoked_by = request.user
+        attestation.revocation_reason = reason
+        attestation.save(update_fields=['revoked_at', 'revoked_by', 'revocation_reason'])
+        schedule.students.filter(is_active=True).update(
+            is_active=False,
+            deactivated_at=timezone.now(),
+            deactivated_by=request.user,
+        )
+        return Response({'detail': 'The attestation was revoked and active enrollments were deactivated.'})
+
 
 class ScheduleStudentViewSet(viewsets.ModelViewSet):
     serializer_class = ScheduleStudentSerializer
@@ -474,12 +554,18 @@ class ScheduleStudentViewSet(viewsets.ModelViewSet):
             'student__student_profile',
         )
 
+        if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.filter(
+                schedule__instructors__instructor=self.request.user,
+                schedule__instructors__is_active=True,
+            ).distinct()
         if self.request.user.is_admin_teacher:
             return queryset
 
         return queryset.filter(student=self.request.user)
 
     def perform_create(self, serializer):
+        require_adult_roster_attestation(serializer.validated_data['schedule'])
         serializer.save(added_by=self.request.user)
 
     def perform_update(self, serializer):
@@ -506,6 +592,42 @@ def bounded_int(value, default=0, maximum=None):
     except (TypeError, ValueError):
         number = default
     return min(number, maximum) if maximum is not None else number
+
+
+def require_adult_roster_attestation(schedule):
+    if (
+        settings.REAL_STUDENT_PRIVACY_ENFORCEMENT
+        and not schedule.adult_roster_attestations.filter(revoked_at__isnull=True).exists()
+    ):
+        raise serializers.ValidationError({
+            'schedule': 'An administrator must verify the adult roster before student accounts or enrollments are added.',
+        })
+
+
+class ScheduleInstructorViewSet(viewsets.ModelViewSet):
+    serializer_class = ScheduleInstructorSerializer
+    permission_classes = [IsAdminTeacherOrReadOnly]
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        queryset = ScheduleInstructor.objects.select_related('schedule', 'instructor', 'assigned_by')
+        if self.request.user.role == User.Role.ADMIN or self.request.user.is_superuser:
+            return queryset
+        if self.request.user.role == User.Role.TEACHER:
+            return queryset.filter(instructor=self.request.user)
+        return queryset.none()
+
+    def perform_create(self, serializer):
+        if self.request.user.role != User.Role.ADMIN and not self.request.user.is_superuser:
+            raise PermissionDenied('Only administrators may assign instructors.')
+        assignment = serializer.save(assigned_by=self.request.user)
+        assignment.full_clean()
+
+    def perform_update(self, serializer):
+        if self.request.user.role != User.Role.ADMIN and not self.request.user.is_superuser:
+            raise PermissionDenied('Only administrators may update instructor assignments.')
+        active = serializer.validated_data.get('is_active', serializer.instance.is_active)
+        serializer.save(deactivated_at=None if active else timezone.now())
 
 
 def schedule_dependency_counts(schedule):

@@ -11,8 +11,7 @@ async function signIn(page: Page) {
 
 async function findWorkflowLesson(page: Page) {
   return page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
-    const headers = { Authorization: `Bearer ${session.access}` }
+    const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
     const load = async (path: string) => {
       const rows = []
       let next: string | null = `http://127.0.0.1:8001/api${path}`
@@ -46,8 +45,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await signIn(page)
 
   const target = await page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
-    const headers = { Authorization: `Bearer ${session.access}` }
+    const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
     const load = async (path: string) => {
       const rows = []
       let next: string | null = `http://127.0.0.1:8001/api${path}`
@@ -196,10 +194,10 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
   await expect(page.getByRole('status')).toContainText('Paper score corrected')
 
   const scheduleId = Number(new URL(page.url()).searchParams.get('schedule'))
+  const adminToken = await page.evaluate(() => window.__ARALFORGE_E2E_ACCESS_TOKEN__ as string)
   const temporaryAccess = await page.evaluate(async (moduleId) => {
-    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
     const headers = {
-      Authorization: `Bearer ${session.access}`,
+      Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}`,
       'Content-Type': 'application/json',
     }
     const usersResponse = await fetch('http://127.0.0.1:8001/api/accounts/users/?limit=100', { headers })
@@ -214,7 +212,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
         candidate.module === moduleId && candidate.student === student.id,
     )
     if (existing?.is_active) {
-      return { cleanup: 'deactivate', id: existing.id, token: session.access }
+      return { cleanup: 'deactivate', id: existing.id }
     }
     if (existing) {
       await fetch(`http://127.0.0.1:8001/api/modules/access/${existing.id}/`, {
@@ -222,7 +220,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
         headers,
         method: 'PATCH',
       })
-      return { cleanup: 'deactivate', id: existing.id, token: session.access }
+      return { cleanup: 'deactivate', id: existing.id }
     }
     const accessResponse = await fetch('http://127.0.0.1:8001/api/modules/access/', {
       body: JSON.stringify({ module: moduleId, student: student.id, is_active: true }),
@@ -230,11 +228,13 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
       method: 'POST',
     })
     const access = await accessResponse.json()
-    return { cleanup: 'delete', id: access.id, token: session.access }
+    return { cleanup: 'delete', id: access.id }
   }, target.module)
   try {
-    await page.evaluate(() => localStorage.clear())
-    await page.goto('/modules')
+    const signedOut = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
+    await page.locator('button[title="Sign out"]:visible').click()
+    expect((await signedOut).status()).toBe(204)
+    await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
     await page.getByLabel('Student number').fill('E2E-001')
     await page.getByLabel('Password', { exact: true }).fill('e2e-password')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -259,7 +259,7 @@ test('bulk links a Main Activity and records score-only paper submissions', asyn
       await fetch(`http://127.0.0.1:8001/api/modules/access/${id}/`, cleanup === 'delete'
         ? { headers, method: 'DELETE' }
         : { body: JSON.stringify({ is_active: false }), headers, method: 'PATCH' })
-    }, temporaryAccess)
+    }, { ...temporaryAccess, token: adminToken })
   }
 })
 

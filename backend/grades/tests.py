@@ -3,7 +3,9 @@ from io import StringIO
 
 from django.core.management import call_command
 from django.db import connection
-from django.test import TestCase
+from django.conf import settings
+from django.test import TestCase, override_settings
+from unittest import skipUnless
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
@@ -20,6 +22,7 @@ from grades.models import (
     GradingTemplate,
     GradingPeriod,
     FinalGrade,
+    GradePublication,
     PeriodGrade,
     StudentCategoryGrade,
     StudentGradeItemScore,
@@ -41,7 +44,15 @@ from learning_modules.models import (
     ModuleTopic,
 )
 from subjects.models import Subject
-from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, SubjectSchedule
+from subjects.models import (
+    AdultRosterAttestation,
+    ScheduleInstructor,
+    ScheduleStudent,
+    SchoolYear,
+    SchoolYearSemester,
+    Semester,
+    SubjectSchedule,
+)
 
 
 class GradingTemplateSeedTests(TestCase):
@@ -1479,3 +1490,120 @@ class ScalableTeacherGradesApiTests(APITestCase):
         self.assertLessEqual(len(queries), 30)
         self.assertEqual(searched.data['count'], 1)
         self.assertEqual(searched.data['enrollments'][0]['student'], students[-1].id)
+
+
+@override_settings(REAL_STUDENT_PRIVACY_ENFORCEMENT=True)
+@skipUnless(settings.ADVANCED_PRIVACY_FEATURES, 'Advanced grade publication is dormant.')
+class GradePublicationPrivacyTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='publisher', password='testpass123', role=User.Role.TEACHER,
+        )
+        self.other_teacher = User.objects.create_user(
+            username='unassigned', password='testpass123', role=User.Role.TEACHER,
+        )
+        self.admin = User.objects.create_user(
+            username='privacy_admin', password='testpass123', role=User.Role.ADMIN,
+        )
+        self.student = User.objects.create_user(
+            username='published_student', password='testpass123', role=User.Role.STUDENT,
+        )
+        self.other_student = User.objects.create_user(
+            username='other_published_student', password='testpass123', role=User.Role.STUDENT,
+        )
+        subject = Subject.objects.create(code='SAFE101', name='Private Grade Publication')
+        year = SchoolYear.objects.create(start_year=2035, end_year=2036)
+        term = SchoolYearSemester.objects.create(school_year=year, semester=Semester.FIRST)
+        self.schedule = SubjectSchedule.objects.create(
+            subject=subject, school_year_semester=term, days='MWF',
+            start_time='08:00', end_time='09:00', section='A', created_by=self.teacher,
+        )
+        ScheduleInstructor.objects.create(
+            schedule=self.schedule, instructor=self.teacher, assigned_by=self.admin,
+        )
+        AdultRosterAttestation.objects.create(schedule=self.schedule, attested_by=self.admin)
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.student)
+        ScheduleStudent.objects.create(schedule=self.schedule, student=self.other_student)
+        self.category = GradeCategory.objects.create(
+            subject=subject, grading_period=GradingPeriod.PRELIM,
+            category=GradeCategoryChoices.QUIZ, name='Quizzes', weight=Decimal('100.00'),
+        )
+        self.item = GradeItem.objects.create(
+            schedule=self.schedule, grade_category=self.category,
+            title='Private quiz', points_possible=Decimal('20.00'),
+        )
+        for student, raw in ((self.student, '18.00'), (self.other_student, '16.00')):
+            StudentGradeItemScore.objects.create(
+                grade_item=self.item, student=student, raw_score=Decimal(raw),
+            )
+            period = PeriodGrade.objects.get(
+                schedule=self.schedule, student=student, grading_period=GradingPeriod.PRELIM,
+            )
+            period.completion_status = 'COMPLETE'
+            period.raw_score = Decimal('95.00') if student == self.student else Decimal('90.00')
+            period.save(update_fields=('completion_status', 'raw_score'))
+
+    def test_student_draft_endpoints_are_empty_before_publication(self):
+        self.client.force_authenticate(self.student)
+
+        overview = self.client.get('/api/grades/overview/')
+        items = self.client.get('/api/grades/items/')
+        scores = self.client.get('/api/grades/item-scores/')
+
+        self.assertEqual(overview.status_code, 200)
+        self.assertEqual(overview.data, {'publications': [], 'drafts_hidden': True})
+        self.assertEqual(result_rows(items), [])
+        self.assertEqual(result_rows(scores), [])
+
+    def test_publication_is_student_specific_stable_and_versioned(self):
+        self.client.force_authenticate(self.teacher)
+        first = self.client.post('/api/grades/publications/publish/', {
+            'schedule': self.schedule.id, 'period': 'PRELIM',
+        }, format='json')
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(first.data['revision'], 1)
+
+        self.client.force_authenticate(self.student)
+        visible = self.client.get('/api/grades/overview/')
+        self.assertEqual(len(visible.data['publications']), 1)
+        snapshots = visible.data['publications'][0]['student_snapshots']
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0]['student'], self.student.id)
+        self.assertEqual(snapshots[0]['snapshot']['summary']['raw_score'], '95.00')
+
+        grade = PeriodGrade.objects.get(
+            schedule=self.schedule, student=self.student, grading_period=GradingPeriod.PRELIM,
+        )
+        grade.raw_score = Decimal('99.00')
+        grade.save(update_fields=('raw_score',))
+        unchanged = self.client.get('/api/grades/overview/')
+        self.assertEqual(
+            unchanged.data['publications'][0]['student_snapshots'][0]['snapshot']['summary']['raw_score'],
+            '95.00',
+        )
+
+        self.client.force_authenticate(self.teacher)
+        missing_note = self.client.post('/api/grades/publications/publish/', {
+            'schedule': self.schedule.id, 'period': 'PRELIM',
+        }, format='json')
+        self.assertEqual(missing_note.status_code, 400)
+        revision = self.client.post('/api/grades/publications/publish/', {
+            'schedule': self.schedule.id, 'period': 'PRELIM',
+            'publication_note': 'Corrected verified score',
+        }, format='json')
+        self.assertEqual(revision.status_code, 201, revision.data)
+        self.assertEqual(revision.data['revision'], 2)
+        first_record = GradePublication.objects.get(schedule=self.schedule, period='PRELIM', revision=1)
+        self.assertIsNotNone(first_record.withdrawn_at)
+        self.assertTrue(first_record.student_snapshots.exists())
+
+    def test_unassigned_teacher_cannot_view_or_publish(self):
+        self.client.force_authenticate(self.other_teacher)
+
+        gradebook = self.client.get(f'/api/grades/gradebook/?schedule={self.schedule.id}')
+        publish = self.client.post('/api/grades/publications/publish/', {
+            'schedule': self.schedule.id, 'period': 'PRELIM',
+        }, format='json')
+
+        self.assertEqual(gradebook.status_code, 404)
+        self.assertEqual(publish.status_code, 404)

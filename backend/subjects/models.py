@@ -187,6 +187,83 @@ class SubjectSchedule(models.Model):
         )
 
 
+class ScheduleInstructor(models.Model):
+    schedule = models.ForeignKey(
+        SubjectSchedule,
+        on_delete=models.CASCADE,
+        related_name='instructors',
+    )
+    instructor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='teaching_assignments',
+    )
+    is_active = models.BooleanField(default=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name='created_teaching_assignments',
+        null=True,
+        blank=True,
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['schedule', 'instructor'],
+                name='unique_schedule_instructor',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['instructor', 'is_active'], name='instructor_active_idx'),
+        ]
+
+    def clean(self):
+        if self.instructor_id and self.instructor.role != self.instructor.Role.TEACHER:
+            raise ValidationError({'instructor': 'Only teacher accounts may be assigned to a class.'})
+
+    def set_active(self, active):
+        self.is_active = active
+        self.deactivated_at = None if active else timezone.now()
+        self.save(update_fields=['is_active', 'deactivated_at'])
+
+
+class AdultRosterAttestation(models.Model):
+    schedule = models.ForeignKey(
+        SubjectSchedule,
+        on_delete=models.PROTECT,
+        related_name='adult_roster_attestations',
+    )
+    statement_version = models.CharField(max_length=30, default='2026-09-11')
+    attested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='adult_roster_attestations',
+    )
+    attested_at = models.DateTimeField(auto_now_add=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='revoked_adult_roster_attestations',
+        null=True,
+        blank=True,
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revocation_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ['-attested_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['schedule'],
+                condition=Q(revoked_at__isnull=True),
+                name='unique_active_adult_attestation',
+            ),
+        ]
+
+
 class ScheduleStudent(models.Model):
     schedule = models.ForeignKey(
         SubjectSchedule,

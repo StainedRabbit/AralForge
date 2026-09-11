@@ -1,4 +1,4 @@
-export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT'
+export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PRIVACY_OFFICER'
 
 export type ApiPage<T> = {
   count: number
@@ -20,7 +20,6 @@ export type ApiList<T> = T[] | ApiPage<T>
 
 export type TokenPair = {
   access: string
-  refresh: string
 }
 
 export type User = {
@@ -34,8 +33,53 @@ export type User = {
   last_name: string
   role: Role
   is_admin_teacher: boolean
+  is_privacy_officer: boolean
   is_active: boolean
   must_change_password: boolean
+}
+
+export type LegalDocumentStatus = {
+  document: 'PRIVACY' | 'TERMS' | 'ACCEPTABLE_USE'
+  version: string
+  effective_date: string
+  action: 'ACKNOWLEDGED' | 'AGREED'
+  path: string
+  accepted: boolean
+}
+
+export type LegalStatus = {
+  complete: boolean
+  documents: LegalDocumentStatus[]
+}
+
+export type PrivacyRequestEvent = {
+  id: number
+  event: string
+  from_status: string
+  to_status: string
+  public_message: string
+  internal_note?: string
+  actor: number | null
+  actor_name: string
+  created_at: string
+}
+
+export type PrivacyRequestRecord = {
+  id: string
+  subject: number
+  subject_name: string
+  subject_number: string
+  request_type: 'ACCESS' | 'CORRECTION' | 'PORTABILITY' | 'OBJECTION' | 'ERASURE_BLOCKING'
+  details: string
+  status: 'SUBMITTED' | 'IDENTITY_VERIFICATION' | 'IN_REVIEW' | 'APPROVED' | 'DENIED' | 'COMPLETED' | 'CANCELLED'
+  assigned_to: number | null
+  assigned_to_name: string
+  public_response: string
+  submitted_at: string
+  updated_at: string
+  decided_at: string | null
+  completed_at: string | null
+  events: PrivacyRequestEvent[]
 }
 
 export type StudentProfile = {

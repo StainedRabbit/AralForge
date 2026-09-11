@@ -1,10 +1,12 @@
 from django.urls import include, path
+from django.conf import settings
 from rest_framework.routers import DefaultRouter
 
 from .views import (
     FinalGradeViewSet,
     GradeCategoryViewSet,
     GradeItemViewSet,
+    GradePublicationViewSet,
     GradingTemplateItemViewSet,
     GradingTemplateViewSet,
     PeriodGradeViewSet,
@@ -25,6 +27,8 @@ router.register('template-items', GradingTemplateItemViewSet, basename='grading-
 router.register('subject-policies', SubjectGradingPolicyViewSet, basename='subject-grading-policy')
 router.register('categories', GradeCategoryViewSet, basename='grade-category')
 router.register('items', GradeItemViewSet, basename='grade-item')
+if settings.ADVANCED_PRIVACY_FEATURES:
+    router.register('publications', GradePublicationViewSet, basename='grade-publication')
 router.register('item-scores', StudentGradeItemScoreViewSet, basename='student-grade-item-score')
 router.register('student-categories', StudentCategoryGradeViewSet, basename='student-category-grade')
 router.register('periods', PeriodGradeViewSet, basename='period-grade')

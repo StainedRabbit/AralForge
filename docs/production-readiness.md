@@ -18,6 +18,8 @@ Railway requires these values for each environment:
 - `CORS_ALLOWED_ORIGINS` (only the exact frontend origins)
 - `CORS_ALLOWED_ORIGIN_REGEXES` (leave empty unless a reviewed, narrowly scoped pattern is required)
 - `CSRF_TRUSTED_ORIGINS` (the exact HTTPS origins)
+- `AUTH_REFRESH_COOKIE_SECURE=True`
+- `AUTH_REFRESH_COOKIE_SAMESITE=None` (required when the reviewed frontend and API are cross-site; use the narrowest deployment topology possible)
 - `API_SLOW_REQUEST_MS=750`
 - `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
 - `REDIS_URL` (the shared Railway Redis URL used by the API and Celery worker)
@@ -28,17 +30,7 @@ Railway requires these values for each environment:
 - `SUPABASE_S3_SECRET_ACCESS_KEY`
 - `SUPABASE_STORAGE_BUCKET`
 
-Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. The public legal configuration below is optional at build time and recommended for a reviewed deployment:
-
-- `VITE_LEGAL_OPERATOR_NAME`
-- `VITE_LEGAL_SCHOOL_NAME`
-- `VITE_LEGAL_SERVICE_ADDRESS`
-- `VITE_LEGAL_SUPPORT_EMAIL`
-- `VITE_LEGAL_PRIVACY_EMAIL`
-- `VITE_LEGAL_EFFECTIVE_DATE`
-- `VITE_LEGAL_RETENTION_POLICY`
-
-When legal values are absent, the public documents use neutral operator/school wording, omit addresses and email links, and direct users to an established official school channel. That fallback permits deployment testing but does not provide legal production clearance. Before public production use, the legal values must be approved for publication and must match the written school authorization, final controller/processor allocation, and applicable data-processing agreement. Keep separate frontend deployments for staging and production.
+Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. Keep separate frontend deployments for staging and production.
 
 Each Railway environment also requires a worker service built from the same commit and configured with the same database, application, storage, and Redis variables as the API. Its start command is:
 
@@ -69,7 +61,7 @@ A reachable Redis service does not mean a worker is running. If a roster import 
    VITE_API_BASE_URL=https://<railway-host>/api
    ```
 
-5. Verify `https://<railway-host>/api/health/`, the login request, token refresh, bearer-authenticated requests, and the exact CORS response before treating staging as ready.
+5. Verify `https://<railway-host>/api/health/`, the HttpOnly refresh cookie, CSRF bootstrap, token rotation, logout revocation, bearer-authenticated requests, CSP/security headers, and the exact credentialed CORS response before treating staging as ready.
 
 Production must remain separate and restricted to:
 

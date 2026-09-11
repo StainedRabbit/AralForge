@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { LegalLinks } from '../legal/LegalLinks'
 import type { User } from '../types'
 import { fullName, initials } from '../utils/student'
 import { Icon } from './Icon'
@@ -86,9 +85,6 @@ export function Sidebar({
           <Icon name="logout" />
           <span>Sign out</span>
         </button>
-        <div className="sidebar-legal-links">
-          <LegalLinks compact />
-        </div>
       </div>
     </aside>
   )
@@ -272,7 +268,6 @@ export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, w
         <nav aria-label="More destinations" className="mobile-more__links">
           {items.map((item) => <Link aria-current={matchesNavItem(location.pathname, item) ? 'page' : undefined} className={matchesNavItem(location.pathname, item) ? 'active' : ''} key={item.to} onClick={onClose} to={item.to}><Icon name={item.icon} /><span><strong>{item.label}</strong><small>Open {item.label.toLowerCase()}</small></span><Icon name="arrow-right" /></Link>)}
         </nav>
-        <LegalLinks compact />
         <button className="button button--secondary mobile-more__logout" onClick={onLogout} type="button"><Icon name="logout" /><span>Sign out</span></button>
       </div>
     </div>

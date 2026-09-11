@@ -18,9 +18,8 @@ test('teacher Overview drives attendance and focused submission review', async (
   await signIn(page)
 
   const scheduleId = await page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
     const headers = {
-      Authorization: `Bearer ${session.access}`,
+      Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}`,
       'Content-Type': 'application/json',
     }
     const response = await fetch('http://127.0.0.1:8001/api/subjects/subject-schedules/?limit=100&status=all', { headers })

@@ -3,15 +3,19 @@ from datetime import timedelta
 
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
+from django.middleware.csrf import get_token
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken, Token
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
 from .models import StudentProfile
 
@@ -64,6 +68,15 @@ class AralForgeTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class AralForgeTokenObtainPairView(TokenObtainPairView):
     serializer_class = AralForgeTokenObtainPairSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        refresh = response.data.pop('refresh', None)
+        if refresh:
+            set_refresh_cookie(response, refresh)
+        return response
 
 
 class CompletePasswordSetupSerializer(serializers.Serializer):
@@ -91,6 +104,8 @@ class CompletePasswordSetupSerializer(serializers.Serializer):
 class CompletePasswordSetupView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'password_setup'
 
     def post(self, request):
         serializer = CompletePasswordSetupSerializer(data=request.data)
@@ -100,4 +115,84 @@ class CompletePasswordSetupView(APIView):
         user.must_change_password = False
         user.save(update_fields=('password', 'must_change_password'))
         refresh = RefreshToken.for_user(user)
-        return Response({'refresh': str(refresh), 'access': str(refresh.access_token)})
+        response = Response({'access': str(refresh.access_token)})
+        set_refresh_cookie(response, str(refresh))
+        return response
+
+
+class CookieTokenRefreshView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_refresh'
+
+    def post(self, request):
+        enforce_csrf(request)
+        raw_refresh = request.COOKIES.get(settings.AUTH_REFRESH_COOKIE_NAME)
+        if not raw_refresh:
+            return Response(status=204)
+        serializer = TokenRefreshSerializer(data={'refresh': raw_refresh})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError:
+            return Response(status=204)
+        response = Response({'access': serializer.validated_data['access']})
+        rotated = serializer.validated_data.get('refresh')
+        if rotated:
+            set_refresh_cookie(response, rotated)
+        return response
+
+
+class LogoutView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        enforce_csrf(request)
+        raw_refresh = request.COOKIES.get(settings.AUTH_REFRESH_COOKIE_NAME)
+        if raw_refresh:
+            try:
+                RefreshToken(raw_refresh).blacklist()
+            except TokenError:
+                pass
+        response = Response(status=204)
+        clear_refresh_cookie(response)
+        return response
+
+
+class CsrfTokenView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({'csrf_token': get_token(request)})
+
+
+def set_refresh_cookie(response, value):
+    response.set_cookie(
+        settings.AUTH_REFRESH_COOKIE_NAME,
+        value,
+        max_age=int(RefreshToken.lifetime.total_seconds()),
+        httponly=True,
+        secure=settings.AUTH_REFRESH_COOKIE_SECURE,
+        samesite=settings.AUTH_REFRESH_COOKIE_SAMESITE,
+        path='/api/auth/',
+    )
+
+
+def clear_refresh_cookie(response):
+    response.delete_cookie(
+        settings.AUTH_REFRESH_COOKIE_NAME,
+        path='/api/auth/',
+        samesite=settings.AUTH_REFRESH_COOKIE_SAMESITE,
+    )
+
+
+def enforce_csrf(request):
+    from rest_framework.authentication import CSRFCheck
+
+    check = CSRFCheck(lambda inner_request: None)
+    check.process_request(request._request)
+    reason = check.process_view(request._request, None, (), {})
+    if reason:
+        raise AuthenticationFailed(f'CSRF validation failed: {reason}')

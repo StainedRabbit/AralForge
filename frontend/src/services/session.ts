@@ -1,46 +1,32 @@
 import type { Session } from '../api'
-import { migrateAralForgeStorage, migrateStorageValue } from '../utils/storageMigration'
+import { migrateAralForgeStorage } from '../utils/storageMigration'
 
 export const SESSION_KEY = 'aralforge.session'
 export const LEGACY_SESSION_KEY = 'ezoryx.session'
 
-export function loadSession() {
-  migrateAralForgeStorage()
-  const raw = migrateStorageValue(SESSION_KEY, LEGACY_SESSION_KEY, isStoredSession)
-
-  if (!raw) {
-    return null
-  }
-
-  try {
-    return JSON.parse(raw) as Session
-  } catch {
-    clearSession()
-    return null
+declare global {
+  interface Window {
+    __ARALFORGE_E2E_ACCESS_TOKEN__?: string
   }
 }
 
-export function saveSession(session: Session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+export function loadSession() {
+  migrateAralForgeStorage()
+  // JWTs from older releases are deliberately removed. The current access token
+  // lives only in memory; the refresh credential is an HttpOnly cookie.
+  clearSession()
+  return null
+}
+
+export function saveSession(_session: Session) {
+  // Intentionally memory-only. App owns the current access token state.
+  if (import.meta.env.DEV) window.__ARALFORGE_E2E_ACCESS_TOKEN__ = _session.access
 }
 
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY)
   localStorage.removeItem(LEGACY_SESSION_KEY)
-}
-
-function isStoredSession(value: string) {
-  try {
-    const parsed = JSON.parse(value) as Partial<Session> | null
-    return Boolean(
-      parsed
-      && typeof parsed === 'object'
-      && typeof parsed.access === 'string'
-      && typeof parsed.refresh === 'string',
-    )
-  } catch {
-    return false
-  }
+  if (import.meta.env.DEV) delete window.__ARALFORGE_E2E_ACCESS_TOKEN__
 }
 
 export function readJwtUserId(token: string) {

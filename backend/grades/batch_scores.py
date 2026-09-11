@@ -1,12 +1,14 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.models import User
 from subjects.models import ScheduleStudent
+from subjects.access import managed_schedules_for
 
 from .models import GradeItem, StudentGradeItemScore
 from .services import recompute_student_categories_bulk
@@ -49,9 +51,12 @@ def apply_score_batch(user, changes):
         student_ids.add(student_id)
         normalized.append((index, operation, item_id, student_id, change))
 
+    item_queryset = GradeItem.objects.filter(id__in=item_ids)
+    if user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+        item_queryset = item_queryset.filter(schedule__in=managed_schedules_for(user))
     items = {
         item.id: item
-        for item in GradeItem.objects.filter(id__in=item_ids).select_related(
+        for item in item_queryset.select_related(
             'schedule', 'grade_category', 'grade_category__subject',
         )
     }

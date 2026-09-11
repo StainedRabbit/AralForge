@@ -29,11 +29,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   await page.evaluate(() => {
-    const session = localStorage.getItem('aralforge.session')
-    if (!session) throw new Error('Expected an authenticated AralForge session.')
-
-    localStorage.setItem('ezoryx.session', session)
-    localStorage.removeItem('aralforge.session')
+    localStorage.setItem('ezoryx.session', JSON.stringify({ access: 'legacy', refresh: 'legacy' }))
     localStorage.setItem('ezoryx:lesson-draft:v2:lesson:77', JSON.stringify({
       savedAt: '2026-08-19T00:00:00Z',
       value: { title: 'Legacy lesson draft' },
@@ -64,7 +60,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
     invalidActivity: localStorage.getItem('aralforge.main-activity-draft.invalid'),
   }))
 
-  expect(migrated.session).toBeTruthy()
+  expect(migrated.session).toBeNull()
   expect(migrated.legacySession).toBeNull()
   expect(migrated.lesson).toContain('Legacy lesson draft')
   expect(migrated.legacyLesson).toBeNull()
@@ -102,5 +98,5 @@ test('does not migrate a malformed legacy session', async ({ page }) => {
     current: localStorage.getItem('aralforge.session'),
     legacy: localStorage.getItem('ezoryx.session'),
   }))
-  expect(values).toEqual({ current: null, legacy: '{invalid' })
+  expect(values).toEqual({ current: null, legacy: null })
 })

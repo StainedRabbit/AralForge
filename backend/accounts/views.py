@@ -1,4 +1,7 @@
 from django.db.models import BooleanField, Exists, F, OuterRef, Q, Value
+from django.conf import settings
+from django.utils import timezone
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -35,6 +38,22 @@ class UserViewSet(viewsets.ModelViewSet):
             return [IsAdminTeacher()]
 
         return [IsAdminTeacherOrReadOnly()]
+
+    def perform_destroy(self, instance):
+        if not settings.ADVANCED_PRIVACY_FEATURES:
+            instance.delete()
+            return
+
+        """Advanced rollout: deletion is a reversible deactivation."""
+        instance.is_active = False
+        instance.save(update_fields=('is_active',))
+        ScheduleStudent.objects.filter(student=instance, is_active=True).update(
+            is_active=False,
+            deactivated_at=timezone.now(),
+            deactivated_by=self.request.user,
+        )
+        for outstanding in OutstandingToken.objects.filter(user=instance):
+            BlacklistedToken.objects.get_or_create(token=outstanding)
 
     @action(detail=False, methods=['get'])
     def me(self, request):

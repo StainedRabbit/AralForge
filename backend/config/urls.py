@@ -18,9 +18,13 @@ from django.contrib import admin
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path
-from rest_framework_simplejwt.views import TokenRefreshView
-
-from accounts.auth import AralForgeTokenObtainPairView, CompletePasswordSetupView
+from accounts.auth import (
+    AralForgeTokenObtainPairView,
+    CompletePasswordSetupView,
+    CookieTokenRefreshView,
+    CsrfTokenView,
+    LogoutView,
+)
 from config.health import health_check
 
 admin.site.site_header = 'AralForge administration'
@@ -31,7 +35,9 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='health-check'),
     path('api/auth/token/', AralForgeTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/token/refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/logout/', LogoutView.as_view(), name='logout'),
+    path('api/auth/csrf/', CsrfTokenView.as_view(), name='csrf'),
     path('api/auth/complete-password-setup/', CompletePasswordSetupView.as_view(), name='complete_password_setup'),
     path('api/accounts/', include('accounts.urls')),
     path('api/subjects/', include('subjects.urls')),
@@ -42,6 +48,9 @@ urlpatterns = [
     path('api/overview/', include('overview.urls')),
     path('api/jobs/', include('jobs.urls')),
 ]
+
+if settings.ADVANCED_PRIVACY_FEATURES:
+    urlpatterns.append(path('api/privacy/', include('privacy.urls')))
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

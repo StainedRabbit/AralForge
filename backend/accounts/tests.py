@@ -437,3 +437,41 @@ class ChangePasswordTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class CookieSessionSecurityTests(APITestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='cookie-user', password='CookiePass!482', role=get_user_model().Role.STUDENT,
+        )
+
+    def test_refresh_token_is_httponly_rotated_and_revoked_on_logout(self):
+        login = self.client.post('/api/auth/token/', {
+            'username': self.user.username, 'password': 'CookiePass!482',
+        }, format='json')
+        self.assertEqual(login.status_code, 200)
+        self.assertIn('access', login.data)
+        self.assertNotIn('refresh', login.data)
+        refresh_cookie = login.cookies['aralforge_refresh']
+        self.assertTrue(refresh_cookie['httponly'])
+        original_refresh = refresh_cookie.value
+
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        refreshed = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+        self.assertEqual(refreshed.status_code, 200, refreshed.data)
+        self.assertIn('access', refreshed.data)
+        rotated_refresh = refreshed.cookies['aralforge_refresh'].value
+        self.assertNotEqual(rotated_refresh, original_refresh)
+
+        logged_out = self.client.post(
+            '/api/auth/logout/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+        self.assertEqual(logged_out.status_code, 204)
+        self.assertEqual(logged_out.cookies['aralforge_refresh']['max-age'], 0)
+
+        self.client.cookies['aralforge_refresh'] = rotated_refresh
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        after_logout = self.client.post('/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf)
+        self.assertEqual(after_logout.status_code, 204)

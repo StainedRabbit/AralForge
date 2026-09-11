@@ -57,16 +57,51 @@ export async function completePasswordSetup(
   })
 }
 
-export async function refreshToken(refresh: string) {
-  return request<{ access: string }>('/auth/token/refresh/', {
+let csrfToken: string | null = null
+let csrfInFlight: Promise<string> | null = null
+
+async function getCsrfToken() {
+  if (csrfToken) return csrfToken
+  csrfInFlight ??= request<{ csrf_token: string }>('/auth/csrf/')
+    .then(payload => {
+      csrfToken = payload.csrf_token
+      return payload.csrf_token
+    })
+    .finally(() => { csrfInFlight = null })
+  return csrfInFlight
+}
+
+let refreshSessionInFlight: Promise<{ access: string }> | null = null
+
+export function refreshToken() {
+  refreshSessionInFlight ??= getCsrfToken()
+    .then(async csrf => {
+      const response = await fetch(buildUrl('/auth/token/refresh/'), {
+        credentials: 'include',
+        headers: createHeaders({ headers: { 'X-CSRFToken': csrf } }),
+        method: 'POST',
+      })
+      if (response.status === 204) {
+        throw new ApiError('No active session was found.', 401)
+      }
+      return parseResponse<{ access: string }>(response)
+    })
+    .finally(() => { refreshSessionInFlight = null })
+  return refreshSessionInFlight
+}
+
+export async function logoutSession() {
+  const csrf = await getCsrfToken()
+  await request<void>('/auth/logout/', {
     method: 'POST',
-    body: JSON.stringify({ refresh }),
+    headers: { 'X-CSRFToken': csrf },
   })
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}) {
   const response = await fetch(buildUrl(path), {
     ...options,
+    credentials: 'include',
     headers: createHeaders(options),
   })
 
@@ -80,6 +115,7 @@ export async function requestWithToken<T>(
 ) {
   const response = await fetch(buildUrl(path), {
     ...options,
+    credentials: 'include',
     headers: createHeaders(options, accessToken),
   })
 

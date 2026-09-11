@@ -9,6 +9,7 @@ E2E_TESTING = True
 DEBUG = True
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 CORS_ALLOWED_ORIGINS = ['http://127.0.0.1:4173', 'http://localhost:4173']
+CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:4173', 'http://localhost:4173']
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -17,3 +18,16 @@ DATABASES = {
 }
 MEDIA_ROOT = BASE_DIR / 'e2e_media'  # noqa: F405
 PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
+
+# Browser regression tests intentionally perform many independent sign-ins from
+# one local address.  Keep the production throttle classes and limits intact;
+# only give this isolated test server a sufficiently high ceiling.
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,  # noqa: F405
+    'DEFAULT_THROTTLE_RATES': {
+        **REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'],  # noqa: F405
+        'login': '10000/minute',
+        'password_setup': '10000/minute',
+        'token_refresh': '10000/minute',
+    },
+}

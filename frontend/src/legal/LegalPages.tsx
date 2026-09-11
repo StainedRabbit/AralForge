@@ -128,7 +128,7 @@ function StorageNotice() {
       <LegalCallout>AralForge uses essential storage only in this launch. There are no advertising, analytics, or marketing trackers.</LegalCallout>
       <LegalSection title="Current browser storage">
         <ul>
-          <li><code>aralforge.session</code> stores access and refresh tokens so an invited user can remain signed in. A later security slice will move refresh tokens to Secure, HttpOnly cookies.</li>
+          <li>A rotated refresh credential is stored in a Secure, HttpOnly cookie so an invited user can remain signed in. JavaScript cannot read this cookie. The short-lived access token is held only in memory and disappears when the page closes or reloads.</li>
           <li><code>aralforge:lesson-draft:*</code> and <code>aralforge.main-activity-draft.*</code> protect authorized editing work from accidental loss.</li>
           <li><code>aralforge:presentation-text-size</code> remembers a presentation display preference.</li>
           <li><code>aralforge:roster-import-acknowledged:*</code> prevents an administrator from being shown the same completed roster-import result repeatedly.</li>
@@ -136,7 +136,7 @@ function StorageNotice() {
         </ul>
       </LegalSection>
       <LegalSection title="Cookies and hosting controls">
-        <p>The student-facing application does not intentionally set optional cookies in this launch. Infrastructure providers may use strictly necessary security or delivery controls. Their exact production behavior must be verified and this notice updated before deployment.</p>
+        <p>The student-facing application does not set optional cookies in this launch. It uses only authentication and request-security cookies. Infrastructure providers may use strictly necessary security or delivery controls. Their exact production behavior must be verified and this notice updated before deployment.</p>
       </LegalSection>
       <LegalSection title="Your controls">
         <p>You may clear site data through your browser. Clearing authentication data signs you out, and clearing unsaved drafts may permanently remove them from that device. Essential storage cannot be disabled through a preference toggle without preventing the associated feature from working.</p>

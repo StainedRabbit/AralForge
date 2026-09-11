@@ -17,6 +17,8 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
 
   expect([...new Set(apiRequests.filter(path => path !== '/api/auth/token/'))]).toEqual([
+    '/api/auth/csrf/',
+    '/api/auth/token/refresh/',
     '/api/accounts/users/me/',
     '/api/overview/navigation/',
     '/api/overview/dashboard/',
@@ -75,7 +77,7 @@ test('feature navigation loads only that route resources', async ({ page }) => {
   expect(uniqueRouteRequests.length).toBeLessThanOrEqual(10)
 })
 
-test('JWT login, refresh, authenticated retry, and logout stay on the configured API', async ({ page }) => {
+test('cookie login, refresh, authenticated requests, and logout stay on the configured API', async ({ page }) => {
   const apiRequests: Array<{ authorization: string | null; pathname: string; origin: string }> = []
   page.on('request', request => {
     const url = new URL(request.url())
@@ -98,15 +100,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   expect(loginRequest?.origin).toBe('http://127.0.0.1:8001')
   expect(loginRequest?.authorization).toBeNull()
 
-  await page.evaluate(() => {
-    const rawSession = localStorage.getItem('aralforge.session')
-    if (!rawSession) throw new Error('Expected a stored JWT session.')
-    const session = JSON.parse(rawSession) as { access: string; refresh: string }
-    localStorage.setItem(
-      'aralforge.session',
-      JSON.stringify({ ...session, access: 'invalid-access-token' }),
-    )
-  })
+  expect(await page.evaluate(() => localStorage.getItem('aralforge.session'))).toBeNull()
   apiRequests.length = 0
 
   await page.reload()
@@ -124,13 +118,8 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   )
   expect(
     identityRequests.some(
-      request => request.authorization === 'Bearer invalid-access-token',
-    ),
-  ).toBe(true)
-  expect(
-    identityRequests.some(
       request => request.authorization?.startsWith('Bearer ')
-        && request.authorization !== 'Bearer invalid-access-token',
+        && request.authorization !== 'Bearer undefined',
     ),
   ).toBe(true)
 
@@ -140,5 +129,7 @@ test('JWT login, refresh, authenticated retry, and logout stay on the configured
   const storedSession = await page.evaluate(() => localStorage.getItem('aralforge.session'))
 
   expect(storedSession).toBeNull()
-  expect(apiRequests).toEqual([])
+  const logoutRequest = apiRequests.find(request => request.pathname === '/api/auth/logout/')
+  expect(logoutRequest?.origin).toBe('http://127.0.0.1:8001')
+  expect(logoutRequest?.authorization).toBeNull()
 })

@@ -126,7 +126,7 @@ test('mobile detail panel contains focus and protects unsaved edits', async ({ p
 
 test('selected-student enrollments and Advanced tools remain available', async ({ page }) => {
   await openStudents(page)
-  const token = await page.evaluate(() => JSON.parse(localStorage.getItem('aralforge.session') ?? '{}').access as string)
+  const token = await page.evaluate(() => window.__ARALFORGE_E2E_ACCESS_TOKEN__ as string)
   const headers = { Authorization: `Bearer ${token}` }
   const studentNumber = `E2E-ENR-${randomUUID().slice(0, 12)}`
   const created = await page.request.post('http://127.0.0.1:8001/api/accounts/students/', {
@@ -178,7 +178,7 @@ test('selected-student enrollments and Advanced tools remain available', async (
   } finally {
     releaseRefresh()
     const deleted = await page.request.delete(`http://127.0.0.1:8001/api/accounts/users/${profile.user}/`, { headers })
-    expect(deleted.ok()).toBe(true)
+    expect(deleted.status()).toBe(204)
   }
 })
 

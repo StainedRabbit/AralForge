@@ -99,5 +99,5 @@ function ActivityWorkspaceRoute({ api, currentUser, profile }: WorkspaceRoutePro
 type GradeOverview = { enrollments: ScheduleStudent[]; schedules: SubjectSchedule[]; categories: GradeCategory[]; category_grades: StudentCategoryGrade[]; period_grades: PeriodGrade[]; final_grades: FinalGrade[]; points: PointLedger[]; levels: LevelRule[] }
 function GradeOverviewRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
   const path = '/grades/overview/'
-  return <EndpointWorkspace<GradeOverview> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ enrollments: payload.enrollments, schedules: payload.schedules, gradeCategories: payload.categories, categoryGrades: payload.category_grades, periodGrades: payload.period_grades, finalGrades: payload.final_grades, points: payload.points, levels: payload.levels })}>{data => <GradesPage data={data} />}</EndpointWorkspace>
+  return <EndpointWorkspace<GradeOverview> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ enrollments: payload.enrollments, schedules: payload.schedules, gradeCategories: payload.categories, categoryGrades: payload.category_grades, periodGrades: payload.period_grades, finalGrades: payload.final_grades, points: payload.points, levels: payload.levels })}>{workspace => <GradesPage data={workspace} />}</EndpointWorkspace>
 }

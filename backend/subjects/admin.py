@@ -1,6 +1,18 @@
 from django.contrib import admin
 
-from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
+from .models import AdultRosterAttestation, ScheduleInstructor, ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
+
+
+@admin.register(ScheduleInstructor)
+class ScheduleInstructorAdmin(admin.ModelAdmin):
+    list_display = ('schedule', 'instructor', 'is_active', 'assigned_by', 'assigned_at')
+    list_filter = ('is_active',)
+
+
+@admin.register(AdultRosterAttestation)
+class AdultRosterAttestationAdmin(admin.ModelAdmin):
+    list_display = ('schedule', 'statement_version', 'attested_by', 'attested_at', 'revoked_at')
+    list_filter = ('statement_version',)
 
 
 @admin.register(SchoolYear)

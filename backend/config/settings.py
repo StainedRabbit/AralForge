@@ -182,7 +182,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework',
+      'rest_framework',
+      'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'storages',
     'accounts',
@@ -195,10 +196,12 @@ INSTALLED_APPS = [
     'gamification',
     'overview',
     'jobs',
+    'privacy',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'config.middleware.ApiSecurityHeadersMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'config.middleware.RequestTimingMiddleware',
@@ -254,6 +257,13 @@ CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '1800'))
 ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS = int(os.getenv('ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS', '300'))
+# Advanced real-student privacy workflows remain installed for a future approved
+# rollout, but are deliberately dormant in the current application.
+ADVANCED_PRIVACY_FEATURES = env_bool('ADVANCED_PRIVACY_FEATURES', default=False)
+REAL_STUDENT_PRIVACY_ENFORCEMENT = ADVANCED_PRIVACY_FEATURES and env_bool(
+    'REAL_STUDENT_PRIVACY_ENFORCEMENT',
+    default=False,
+)
 
 
 # Password validation
@@ -338,15 +348,34 @@ AUTH_USER_MODEL = 'accounts.User'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'accounts.authentication.AralForgeJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_PAGINATION_CLASS': 'config.pagination.AralForgePagination',
     'DEFAULT_FILTER_BACKENDS': ('config.filters.AralForgeQueryFilterBackend',),
-    'PAGE_SIZE': 50,
+      'PAGE_SIZE': 50,
+      'DEFAULT_THROTTLE_RATES': {
+          'login': os.getenv('AUTH_LOGIN_THROTTLE_RATE', '10/minute'),
+          'password_setup': os.getenv('AUTH_PASSWORD_SETUP_THROTTLE_RATE', '6/minute'),
+          'token_refresh': os.getenv('AUTH_REFRESH_THROTTLE_RATE', '30/minute'),
+      },
+  }
+
+SIMPLE_JWT = {
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
+
+CORS_ALLOW_CREDENTIALS = True
+AUTH_REFRESH_COOKIE_NAME = os.getenv('AUTH_REFRESH_COOKIE_NAME', 'aralforge_refresh')
+AUTH_REFRESH_COOKIE_SECURE = env_bool('AUTH_REFRESH_COOKIE_SECURE', default=not DEBUG)
+AUTH_REFRESH_COOKIE_SAMESITE = os.getenv(
+    'AUTH_REFRESH_COOKIE_SAMESITE',
+    'None' if not DEBUG else 'Lax',
+)
 
 CORS_EXPOSE_HEADERS = ['Server-Timing', 'X-Response-Time-Ms']
 
@@ -370,6 +399,7 @@ if not DEBUG:
 
     SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', default=True)
     CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', default=True)
+    CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'None')
     SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', default=True)
     SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(

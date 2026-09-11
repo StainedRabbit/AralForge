@@ -3,7 +3,15 @@ from rest_framework import serializers
 
 from accounts.services import clean_student_number, validate_person_name
 
-from .models import ScheduleStudent, SchoolYear, SchoolYearSemester, Subject, SubjectSchedule
+from .models import (
+    AdultRosterAttestation,
+    ScheduleInstructor,
+    ScheduleStudent,
+    SchoolYear,
+    SchoolYearSemester,
+    Subject,
+    SubjectSchedule,
+)
 from .scheduling import normalize_schedule_days
 
 
@@ -56,6 +64,8 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True)
     term_name = serializers.CharField(source='school_year_semester.name', read_only=True)
     term_is_active = serializers.BooleanField(source='school_year_semester.is_active', read_only=True)
+    instructor_ids = serializers.SerializerMethodField()
+    adult_roster_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = SubjectSchedule
@@ -67,6 +77,8 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             'school_year_semester',
             'term_name',
             'term_is_active',
+            'instructor_ids',
+            'adult_roster_verified',
             'days',
             'start_time',
             'end_time',
@@ -86,6 +98,8 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             'subject_name',
             'term_name',
             'term_is_active',
+            'instructor_ids',
+            'adult_roster_verified',
             'created_by',
             'updated_by',
             'archived_by',
@@ -109,6 +123,38 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('End time must be after start time.')
 
         return attrs
+
+    def get_instructor_ids(self, obj):
+        return list(obj.instructors.filter(is_active=True).values_list('instructor_id', flat=True))
+
+    def get_adult_roster_verified(self, obj):
+        return obj.adult_roster_attestations.filter(revoked_at__isnull=True).exists()
+
+
+class ScheduleInstructorSerializer(serializers.ModelSerializer):
+    instructor_name = serializers.CharField(source='instructor.get_display_name', read_only=True)
+
+    class Meta:
+        model = ScheduleInstructor
+        fields = ('id', 'schedule', 'instructor', 'instructor_name', 'is_active', 'assigned_by', 'assigned_at', 'deactivated_at')
+        read_only_fields = ('id', 'instructor_name', 'assigned_by', 'assigned_at', 'deactivated_at')
+
+    def validate_instructor(self, value):
+        if value.role != value.Role.TEACHER:
+            raise serializers.ValidationError('Only teacher accounts may be assigned to a class.')
+        return value
+
+
+class AdultRosterAttestationSerializer(serializers.ModelSerializer):
+    attested_by_name = serializers.CharField(source='attested_by.get_display_name', read_only=True)
+
+    class Meta:
+        model = AdultRosterAttestation
+        fields = (
+            'id', 'schedule', 'statement_version', 'attested_by', 'attested_by_name',
+            'attested_at', 'revoked_by', 'revoked_at', 'revocation_reason',
+        )
+        read_only_fields = fields
 
 
 class RosterStudentCreateSerializer(serializers.Serializer):

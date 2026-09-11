@@ -7,7 +7,6 @@ import loginIllustration from '../assets/aralforge-login-illustration.jpg'
 import { BrandMark } from '../components/navigation'
 import { Icon } from '../components/Icon'
 import { PasswordInput } from '../components/PasswordInput'
-import { LegalLinks } from '../legal/LegalLinks'
 import { toErrorMessage } from '../utils/format'
 
 export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -89,7 +88,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
             {!passwordSetupToken ? (
               <>
             <label>
-              <span>Student number</span>
+              <span>Student number or username</span>
               <input
                 autoComplete="username"
                 onChange={(event) => setUsername(event.target.value)}
@@ -142,9 +141,6 @@ export function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) 
               <span>{loading ? 'Please wait...' : passwordSetupToken ? 'Set password and continue' : 'Sign in'}</span>
             </button>
           </form>
-          <div className="login-legal-links">
-            <LegalLinks compact />
-          </div>
         </div>
       </section>
     </main>

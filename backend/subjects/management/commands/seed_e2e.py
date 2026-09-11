@@ -19,6 +19,8 @@ from learning_modules.models import (
     ModuleTopic,
 )
 from learning_modules.services.activity_snapshots import build_activity_snapshot
+from privacy.models import LegalAcknowledgment
+from privacy.serializers import LEGAL_DOCUMENTS
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 
@@ -57,6 +59,16 @@ class Command(BaseCommand):
                 student_number=f'E2E-00{index}',
             )
             students.append(student)
+
+        for user in [teacher, *students]:
+            for document, metadata in LEGAL_DOCUMENTS.items():
+                LegalAcknowledgment.objects.create(
+                    user=user,
+                    document=document,
+                    version=metadata['version'],
+                    effective_date=metadata['effective_date'],
+                    action=metadata['action'],
+                )
 
         school_year = SchoolYear.objects.create(start_year=2030, end_year=2031)
         first_term = SchoolYearSemester.objects.create(

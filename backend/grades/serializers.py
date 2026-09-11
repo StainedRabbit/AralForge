@@ -6,14 +6,54 @@ from .models import (
     FinalGrade,
     GradeCategory,
     GradeItem,
+    GradePublication,
     GradeItemSourceType,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
     StudentCategoryGrade,
     StudentGradeItemScore,
+    PublishedStudentGrade,
     SubjectGradingPolicy,
 )
+
+
+class PublishedStudentGradeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PublishedStudentGrade
+        fields = ('id', 'student', 'snapshot', 'snapshot_sha256', 'created_at')
+        read_only_fields = fields
+
+
+class GradePublicationSerializer(serializers.ModelSerializer):
+    student_snapshots = serializers.SerializerMethodField()
+    published_by_name = serializers.SerializerMethodField()
+    withdrawn_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GradePublication
+        fields = (
+            'id', 'schedule', 'period', 'revision', 'publication_note',
+            'published_by', 'published_by_name', 'published_at', 'withdrawn_by',
+            'withdrawn_by_name', 'withdrawn_at', 'withdrawal_reason',
+            'student_snapshots',
+        )
+        read_only_fields = fields
+
+    def get_published_by_name(self, obj):
+        return obj.published_by.get_display_name() or obj.published_by.username
+
+    def get_withdrawn_by_name(self, obj):
+        if not obj.withdrawn_by:
+            return None
+        return obj.withdrawn_by.get_display_name() or obj.withdrawn_by.username
+
+    def get_student_snapshots(self, obj):
+        request = self.context.get('request')
+        snapshots = obj.student_snapshots.all()
+        if request and not request.user.is_admin_teacher:
+            snapshots = snapshots.filter(student=request.user)
+        return PublishedStudentGradeSerializer(snapshots, many=True).data
 
 
 class GradingTemplateItemSerializer(serializers.ModelSerializer):

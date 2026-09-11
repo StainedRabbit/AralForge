@@ -9,6 +9,7 @@ from .services import create_student_account, update_student_profile, validate_p
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
     is_admin_teacher = serializers.BooleanField(read_only=True)
+    is_privacy_officer = serializers.BooleanField(read_only=True)
     display_name = serializers.CharField(source='get_display_name', read_only=True)
     full_name = serializers.CharField(source='get_full_name', read_only=True)
 
@@ -24,12 +25,13 @@ class UserSerializer(serializers.ModelSerializer):
             'last_name',
             'role',
             'is_admin_teacher',
+            'is_privacy_officer',
             'display_name',
             'full_name',
             'is_active',
             'must_change_password',
         )
-        read_only_fields = ('id', 'is_admin_teacher', 'must_change_password')
+        read_only_fields = ('id', 'is_admin_teacher', 'is_privacy_officer', 'must_change_password')
 
     def validate_password(self, value):
         validate_password(value, self.instance)

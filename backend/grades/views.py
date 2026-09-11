@@ -1,9 +1,11 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Case, CharField, Count, Exists, Max, OuterRef, Q, Subquery, Sum, Value, When
 from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -22,7 +24,8 @@ from learning_modules.serializers import (
     ModuleActivityAttemptSummarySerializer,
     ModuleActivitySerializer,
 )
-from subjects.models import SchoolYearSemester, ScheduleStudent, Subject, SubjectSchedule
+from subjects.access import get_managed_schedule_or_404, managed_schedules_for
+from subjects.models import AdultRosterAttestation, SchoolYearSemester, ScheduleStudent, Subject, SubjectSchedule
 from subjects.serializers import (
     ScheduleStudentSerializer,
     SchoolYearSemesterSerializer,
@@ -34,18 +37,21 @@ from .models import (
     GradeCategory,
     GradeCategoryChoices,
     GradeItem,
+    GradePublication,
     GradeItemSourceType,
     GradingTemplate,
     GradingTemplateItem,
     PeriodGrade,
     StudentCategoryGrade,
     StudentGradeItemScore,
+    PublishedStudentGrade,
     SubjectGradingPolicy,
 )
 from .serializers import (
     FinalGradeSerializer,
     GradeCategorySerializer,
     GradeItemSerializer,
+    GradePublicationSerializer,
     GradingTemplateItemSerializer,
     GradingTemplateSerializer,
     PeriodGradeSerializer,
@@ -53,12 +59,33 @@ from .serializers import (
     StudentGradeItemScoreSerializer,
     SubjectGradingPolicySerializer,
 )
+from .publication import build_publication_snapshots, snapshot_digest
 
 
 class StudentGradeOverviewView(APIView):
     def get(self, request):
         if request.user.is_admin_teacher:
             return Response({'detail': 'Student grade overview is only available to students.'}, status=403)
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            publications = GradePublication.objects.filter(
+                withdrawn_at__isnull=True,
+                student_snapshots__student=request.user,
+                schedule__is_active=True,
+                schedule__students__student=request.user,
+                schedule__students__is_active=True,
+            ).select_related(
+                'schedule__subject', 'schedule__school_year_semester__school_year',
+                'published_by', 'withdrawn_by',
+            ).prefetch_related('student_snapshots').distinct()
+            for publication in publications:
+                publication._prefetched_objects_cache['student_snapshots'] = [
+                    snapshot for snapshot in publication.student_snapshots.all()
+                    if snapshot.student_id == request.user.id
+                ]
+            return Response({
+                'publications': GradePublicationSerializer(publications, many=True).data,
+                'drafts_hidden': True,
+            })
         enrollments = ScheduleStudent.objects.select_related(
             'schedule__subject', 'schedule__school_year_semester__school_year', 'student',
         ).filter(student=request.user, is_active=True, schedule__is_active=True)
@@ -94,9 +121,9 @@ class TeacherGradesOverviewView(APIView):
         term = request.query_params.get('term', '').strip()
         search = request.query_params.get('search', '').strip()
 
-        schedules = SubjectSchedule.objects.select_related(
+        schedules = managed_schedules_for(request.user, SubjectSchedule.objects.select_related(
             'subject', 'school_year_semester__school_year',
-        ).filter(is_active=True)
+        ).filter(is_active=True))
         if term.isdigit():
             schedules = schedules.filter(school_year_semester_id=int(term))
         if search:
@@ -179,7 +206,7 @@ class TeacherGradesOverviewView(APIView):
                 ) if expected_periods else 0,
             })
 
-        active_schedules = SubjectSchedule.objects.filter(is_active=True)
+        active_schedules = managed_schedules_for(request.user, SubjectSchedule.objects.filter(is_active=True))
         summary = {
             'active_classes': active_schedules.count(),
             'active_enrollments': ScheduleStudent.objects.filter(
@@ -213,9 +240,10 @@ class TeacherGradebookView(APIView):
         schedule_id = request.query_params.get('schedule')
         if not schedule_id or not schedule_id.isdigit():
             return Response({'detail': 'A valid schedule is required.'}, status=400)
-        schedule = get_object_or_404(
+        schedule = get_managed_schedule_or_404(
+            request.user,
+            schedule_id,
             SubjectSchedule.objects.select_related('subject', 'school_year_semester__school_year'),
-            pk=schedule_id,
         )
         period = request.query_params.get('period', 'PRELIM').strip().upper()
         categories = GradeCategory.objects.filter(subject=schedule.subject)
@@ -436,6 +464,110 @@ def gradebook_roster_status(item, score, paper_attempt, online_attempt):
     return 'PENDING'
 
 
+class GradePublicationViewSet(viewsets.ReadOnlyModelViewSet):
+    """Immutable student-facing grade releases; live grade tables remain working drafts."""
+
+    serializer_class = GradePublicationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = GradePublication.objects.select_related(
+            'schedule__subject', 'schedule__school_year_semester__school_year',
+            'published_by', 'withdrawn_by',
+        ).prefetch_related('student_snapshots')
+        user = self.request.user
+        if user.is_admin_teacher:
+            return queryset.filter(schedule__in=managed_schedules_for(user))
+        return queryset.filter(
+            withdrawn_at__isnull=True,
+            student_snapshots__student=user,
+            schedule__students__student=user,
+            schedule__students__is_active=True,
+            schedule__is_active=True,
+        ).distinct()
+
+    @action(detail=False, methods=['post'], url_path='publish')
+    @transaction.atomic
+    def publish(self, request):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only the assigned teacher or an administrator may publish grades.')
+        schedule_id = request.data.get('schedule')
+        period = str(request.data.get('period', '')).strip().upper()
+        if period not in GradePublication.Period.values:
+            raise serializers.ValidationError({'period': 'Select a valid grading period.'})
+        schedule = get_managed_schedule_or_404(
+            request.user,
+            schedule_id,
+            SubjectSchedule.objects.select_for_update().select_related(
+                'subject', 'school_year_semester__school_year',
+            ),
+        )
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT and not AdultRosterAttestation.objects.filter(
+            schedule=schedule, revoked_at__isnull=True,
+        ).exists():
+            raise serializers.ValidationError({
+                'schedule': 'An administrator must attest that this class roster is verified as adult before grades can be published.',
+            })
+
+        active = GradePublication.objects.select_for_update().filter(
+            schedule=schedule, period=period, withdrawn_at__isnull=True,
+        ).first()
+        note = str(request.data.get('publication_note', '')).strip()
+        if active and not note:
+            raise serializers.ValidationError({
+                'publication_note': 'A revision note is required when replacing a published grade.',
+            })
+        snapshots = build_publication_snapshots(schedule, period)
+        revision = (
+            GradePublication.objects.filter(schedule=schedule, period=period)
+            .aggregate(maximum=Max('revision'))['maximum'] or 0
+        ) + 1
+        now = timezone.now()
+        if active:
+            active.withdrawn_by = request.user
+            active.withdrawn_at = now
+            active.withdrawal_reason = f'Superseded by revision {revision}: {note}'
+            active.save(update_fields=('withdrawn_by', 'withdrawn_at', 'withdrawal_reason'))
+        publication = GradePublication.objects.create(
+            schedule=schedule,
+            period=period,
+            revision=revision,
+            publication_note=note,
+            published_by=request.user,
+        )
+        PublishedStudentGrade.objects.bulk_create([
+            PublishedStudentGrade(
+                publication=publication,
+                student_id=snapshot['student_id'],
+                snapshot=snapshot,
+                snapshot_sha256=snapshot_digest(snapshot),
+            )
+            for snapshot in snapshots
+        ])
+        publication = self.get_queryset().get(pk=publication.pk)
+        return Response(
+            self.get_serializer(publication).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='withdraw')
+    @transaction.atomic
+    def withdraw(self, request, pk=None):
+        if not request.user.is_admin_teacher:
+            raise PermissionDenied('Only the assigned teacher or an administrator may withdraw grades.')
+        reason = str(request.data.get('reason', '')).strip()
+        if not reason:
+            raise serializers.ValidationError({'reason': 'A withdrawal reason is required.'})
+        publication = self.get_queryset().select_for_update().get(pk=pk)
+        if publication.withdrawn_at:
+            raise serializers.ValidationError({'detail': 'This publication is already withdrawn.'})
+        publication.withdrawn_by = request.user
+        publication.withdrawn_at = timezone.now()
+        publication.withdrawal_reason = reason
+        publication.save(update_fields=('withdrawn_by', 'withdrawn_at', 'withdrawal_reason'))
+        return Response(self.get_serializer(publication).data)
+
+
 class SubjectGradingPolicyViewSet(viewsets.ModelViewSet):
     queryset = SubjectGradingPolicy.objects.select_related('subject', 'source_template')
     serializer_class = SubjectGradingPolicySerializer
@@ -502,7 +634,12 @@ class StudentCategoryGradeViewSet(viewsets.ModelViewSet):
         queryset = StudentCategoryGrade.objects.select_related('schedule', 'subject', 'student', 'grade_category')
 
         if self.request.user.is_admin_teacher:
+            if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+                return queryset.filter(schedule__in=managed_schedules_for(self.request.user))
             return queryset
+
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.none()
 
         return queryset.filter(student=self.request.user).filter(
             Q(schedule__isnull=True)
@@ -527,7 +664,11 @@ class GradeItemViewSet(viewsets.ModelViewSet):
             'attendance_session',
         )
 
-        if not self.request.user.is_admin_teacher:
+        if not self.request.user.is_admin_teacher and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.none()
+        if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            queryset = queryset.filter(schedule__in=managed_schedules_for(self.request.user))
+        elif not self.request.user.is_admin_teacher:
             queryset = queryset.filter(
                 schedule__students__student=self.request.user,
                 schedule__students__is_active=True,
@@ -1084,7 +1225,12 @@ class StudentGradeItemScoreViewSet(viewsets.ModelViewSet):
         )
 
         if self.request.user.is_admin_teacher:
+            if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+                return queryset.filter(grade_item__schedule__in=managed_schedules_for(self.request.user))
             return queryset
+
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.none()
 
         return queryset.filter(student=self.request.user).filter(
             Q(grade_item__schedule__isnull=True)
@@ -1171,7 +1317,12 @@ class PeriodGradeViewSet(viewsets.ModelViewSet):
         queryset = PeriodGrade.objects.select_related('schedule', 'subject', 'student')
 
         if self.request.user.is_admin_teacher:
+            if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+                return queryset.filter(schedule__in=managed_schedules_for(self.request.user))
             return queryset
+
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.none()
 
         return queryset.filter(student=self.request.user).filter(
             Q(schedule__isnull=True)
@@ -1203,7 +1354,12 @@ class FinalGradeViewSet(viewsets.ModelViewSet):
         queryset = FinalGrade.objects.select_related('schedule', 'subject', 'student')
 
         if self.request.user.is_admin_teacher:
+            if self.request.user.role == User.Role.TEACHER and settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+                return queryset.filter(schedule__in=managed_schedules_for(self.request.user))
             return queryset
+
+        if settings.REAL_STUDENT_PRIVACY_ENFORCEMENT:
+            return queryset.none()
 
         return queryset.filter(student=self.request.user).filter(
             Q(schedule__isnull=True)

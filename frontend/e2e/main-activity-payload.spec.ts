@@ -8,8 +8,7 @@ async function signInAndFindTarget(page: Page) {
   await page.waitForURL((url) => url.pathname === '/')
 
   const target = await page.evaluate(async () => {
-    const session = JSON.parse(localStorage.getItem('aralforge.session') ?? '{}') as { access?: string }
-    const headers = { Authorization: `Bearer ${session.access}` }
+    const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
     const modulesResponse = await fetch('http://127.0.0.1:8001/api/modules/modules/?limit=100', { headers })
     const modulesPayload = await modulesResponse.json()
     const module = modulesPayload.results.find(

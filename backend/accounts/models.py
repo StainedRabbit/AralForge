@@ -7,6 +7,7 @@ class User(AbstractUser):
         ADMIN = 'ADMIN', 'Admin'
         TEACHER = 'TEACHER', 'Teacher'
         STUDENT = 'STUDENT', 'Student'
+        PRIVACY_OFFICER = 'PRIVACY_OFFICER', 'Privacy Officer'
 
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
     must_change_password = models.BooleanField(default=False)
@@ -32,6 +33,10 @@ class User(AbstractUser):
     @property
     def is_admin_teacher(self):
         return self.role in {self.Role.ADMIN, self.Role.TEACHER} or self.is_superuser
+
+    @property
+    def is_privacy_officer(self):
+        return self.role == self.Role.PRIVACY_OFFICER
 
     def __str__(self):
         return self.get_full_name() or self.username

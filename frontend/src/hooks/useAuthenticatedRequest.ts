@@ -22,7 +22,7 @@ export function useAuthenticatedRequest(
 
         let refreshed: { access: string }
         try {
-          refreshInFlight ??= refreshToken(session.refresh).finally(() => {
+          refreshInFlight ??= refreshToken().finally(() => {
             refreshInFlight = null
           })
           refreshed = await refreshInFlight

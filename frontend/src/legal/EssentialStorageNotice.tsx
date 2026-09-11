@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { STORAGE_NOTICE_KEY, STORAGE_NOTICE_VERSION } from './legalConfig'
 import { OPEN_STORAGE_NOTICE_EVENT } from './storageNotice'
 
@@ -33,12 +32,12 @@ export function EssentialStorageNotice() {
       <div>
         <strong id="storage-notice-title">Essential browser storage only</strong>
         <p>
-          AralForge stores sign-in tokens, local editing drafts, interface preferences, and this notice acknowledgment.
+          AralForge uses a Secure, HttpOnly sign-in cookie, memory-only access tokens, local editing drafts,
+          interface preferences, and this notice acknowledgment.
           This launch does not use advertising, analytics, or marketing trackers.
         </p>
       </div>
       <div className="storage-notice__actions">
-        <Link className="button button--secondary" to="/legal/storage">Learn more</Link>
         <button className="button button--primary" onClick={acknowledge} ref={acknowledgeRef} type="button">Got it</button>
       </div>
     </aside>

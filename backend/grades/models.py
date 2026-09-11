@@ -626,3 +626,86 @@ class FinalGrade(models.Model):
 
     def __str__(self):
         return f'{self.student} - {self.subject}: {self.final_grade}'
+
+
+class GradePublication(models.Model):
+    class Period(models.TextChoices):
+        PRELIM = 'PRELIM', 'Prelim'
+        MIDTERM = 'MIDTERM', 'Midterm'
+        PREFINAL = 'PREFINAL', 'Prefinal'
+        FINAL = 'FINAL', 'Final period'
+        OVERALL = 'OVERALL', 'Final course grade'
+
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='grade_publications',
+    )
+    period = models.CharField(max_length=20, choices=Period)
+    revision = models.PositiveIntegerField()
+    publication_note = models.CharField(max_length=500, blank=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='published_grade_revisions',
+    )
+    published_at = models.DateTimeField(auto_now_add=True)
+    withdrawn_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='withdrawn_grade_revisions',
+        null=True,
+        blank=True,
+    )
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+    withdrawal_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ['schedule', 'period', '-revision']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['schedule', 'period', 'revision'],
+                name='unique_grade_publication_revision',
+            ),
+            models.UniqueConstraint(
+                fields=['schedule', 'period'],
+                condition=Q(withdrawn_at__isnull=True),
+                name='unique_active_grade_publication',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['schedule', 'period', 'withdrawn_at'], name='grade_publication_active_idx'),
+        ]
+
+
+class PublishedStudentGrade(models.Model):
+    publication = models.ForeignKey(
+        GradePublication,
+        on_delete=models.PROTECT,
+        related_name='student_snapshots',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='published_grade_snapshots',
+    )
+    snapshot = models.JSONField()
+    snapshot_sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['publication', 'student']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['publication', 'student'],
+                name='unique_published_student_grade',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError('Published grade snapshots are immutable.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Published grade snapshots cannot be deleted directly.')
