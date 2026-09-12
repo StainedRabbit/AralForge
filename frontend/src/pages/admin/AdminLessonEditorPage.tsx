@@ -574,7 +574,7 @@ function AdminLessonEditorForm({
         ) : null}
         <div className="lesson-editor-workspace">
           <div className="lesson-editor-workspace__main">
-            <LessonEditorMobileOutline draft={draft} />
+            <LessonEditorMobileOutline draft={draft} exampleDrafts={exampleDrafts} />
 
             <section className="lesson-editor-section" id="lesson-editor-details">
               <SectionHeading
@@ -748,7 +748,7 @@ function AdminLessonEditorForm({
               </div>
             </div>
           </div>
-          <LessonEditorOutline draft={draft} />
+          <LessonEditorOutline draft={draft} exampleDrafts={exampleDrafts} />
         </div>
       </form>
 
@@ -1639,16 +1639,19 @@ function lessonFieldStatus(draft: LessonDraft, field: LessonTemplateFieldKey) {
 
 function LessonEditorOutline({
   draft,
+  exampleDrafts,
 }: {
   draft: LessonDraft
+  exampleDrafts: LessonExampleDraft[]
 }) {
-  const filledCount = studentLessonFields.filter((field) => draft[field.key].trim()).length
+  const hasExamples = exampleDrafts.some((example) => !example.deleted)
+  const filledCount = studentLessonFields.filter((field) => draft[field.key].trim()).length + Number(hasExamples)
 
   return (
     <aside className="lesson-editor-outline" aria-label="Lesson checklist">
       <div className="lesson-editor-outline__header">
         <span>Lesson Checklist</span>
-        <strong>{filledCount} of {studentLessonFields.length} sections filled</strong>
+        <strong>{filledCount} of {studentLessonFields.length + 1} sections filled</strong>
       </div>
 
       <div className="lesson-editor-outline__group">
@@ -1665,6 +1668,12 @@ function LessonEditorOutline({
               </button>
             )
           })}
+          <button onClick={() => scrollToLessonEditorSection('lesson-editor-examples')} type="button">
+            <span>Lesson Examples</span>
+            <small className={`lesson-editor-outline__status lesson-editor-outline__status--${hasExamples ? 'filled' : 'empty'}`}>
+              {hasExamples ? 'Filled' : 'Needs content'}
+            </small>
+          </button>
         </div>
       </div>
 
@@ -1682,9 +1691,13 @@ function LessonEditorOutline({
 
 function LessonEditorMobileOutline({
   draft,
+  exampleDrafts,
 }: {
   draft: LessonDraft
+  exampleDrafts: LessonExampleDraft[]
 }) {
+  const hasExamples = exampleDrafts.some((example) => !example.deleted)
+
   return (
     <nav className="lesson-editor-mobile-outline" aria-label="Lesson editor sections">
       {studentLessonFields.map((field) => {
@@ -1700,6 +1713,13 @@ function LessonEditorMobileOutline({
           </button>
         )
       })}
+      <button
+        className={hasExamples ? 'is-filled' : ''}
+        onClick={() => scrollToLessonEditorSection('lesson-editor-examples')}
+        type="button"
+      >
+        Lesson Examples
+      </button>
       <button
         className="lesson-editor-mobile-outline__utility"
         onClick={() => scrollToLessonEditorSection('lesson-editor-main-activity')}

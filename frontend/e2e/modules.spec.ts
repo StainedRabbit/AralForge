@@ -371,7 +371,11 @@ This line should be ignored.
   await page.getByRole('link', { name: 'Edit Lesson' }).click()
   await expect(page.getByRole('heading', { name: 'Edit Lesson' })).toBeVisible()
   const checklist = page.getByRole('complementary', { name: 'Lesson checklist' })
-  await expect(checklist).toContainText('0 of 5 sections filled')
+  await expect(checklist).toContainText('0 of 6 sections filled')
+  await expect(checklist.getByRole('button', { name: /Lesson Examples.*Needs content/ })).toBeVisible()
+  await expect(page.locator('[aria-label="Lesson editor sections"] button').filter({ hasText: 'Lesson Examples' })).toHaveCount(1)
+  await checklist.getByRole('button', { name: /Lesson Examples.*Needs content/ }).click()
+  await expect(page.locator('#lesson-editor-examples')).toBeInViewport()
   for (const retainedSection of [
     "What We'll Learn",
     'Before We Start',
@@ -468,6 +472,8 @@ Complete the retained practice.
   await lessonImport.getByRole('button', { name: 'Apply to Empty Fields' }).click()
   await expect(lessonImport).toContainText('Lesson import applied to the draft.')
   await lessonImport.getByRole('button', { name: 'Close' }).click()
+  await expect(checklist).toContainText('2 of 6 sections filled')
+  await expect(checklist.getByRole('button', { name: /Lesson Examples.*Filled/ })).toBeVisible()
   const practiceEditor = page.getByRole('textbox', { name: "Let's Practice", exact: true })
   await expect(practiceEditor).toHaveValue('Complete the retained practice.')
   await practiceEditor.fill('Complete the retained practice. \uFFFD')
