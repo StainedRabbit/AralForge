@@ -42,11 +42,158 @@ from .models import (
     ModuleActivityQuestionChoice,
     ModuleActivitySubmission,
     ModuleLesson,
+    ModuleLessonAsset,
     ModuleLessonExample,
     ModuleLessonProgress,
     ModuleTopic,
     add_calendar_months,
 )
+
+
+class ModuleMarkdownExportApiTests(APITestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username='markdown-teacher',
+            password='testpass123',
+            role=User.Role.TEACHER,
+        )
+        self.student = User.objects.create_user(
+            username='markdown-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        self.module = Module.objects.create(
+            title='Markdown Backup ✓',
+            slug='markdown-backup',
+            description='Complete module export.',
+            learning_objectives='Understand **Markdown** exports.',
+            is_published=False,
+        )
+        self.topic = ModuleTopic.objects.create(
+            module=self.module,
+            title='Draft Foundations',
+            order=2,
+            competency_code='MD-101',
+            overview='Topic overview.',
+            is_published=False,
+        )
+        self.lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Draft Lesson',
+            order=3,
+            learning_targets='Write a backup.',
+            answer_key='The teacher-only answer.',
+            is_published=False,
+        )
+        self.activity = ModuleActivity.objects.create(
+            lesson=self.lesson,
+            title='Draft Quiz',
+            instructions='Choose the correct answer.',
+            points_possible=Decimal('10.00'),
+            grading_period=GradingPeriod.PRELIM,
+            is_published=False,
+        )
+        self.question = ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            prompt='Which format is exported?',
+            points=Decimal('2.00'),
+            order=2,
+            explanation='Markdown is the correct answer.',
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=self.question,
+            text='Plain text',
+            is_correct=False,
+            order=2,
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=self.question,
+            text='Markdown',
+            is_correct=True,
+            order=1,
+        )
+        matching_question = ModuleActivityQuestion.objects.create(
+            activity=self.activity,
+            question_type=ModuleActivityQuestion.QuestionType.MATCHING,
+            prompt='Match the export.',
+            points=Decimal('1.00'),
+            order=1,
+        )
+        ModuleActivityMatchingPair.objects.create(
+            question=matching_question,
+            left_text='Module',
+            right_text='Markdown backup',
+            order=1,
+        )
+
+    def test_teacher_downloads_complete_markdown_backup(self):
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            ModuleLessonExample.objects.create(
+                lesson=self.lesson,
+                title='Unicode example ✓',
+                order=1,
+                image=SimpleUploadedFile(
+                    'diagram.svg',
+                    b'<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+                    content_type='image/svg+xml',
+                ),
+                alt_text='Export diagram',
+                body='Example body.',
+                common_mistake='Do not omit the extension.',
+                is_published=False,
+            )
+            ModuleLessonAsset.objects.create(
+                lesson=self.lesson,
+                file=SimpleUploadedFile('asset.svg', b'<svg></svg>', content_type='image/svg+xml'),
+                original_name='asset.svg',
+                alt_text='Supporting asset',
+            )
+            self.client.force_authenticate(self.teacher)
+
+            response = self.client.get(
+                f'/api/modules/modules/{self.module.id}/download_markdown/',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response['Content-Type'].startswith('text/markdown'))
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="markdown-backup.md"',
+        )
+        markdown = response.content.decode('utf-8')
+        for expected in (
+            '# Markdown Backup ✓',
+            '## Topic 1: Draft Foundations',
+            '### Lesson 1: Draft Lesson',
+            '#### Answer Key',
+            'The teacher-only answer.',
+            '#### Example 1: Unicode example ✓',
+            '![Export diagram](/media/module_lesson_examples/diagram.svg)',
+            '[asset.svg](/media/module_lesson_assets/asset.svg "Supporting asset")',
+            '#### Activity 1: Draft Quiz',
+            '##### Question 1: Matching',
+            '- Module → Markdown backup',
+            '##### Question 2: Multiple Choice',
+            '- [x] Markdown',
+            '- [ ] Plain text',
+            'Markdown is the correct answer.',
+        ):
+            self.assertIn(expected, markdown)
+        self.assertLess(markdown.index('Question 1: Matching'), markdown.index('Question 2: Multiple Choice'))
+        self.assertLess(markdown.index('- [x] Markdown'), markdown.index('- [ ] Plain text'))
+
+    def test_student_and_anonymous_users_cannot_download_markdown(self):
+        anonymous = self.client.get(
+            f'/api/modules/modules/{self.module.id}/download_markdown/',
+        )
+        self.assertIn(anonymous.status_code, (401, 403))
+
+        self.client.force_authenticate(self.student)
+        student = self.client.get(
+            f'/api/modules/modules/{self.module.id}/download_markdown/',
+        )
+        self.assertEqual(student.status_code, 403)
 
 
 class ModuleAccessApiTests(APITestCase):

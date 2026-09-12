@@ -304,6 +304,7 @@ export function AdminModulesPage({
     <Page>
       <section className="module-workspace module-workspace--dashboard">
         <ModuleWorkspaceTopBar
+          api={api}
           data={data}
           moduleTopics={moduleTopics}
           onImportClick={() => setShowOutlineImport(true)}
@@ -454,6 +455,7 @@ export function AdminModulesPage({
 }
 
 function ModuleWorkspaceTopBar({
+  api,
   data,
   moduleTopics,
   onImportClick,
@@ -470,6 +472,7 @@ function ModuleWorkspaceTopBar({
   topicsLoading,
   visibleTopics,
 }: {
+  api: AuthedRequest
   data: RouteData
   moduleTopics: ModuleTopic[]
   onImportClick: () => void
@@ -543,6 +546,7 @@ function ModuleWorkspaceTopBar({
           ) : null}
           {selectedModule ? (
             <ModuleManageMenu
+              api={api}
               module={selectedModule}
               onImportClick={onImportClick}
               onOutlineClick={onOutlineClick}
@@ -1347,18 +1351,36 @@ function LessonSwitcher({
 }
 
 function ModuleManageMenu({
+  api,
   module,
   onImportClick,
   onOutlineClick,
   returnTo,
   topic,
 }: {
+  api: AuthedRequest
   module: Module
   onImportClick: () => void
   onOutlineClick: () => void
   returnTo: string
   topic: ModuleTopic | null
 }) {
+  const [downloadingMarkdown, setDownloadingMarkdown] = useState(false)
+  const [markdownMessage, setMarkdownMessage] = useState('')
+
+  async function downloadModuleMarkdown() {
+    setDownloadingMarkdown(true)
+    setMarkdownMessage('')
+    try {
+      const blob = await api<Blob>(`/modules/modules/${module.id}/download_markdown/`)
+      downloadBlob(blob, `${slugify(module.slug || module.title) || `module-${module.id}`}.md`)
+    } catch (caughtError) {
+      setMarkdownMessage(toErrorMessage(caughtError) || 'The module Markdown could not be downloaded.')
+    } finally {
+      setDownloadingMarkdown(false)
+    }
+  }
+
   return (
     <details className="action-menu">
       <summary className="button button--secondary">
@@ -1374,6 +1396,11 @@ function ModuleManageMenu({
           <Icon name="upload" />
           <span>Import Outline MD</span>
         </button>
+        <button disabled={downloadingMarkdown} onClick={() => void downloadModuleMarkdown()} type="button">
+          <Icon name="arrow-down" />
+          <span>{downloadingMarkdown ? 'Downloading Module MD...' : 'Download Module MD'}</span>
+        </button>
+        {markdownMessage ? <p className="admin-message">{markdownMessage}</p> : null}
         <Link to={`/admin/modules/${module.id}/topics/new`}>
           <Icon name="plus" />
           <span>New Topic</span>

@@ -1,11 +1,12 @@
 from decimal import Decimal, InvalidOperation
 import json
 
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.db import transaction
 from django.db.models import Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.text import slugify
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 
@@ -88,6 +89,7 @@ from .services.learning_context import (
     request_learning_context,
     resolve_learning_context,
 )
+from .services.markdown_export import module_markdown
 
 
 def bounded_int(value, default=0, maximum=None):
@@ -373,6 +375,22 @@ class ModuleViewSet(viewsets.ModelViewSet):
         if self.action == 'list' and self.request.query_params.get('view') == 'summary':
             return ModuleSummarySerializer
         return ModuleSerializer
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[IsAdminTeacher],
+        url_path='download_markdown',
+    )
+    def download_markdown(self, request, pk=None):
+        module = self.get_object()
+        filename = slugify(module.slug or module.title) or f'module-{module.id}'
+        response_ = HttpResponse(
+            module_markdown(module),
+            content_type='text/markdown; charset=utf-8',
+        )
+        response_['Content-Disposition'] = f'attachment; filename="{filename}.md"'
+        return response_
 
     @decorators.action(
         detail=True,

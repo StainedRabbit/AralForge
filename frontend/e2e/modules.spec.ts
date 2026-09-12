@@ -477,6 +477,21 @@ Complete the retained practice.
   await expect(page.getByRole('button', { name: 'Save lesson' })).toBeEnabled()
 })
 
+test('teacher downloads the selected module as Markdown', async ({ page }) => {
+  await openModuleWorkspace(page)
+  const manageMenu = page.locator('summary').filter({ hasText: 'Manage' })
+  await manageMenu.click()
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download Module MD' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/\.md$/)
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  const markdown = await readFile(downloadPath!, 'utf8')
+  expect(markdown).toContain('# E2E Programming Module')
+})
+
 test('creates, selects, and reloads a lesson beyond the global first page', async ({ page }) => {
   await page.goto('/admin/modules')
   await page.getByLabel('Student number').fill('e2e-teacher')
