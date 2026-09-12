@@ -453,6 +453,10 @@ Submit evidence.
 ## Lesson Examples
 
 ### Example: legacy example
+The Boolean expression is:
+
+Use a clear expression before checking the result.
+
 Common mistake:
 Avoid the wrong symbol.
 
@@ -474,6 +478,9 @@ Complete the retained practice.
   await lessonImport.getByRole('button', { name: 'Close' }).click()
   await expect(checklist).toContainText('2 of 6 sections filled')
   await expect(checklist.getByRole('button', { name: /Lesson Examples.*Filled/ })).toBeVisible()
+  await expect(page.locator('#lesson-editor-examples').getByRole('textbox', { name: 'Example text' })).toHaveValue(
+    'The Boolean expression is:\n\nUse a clear expression before checking the result.',
+  )
   const practiceEditor = page.getByRole('textbox', { name: "Let's Practice", exact: true })
   await expect(practiceEditor).toHaveValue('Complete the retained practice.')
   await practiceEditor.fill('Complete the retained practice. \uFFFD')

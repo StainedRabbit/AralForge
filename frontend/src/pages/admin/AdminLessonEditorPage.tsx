@@ -1106,8 +1106,14 @@ function parseLessonExampleImport(
         }
         return
       }
+
+      // A colon is valid in ordinary Markdown prose (for example, "Circuit plan:").
+      // Keep unrecognized labels in the active text block while still warning authors
+      // about legacy/example-specific fields that AralForge does not model.
       example.unsupportedFields.push(meta[1].trim())
-      currentBlock = null
+      if (currentBlock) {
+        blocks[currentBlock].push(line)
+      }
       return
     }
 

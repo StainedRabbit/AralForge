@@ -170,7 +170,14 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement
       if (event.key === 'Escape') {
+        if (
+          event.defaultPrevented ||
+          target.matches('input, textarea, select, [contenteditable="true"]')
+        ) {
+          return
+        }
         event.preventDefault()
         if (deleteConfirmation) {
           setDeleteConfirmation(null)
@@ -200,7 +207,6 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         return
       }
 
-      const target = event.target as HTMLElement
       if (target.matches('input, textarea, select, [contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
       if (!activeItem || showSummary || saving || closeRequested || excuseOpen || editDraft || deleteConfirmation) return
       if (event.key === 'ArrowLeft' && currentIndex > 0) {

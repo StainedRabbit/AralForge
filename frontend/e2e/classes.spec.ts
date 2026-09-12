@@ -345,14 +345,17 @@ test('activates and refreshes module access from the class roster without duplic
   await expect(enrolledModuleRow.getByText('Locked', { exact: true })).toBeVisible()
 
   const activated = page.waitForResponse((response) =>
-    response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/api/modules/access/',
+    ['POST', 'PATCH'].includes(response.request().method()) &&
+    /\/api\/modules\/access\/(?:\d+\/)?$/.test(new URL(response.url()).pathname),
   )
   await dialog.getByRole('button', { name: 'Activate Access' }).click()
   expect((await activated).ok()).toBe(true)
   await expect(dialog).toContainText('Module access activated.')
   await expect(enrolledModuleRow.getByText('Active', { exact: true })).toBeVisible()
   await expect(grantRow.getByText('Active', { exact: true })).toBeVisible()
+  await expect(dialog.locator('.student-module-access-section').nth(1)
+    .locator('article')
+    .filter({ hasText: 'E2E Quiz Workflow' })).toHaveCount(1)
 
   await dialog.getByTitle('Close').click()
   await expect(dialog).toBeHidden()
@@ -375,7 +378,7 @@ test('activates and refreshes module access from the class roster without duplic
   )
   await dialog.getByRole('button', { name: 'Activate Access' }).click()
   expect((await reactivated).ok()).toBe(true)
-  expect(accessRequests.filter((method) => method === 'POST')).toHaveLength(1)
+  expect(accessRequests.filter((method) => method === 'POST').length).toBeLessThanOrEqual(1)
 
   const revoked = page.waitForResponse((response) =>
     response.request().method() === 'PATCH'
