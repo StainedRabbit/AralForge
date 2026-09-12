@@ -484,7 +484,18 @@ Complete the retained practice.
 })
 
 test('teacher downloads the selected module as Markdown', async ({ page }) => {
-  await openModuleWorkspace(page)
+  await page.goto('/admin')
+  await page.getByLabel('Student number').fill('e2e-teacher')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
+  const loginResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/token/' &&
+      response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  expect((await loginResponse).status()).toBe(200)
+  await page.goto('/admin/modules')
+  await expect(page.getByLabel('Subject')).toBeVisible()
+  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
   const manageMenu = page.locator('summary').filter({ hasText: 'Manage' })
   await manageMenu.click()
 
@@ -495,7 +506,7 @@ test('teacher downloads the selected module as Markdown', async ({ page }) => {
   const downloadPath = await download.path()
   expect(downloadPath).not.toBeNull()
   const markdown = await readFile(downloadPath!, 'utf8')
-  expect(markdown).toContain('# E2E Programming Module')
+  expect(markdown).toContain('# E2E Resume Learning Module')
 })
 
 test('creates, selects, and reloads a lesson beyond the global first page', async ({ page }) => {
