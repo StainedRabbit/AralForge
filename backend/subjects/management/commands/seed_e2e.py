@@ -269,7 +269,7 @@ class Command(BaseCommand):
         workflow_activity = ModuleActivity.objects.create(
             module=workflow_module,
             lesson=workflow_lesson,
-            title='Paper Queue Quiz',
+            title='Paper **Queue** *Quiz* `v1` [Guide](/modules)',
             instructions='Complete the printed Quiz for manual checking.',
             points_possible=10,
             grading_period=GradingPeriod.PRELIM,

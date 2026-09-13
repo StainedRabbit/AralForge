@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { RouteData } from '../app/types'
 import type { Module, ModuleActivity } from '../types'
 import {
@@ -10,6 +10,7 @@ import {
 } from '../utils/student'
 import { dueLabel, percent } from '../utils/format'
 import { Icon } from './Icon'
+import { InlineMarkdown } from './RichLessonText'
 
 export function ModuleCard({ data, module }: { data: RouteData; module: Module }) {
   const activities = getModuleActivities(data, module.id)
@@ -89,20 +90,29 @@ export function ActivityCard({
   data: RouteData
 }) {
   const submitted = hasSubmission(data, activity.id)
+  const navigate = useNavigate()
+  const to = `/activities/${activity.id}`
 
   return (
-    <Link className="activity-card" to={`/activities/${activity.id}`}>
+    <article
+      aria-label={`Open ${activity.title}`}
+      className="activity-card"
+      onClick={(event) => navigateActivityCard(event, navigate, to)}
+      onKeyDown={(event) => navigateActivityCardByKey(event, navigate, to)}
+      role="link"
+      tabIndex={0}
+    >
       <span className="activity-card__icon">
         <Icon name="activity" />
       </span>
       <div>
-        <strong>{activity.title}</strong>
+        <strong>{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</strong>
         <span>{activityTypeLabel(activity.activity_type)}</span>
       </div>
       <span className={submitted ? 'status-pill status-pill--success' : 'status-pill'}>
         {submitted ? 'Submitted' : dueLabel(activity.due_at)}
       </span>
-    </Link>
+    </article>
   )
 }
 export function ActivityTimelineItem({
@@ -113,17 +123,52 @@ export function ActivityTimelineItem({
   data: RouteData
 }) {
   const module = data.modules.find((item) => item.id === activity.module)
+  const navigate = useNavigate()
+  const to = `/activities/${activity.id}`
 
   return (
-    <Link className="timeline-item" to={`/activities/${activity.id}`}>
+    <article
+      aria-label={`Open ${activity.title}`}
+      className="timeline-item"
+      onClick={(event) => navigateActivityCard(event, navigate, to)}
+      onKeyDown={(event) => navigateActivityCardByKey(event, navigate, to)}
+      role="link"
+      tabIndex={0}
+    >
       <div className="timeline-dot">
         <Icon name="calendar" />
       </div>
       <div>
-        <strong>{activity.title}</strong>
+        <strong>{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</strong>
         <span>{module?.title ?? activityTypeLabel(activity.activity_type)}</span>
         <small>{dueLabel(activity.due_at)}</small>
       </div>
-    </Link>
+    </article>
   )
+}
+
+function navigateActivityCard(
+  event: React.MouseEvent<HTMLElement>,
+  navigate: ReturnType<typeof useNavigate>,
+  to: string,
+) {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    (event.target instanceof Element && event.target.closest('a'))
+  ) return
+  navigate(to)
+}
+
+function navigateActivityCardByKey(
+  event: React.KeyboardEvent<HTMLElement>,
+  navigate: ReturnType<typeof useNavigate>,
+  to: string,
+) {
+  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+  event.preventDefault()
+  navigate(to)
 }

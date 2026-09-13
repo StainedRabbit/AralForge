@@ -16,6 +16,7 @@ import type {
 } from '../../types'
 import { toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
+import { InlineMarkdown } from '../RichLessonText'
 import { SectionHeading } from '../ui'
 import { queryKeys } from '../../queries/queryKeys'
 import { isJsonObject, migrateStorageValue } from '../../utils/storageMigration'
@@ -1450,7 +1451,7 @@ function ActivityPreview({
       <div className="lesson-main-activity__header">
         <div>
           <p className="eyebrow">Quiz</p>
-          <h2>{title || 'Quiz'}</h2>
+          <h2><InlineMarkdown value={title || 'Quiz'} /></h2>
           <p>{instructions || 'Student instructions will appear here.'}</p>
         </div>
         <span className={mode === 'review' ? 'status-pill status-pill--success' : 'status-pill'}>

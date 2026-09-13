@@ -462,6 +462,15 @@ function parseTableRow(line: string) {
   return cells.map((value) => value.trim())
 }
 
+/**
+ * Renders the inline subset of AralForge Markdown without adding a wrapper.
+ * This keeps titles in their existing heading or card element while allowing
+ * the same emphasis, code, and link syntax used in lesson text.
+ */
+export function InlineMarkdown({ value }: { value: string }) {
+  return <>{renderInlineMarkdown(value, 'inline-markdown')}</>
+}
+
 function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
   const pieces: ReactNode[] = []
   const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g

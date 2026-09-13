@@ -114,6 +114,15 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
   await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
   const editor = page.locator('#lesson-editor-main-activity')
   await expect(editor.getByRole('heading', { name: 'Quiz' })).toBeVisible()
+  await editor.getByRole('button', { name: 'Preview', exact: true }).click()
+  const previewTitle = editor.locator('.activity-preview-surface').getByRole('heading', {
+    name: 'Paper Queue Quiz v1 Guide',
+  })
+  await expect(previewTitle.locator('strong')).toHaveText('Queue')
+  await expect(previewTitle.locator('em')).toHaveText('Quiz')
+  await expect(previewTitle.locator('code')).toHaveText('v1')
+  await expect(previewTitle.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
+  await editor.getByRole('button', { name: 'Setup', exact: true }).click()
   expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(0)
   expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`)).toBe(true)
   const forbiddenInitialCollections = [
@@ -276,6 +285,15 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
     await page.goto(
       `/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&schedule=${scheduleId}`,
     )
+    const quizTitle = page.getByRole('heading', { name: 'Paper Queue Quiz v1 Guide' })
+    await expect(quizTitle.locator('strong')).toHaveText('Queue')
+    await expect(quizTitle.locator('em')).toHaveText('Quiz')
+    await expect(quizTitle.locator('code')).toHaveText('v1')
+    await expect(quizTitle.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
+    const quizCard = page.locator('.activity-card').filter({ hasText: 'Paper Queue Quiz v1 Guide' })
+    await expect(quizCard.locator('strong')).toHaveText('Queue')
+    await expect(quizCard.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
+    await expect(page.locator('.activity-card').filter({ hasText: 'Database Reflection' }).locator('strong')).toHaveText('Database Reflection')
     await expect(page.getByText('Paper submission final', { exact: true })).toBeVisible()
     await expect(page.getByText(
       'The checked-paper score is final for this activity. Individual paper answers were not stored online.',

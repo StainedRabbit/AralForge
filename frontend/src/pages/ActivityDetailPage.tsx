@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { ModuleSubmissionForm } from '../components/activityForms'
 import { Icon } from '../components/Icon'
+import { InlineMarkdown } from '../components/RichLessonText'
 import { MetaStrip, NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
 import { activityTypeLabel, hasActiveModuleAccess } from '../utils/student'
 import { formatDateTime, numeric } from '../utils/format'
@@ -50,7 +51,7 @@ export function ActivityDetailPage({
     <Page>
       <PageHeader
         eyebrow={activityTypeLabel(activity.activity_type)}
-        title={activity.title}
+        title={activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}
         description={module ? module.title : 'Module activity'}
         actions={
           existingSubmission ? (

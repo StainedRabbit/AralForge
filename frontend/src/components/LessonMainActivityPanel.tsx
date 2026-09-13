@@ -11,7 +11,7 @@ import type {
 } from '../types'
 import { numeric, toErrorMessage } from '../utils/format'
 import { Icon } from './Icon'
-import { RichLessonText } from './RichLessonText'
+import { InlineMarkdown, RichLessonText } from './RichLessonText'
 
 export type ActivityDraft = {
   selected_choice: number | null
@@ -290,7 +290,7 @@ export function LessonMainActivityPanel({
       <div className="lesson-main-activity__header">
         <div>
           <p className="eyebrow">Quiz</p>
-          <h2>{activity.title}</h2>
+          <h2><InlineMarkdown value={activity.title} /></h2>
           <RichLessonText value={activity.instructions} />
         </div>
         <div className="lesson-main-activity__status">

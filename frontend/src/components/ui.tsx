@@ -16,7 +16,7 @@ export function PageHeader({
   actions?: ReactNode
   description: string
   eyebrow: string
-  title: string
+  title: ReactNode
 }) {
   return (
     <header className="page-header">
