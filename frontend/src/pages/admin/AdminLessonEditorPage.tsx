@@ -937,6 +937,7 @@ function parseLessonImportMarkdown(value: string): ParsedLessonImport {
   let inExamples = false
   let currentExampleTitle = ''
   let exampleBuffer: string[] = []
+  let codeFence: MarkdownCodeFence | null = null
 
   function flush() {
     const content = buffer.join('\n').trim()
@@ -970,6 +971,17 @@ function parseLessonImportMarkdown(value: string): ParsedLessonImport {
   }
 
   lines.forEach((line) => {
+    const wasInsideCodeFence = Boolean(codeFence)
+    codeFence = nextMarkdownCodeFence(line, codeFence)
+    if (wasInsideCodeFence || codeFence) {
+      if (inExamples) {
+        exampleBuffer.push(line)
+      } else {
+        buffer.push(line)
+      }
+      return
+    }
+
     const heading = line.match(/^(#{1,6})\s+(.+?)\s*$/)
     if (heading) {
       const level = heading[1].length
@@ -1061,12 +1073,22 @@ function parseLessonExampleImport(
     unsupportedFields: [],
   }
   let currentBlock: 'body' | 'common_mistake' | null = 'body'
+  let codeFence: MarkdownCodeFence | null = null
   const blocks: Record<'body' | 'common_mistake', string[]> = {
     body: [],
     common_mistake: [],
   }
 
   lines.forEach((line) => {
+    const wasInsideCodeFence = Boolean(codeFence)
+    codeFence = nextMarkdownCodeFence(line, codeFence)
+    if (wasInsideCodeFence || codeFence) {
+      if (currentBlock) {
+        blocks[currentBlock].push(line)
+      }
+      return
+    }
+
     const meta = line.match(/^([A-Za-z][A-Za-z -]+)\s*:\s*(.*)$/)
     if (meta) {
       const key = normalizeImportHeading(meta[1])
@@ -1135,6 +1157,34 @@ function parseLessonExampleImport(
     example.alt_text = imageAltTextFromFilename(importedImageFilename(example.imageUrl))
   }
   return example
+}
+
+type MarkdownCodeFence = {
+  character: '`' | '~'
+  length: number
+}
+
+function nextMarkdownCodeFence(line: string, currentFence: MarkdownCodeFence | null) {
+  if (currentFence) {
+    const closingFence = new RegExp(
+      `^ {0,3}${escapeRegExp(currentFence.character)}{${currentFence.length},}\\s*$`,
+    )
+    return closingFence.test(line) ? null : currentFence
+  }
+
+  const openingFence = line.match(/^ {0,3}(`{3,}|~{3,})/)
+  if (!openingFence) {
+    return null
+  }
+
+  return {
+    character: openingFence[1][0] as MarkdownCodeFence['character'],
+    length: openingFence[1].length,
+  }
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function stripExampleHeading(value: string) {

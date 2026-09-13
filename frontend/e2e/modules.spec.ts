@@ -481,6 +481,68 @@ Complete the retained practice.
   await expect(page.locator('#lesson-editor-examples').getByRole('textbox', { name: 'Example text' })).toHaveValue(
     'The Boolean expression is:\n\nUse a clear expression before checking the result.',
   )
+
+  await page.getByRole('button', { name: 'Import Lesson MD' }).click()
+  const fencedExamplesImport = page.getByRole('dialog', { name: 'Import Lesson Markdown' })
+  await fencedExamplesImport.getByRole('textbox', { name: 'Lesson Markdown' }).fill(`# Lesson: variables
+
+## Lesson Examples
+
+### Example: legacy example
+Order: 1
+Published: true
+
+First example.
+
+### Example: Device number
+Order: 2
+Published: true
+
+Second example.
+
+### Example: Debug value
+Order: 3
+Published: true
+
+Third example.
+
+### Example: CSS color
+Order: 4
+Published: true
+
+\`\`\`text
+# RR GG BB
+Order: not metadata
+Published: not metadata
+\`\`\`
+
+### Example: Java literal
+Order: 5
+Published: true
+
+Fifth example.
+
+### Example: RISC-V register
+Order: 6
+Published: true
+
+Sixth example.`)
+  await expect(fencedExamplesImport).toContainText('Examples detected: 6')
+  await expect(fencedExamplesImport).toContainText('Java literal')
+  await expect(fencedExamplesImport).toContainText('RISC-V register')
+  await fencedExamplesImport.getByRole('button', { name: 'Replace Lesson Fields' }).click()
+  await fencedExamplesImport.getByRole('button', { name: 'Close' }).click()
+
+  const exampleEditors = page.locator('#lesson-editor-examples .lesson-example-editor')
+  await expect(exampleEditors).toHaveCount(6)
+  await expect(exampleEditors.nth(3).getByRole('textbox', { name: 'Example text' })).toHaveValue(
+    '```text\n# RR GG BB\nOrder: not metadata\nPublished: not metadata\n```',
+  )
+  await expect(exampleEditors.nth(4).getByRole('textbox', { name: 'Title' })).toHaveValue('Java literal')
+  await expect(exampleEditors.nth(4).getByRole('spinbutton')).toHaveValue('5')
+  await expect(exampleEditors.nth(5).getByRole('textbox', { name: 'Title' })).toHaveValue('RISC-V register')
+  await expect(exampleEditors.nth(5).getByRole('spinbutton')).toHaveValue('6')
+
   const practiceEditor = page.getByRole('textbox', { name: "Let's Practice", exact: true })
   await expect(practiceEditor).toHaveValue('Complete the retained practice.')
   await practiceEditor.fill('Complete the retained practice. \uFFFD')
