@@ -30,21 +30,24 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
 }) {
   const api = useAuthenticatedRequest(session, setSession, onLogout)
   const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: 600_000 })
-  const navigation = useQuery({ queryKey: queryKeys.navigation, queryFn: ({ signal }) => api<Navigation>('/overview/navigation/', { signal }), staleTime: 30_000, enabled: Boolean(identity.data) })
+  const isAdminTeacher = Boolean(
+    identity.data?.user.is_admin_teacher || identity.data?.user.role === 'ADMIN',
+  )
+  const navigation = useQuery({ queryKey: queryKeys.navigation, queryFn: ({ signal }) => api<Navigation>('/overview/navigation/', { signal }), staleTime: 30_000, enabled: isAdminTeacher })
 
   if (identity.isPending) return <main className="app-main"><Page><SkeletonList count={4} /></Page></main>
   if (!identity.data || identity.error) return <main className="app-main"><Page><StatusBanner tone="warning" title="Account could not load" message="Please try loading your account again." /><button className="button button--secondary" type="button" disabled={identity.isFetching} onClick={() => void identity.refetch()}>{identity.isFetching ? 'Retrying…' : 'Retry'}</button></Page></main>
   const { user, student_profile: profile } = identity.data
   const pendingCount = navigation.data?.pending_count ?? 0
-  if (user.is_admin_teacher || user.role === 'ADMIN') return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} /></Suspense>
+  if (isAdminTeacher) return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} /></Suspense>
 
   const scoped = (resources: Parameters<typeof RouteWorkspace>[0]['resources'], render: Parameters<typeof RouteWorkspace>[0]['children']) =>
     <RouteWorkspace api={api} currentUser={user} profile={profile} resources={resources}>{render}</RouteWorkspace>
 
   return <div className="app-shell">
-    <Sidebar currentUser={user} pendingCount={pendingCount} onLogout={onLogout} />
+    <Sidebar currentUser={user} pendingCount={0} onLogout={onLogout} />
     <main className="app-main">
-      <MobileNavigation currentUser={user} pendingCount={pendingCount} onLogout={onLogout} />
+      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} />
       <Suspense fallback={<Page><SkeletonList count={4} /></Page>}>
         <Routes>
           <Route path="/" element={<DashboardPage api={api} currentUser={user} />} />
