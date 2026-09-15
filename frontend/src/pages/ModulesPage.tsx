@@ -1,417 +1,92 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
-import { RichLessonText } from '../components/RichLessonText'
 import { TopicPdfDownloads } from '../components/TopicPdfDownloads'
 import { EmptyState, Page, PageHeader, SearchBox, SkeletonCard } from '../components/ui'
-import type { ModuleLesson, ModuleTopic } from '../types'
-import {
-  getLessonResumeTarget,
-  lessonResumeActionLabel,
-  lessonSearchText,
-  lessonsForTopic,
-  modulesForSubject,
-  topicsForModule,
-  topicOwnSearchText,
-} from '../utils/modules'
-import {
-  getStudentModuleSubjectIds,
-  moduleAccessLabel,
-} from '../utils/student'
+import type { Module, ScheduleStudent } from '../types'
+import { getLessonResumeTarget, lessonResumeActionLabel, lessonSearchText, lessonsForTopic, topicOwnSearchText, topicsForModule } from '../utils/modules'
+import { moduleAccessLabel, moduleSubjectLabel } from '../utils/student'
 
-type ModuleSearchResult =
-  | { kind: 'topic'; topic: ModuleTopic }
-  | { kind: 'lesson'; lesson: ModuleLesson; topic: ModuleTopic }
+type ModuleContext = { type: 'CLASS' | 'PERSONAL'; enrollment?: ScheduleStudent }
 
-export function ModulesPage({
-  api,
-  data,
-}: {
-  api: AuthedRequest
-  data: RouteData
-}) {
+export function ModulesPage({ api, data }: { api: AuthedRequest; data: RouteData }) {
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState('')
-  const activeSubjectIds = useMemo(() => getStudentModuleSubjectIds(data), [data])
-  const visibleSubjects = useMemo(
-    () => data.subjects.filter((subject) => activeSubjectIds.has(subject.id)),
-    [activeSubjectIds, data.subjects],
-  )
-  const requestedSubjectId = Number(searchParams.get('subject')) || null
-  const requestedScheduleId = Number(searchParams.get('schedule')) || null
-  const [subjectId, setSubjectId] = useState<number | null>(
-    requestedSubjectId ?? visibleSubjects[0]?.id ?? null,
-  )
-  const [topicId, setTopicId] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (subjectId && visibleSubjects.some((subject) => subject.id === subjectId)) {
-      return
-    }
-    const nextSubjectId = requestedSubjectId && visibleSubjects.some(
-      (subject) => subject.id === requestedSubjectId,
-    )
-      ? requestedSubjectId
-      : visibleSubjects[0]?.id ?? null
-    queueMicrotask(() => setSubjectId(nextSubjectId))
-  }, [requestedSubjectId, subjectId, visibleSubjects])
-
-  const selectedModule = useMemo(
-    () =>
-      modulesForSubject(data.modules, subjectId).find(
-        (module) => module.is_published,
-      ) ?? null,
-    [data, subjectId],
-  )
-  const publishedTopics = useMemo(
-    () =>
-      selectedModule?.is_accessible
-        ? topicsForModule(data.moduleTopics, selectedModule.id).filter(
-            (topic) => topic.is_published,
-          )
-        : [],
-    [data.moduleTopics, selectedModule],
-  )
-  const publishedLessons = useMemo(
-    () =>
-      publishedTopics.flatMap((topic) =>
-        lessonsForTopic(data.moduleLessons, topic.id).filter(
-          (lesson) => lesson.is_published,
-        ),
-      ),
-    [data.moduleLessons, publishedTopics],
-  )
-  const matchingEnrollments = useMemo(
-    () => data.enrollments.filter((enrollment) =>
-      enrollment.subject === subjectId &&
-      enrollment.is_active &&
-      enrollment.schedule_is_active &&
-      enrollment.term_is_active,
-    ),
-    [data.enrollments, subjectId],
-  )
-  const selectedEnrollment = matchingEnrollments.find(
-    (enrollment) => enrollment.schedule === requestedScheduleId,
-  ) ?? (matchingEnrollments.length === 1 ? matchingEnrollments[0] : null)
-  const personalStudy = !matchingEnrollments.length && selectedModule?.access_status === 'ADVANCE_ACTIVE'
-  const contextReady = Boolean(selectedEnrollment || personalStudy)
-  const scopedLessonProgress = useMemo(
-    () => data.lessonProgress.filter((progress) =>
-      selectedEnrollment
-        ? progress.context_type === 'CLASS' && progress.schedule === selectedEnrollment.schedule
-        : personalStudy
-          ? progress.context_type === 'PERSONAL'
-          : false,
-    ),
-    [data.lessonProgress, personalStudy, selectedEnrollment],
-  )
-  const resumeTarget = useMemo(
-    () =>
-      getLessonResumeTarget(
-        publishedLessons,
-        scopedLessonProgress,
-        {
-          currentUserId: data.currentUser?.id ?? null,
-          isAccessible: Boolean(selectedModule?.is_accessible),
-        },
-      ),
-    [
-      data.currentUser?.id,
-      scopedLessonProgress,
-      publishedLessons,
-      selectedModule?.is_accessible,
-    ],
-  )
-
-  useEffect(() => {
-    if (!publishedTopics.length) {
-      if (topicId !== null) {
-        queueMicrotask(() => setTopicId(null))
-      }
-      return
-    }
-    if (!topicId || !publishedTopics.some((topic) => topic.id === topicId)) {
-      queueMicrotask(() => setTopicId(publishedTopics[0].id))
-    }
-  }, [publishedTopics, topicId])
-
+  const [contextModule, setContextModule] = useState<Module | null>(null)
+  const publishedModules = useMemo(() => data.modules.filter((module) => module.is_published), [data.modules])
   const normalizedQuery = query.trim().toLowerCase()
-  const searchResults = useMemo<ModuleSearchResult[]>(() => {
-    if (!selectedModule) {
-      return []
-    }
+  const visibleModules = useMemo(() => publishedModules.filter((module) => !normalizedQuery || moduleSearchText(data, module).includes(normalizedQuery)), [data, normalizedQuery, publishedModules])
 
-    if (!normalizedQuery) {
-      return publishedTopics.map((topic) => ({ kind: 'topic', topic }))
-    }
-
-    return publishedTopics.flatMap((topic) => {
-      const lessons = lessonsForTopic(data.moduleLessons, topic.id).filter(
-        (lesson) => lesson.is_published,
-      )
-      const results: ModuleSearchResult[] = []
-      if (topicOwnSearchText(topic).toLowerCase().includes(normalizedQuery)) {
-        results.push({ kind: 'topic', topic })
-      }
-      lessons.forEach((lesson) => {
-        if (lessonSearchText(lesson).toLowerCase().includes(normalizedQuery)) {
-          results.push({ kind: 'lesson', lesson, topic })
-        }
-      })
-      return results
-    })
-  }, [
-    data.moduleLessons,
-    normalizedQuery,
-    publishedTopics,
-    selectedModule,
-  ])
-
-  const selectedSubject = data.subjects.find((subject) => subject.id === subjectId)
-
-  function moduleTarget(parameters: Record<string, number> = {}) {
-    if (!selectedModule || !contextReady) return '/modules'
-    const next = new URLSearchParams()
-    Object.entries(parameters).forEach(([key, value]) => next.set(key, String(value)))
-    if (selectedEnrollment) next.set('schedule', String(selectedEnrollment.schedule))
-    else next.set('context', 'PERSONAL')
-    return `/modules/${selectedModule.id}?${next.toString()}`
+  function contextsFor(module: Module): ModuleContext[] {
+    const subjectIds = new Set([...(module.subject ? [module.subject] : []), ...module.subjects])
+    const enrollments = data.enrollments.filter((enrollment) =>
+      enrollment.student === data.currentUser?.id && enrollment.is_active && enrollment.schedule_is_active && enrollment.term_is_active && subjectIds.has(enrollment.subject),
+    )
+    if (enrollments.length) return enrollments.map((enrollment) => ({ type: 'CLASS', enrollment }))
+    return module.access_status === 'ADVANCE_ACTIVE' ? [{ type: 'PERSONAL' }] : []
   }
 
-  function openSelectedTopic() {
-    if (selectedModule?.is_accessible && topicId && contextReady) {
-      navigate(moduleTarget({ topic: topicId }))
-    }
+  function targetFor(module: Module, context: ModuleContext, lesson?: { id: number; topic: number }) {
+    const parameters = new URLSearchParams()
+    if (lesson) { parameters.set('topic', String(lesson.topic)); parameters.set('lesson', String(lesson.id)) }
+    if (context.type === 'CLASS' && context.enrollment) parameters.set('schedule', String(context.enrollment.schedule))
+    else parameters.set('context', 'PERSONAL')
+    return `/modules/${module.id}?${parameters.toString()}`
   }
 
-  return (
-    <Page>
-      <PageHeader
-        eyebrow="Learning library"
-        title="Modules"
-        description="Choose a subject, find a topic or lesson, and continue learning."
-      />
+  function openModule(module: Module) {
+    const contexts = contextsFor(module)
+    if (contexts.length === 1) { navigate(targetFor(module, contexts[0])); return }
+    if (contexts.length > 1) setContextModule(module)
+  }
 
-      {data.loading ? (
-        <div className="module-grid">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-      ) : (
-        <section className="student-module-browser section-block">
-          <div className="student-module-controls">
-            <label className="student-module-control">
-              <span>Subject</span>
-              <select
-                onChange={(event) => {
-                  const nextSubjectId = Number(event.target.value) || null
-                  setSubjectId(nextSubjectId)
-                  setSearchParams((current) => {
-                    const next = new URLSearchParams(current)
-                    if (nextSubjectId) next.set('subject', String(nextSubjectId))
-                    else next.delete('subject')
-                    next.delete('schedule')
-                    next.delete('context')
-                    return next
-                  }, { replace: true })
-                  setTopicId(null)
-                  setQuery('')
-                }}
-                value={subjectId ?? ''}
-              >
-                {!visibleSubjects.length ? (
-                  <option value="">No active subjects</option>
-                ) : null}
-                {visibleSubjects.map((subject) => (
-                  <option key={subject.id} value={subject.id}>
-                    {subject.code} - {subject.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {matchingEnrollments.length ? (
-              <label className="student-module-control">
-                <span>Class</span>
-                <select
-                  onChange={(event) => {
-                    const scheduleId = Number(event.target.value) || null
-                    setSearchParams((current) => {
-                      const next = new URLSearchParams(current)
-                      if (scheduleId) next.set('schedule', String(scheduleId))
-                      else next.delete('schedule')
-                      next.delete('context')
-                      return next
-                    }, { replace: true })
-                  }}
-                  value={selectedEnrollment?.schedule ?? ''}
-                >
-                  {matchingEnrollments.length > 1 ? <option value="">Select class</option> : null}
-                  {matchingEnrollments.map((enrollment) => (
-                    <option key={enrollment.schedule} value={enrollment.schedule}>
-                      {enrollment.schedule_display} · {enrollment.term_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : personalStudy ? (
-              <span className="status-pill">Personal Study</span>
-            ) : null}
-
-            <label className="student-module-control">
-              <span>Topic</span>
-              <select
-                disabled={!publishedTopics.length}
-                onChange={(event) => setTopicId(Number(event.target.value) || null)}
-                value={topicId ?? ''}
-              >
-                {!publishedTopics.length ? <option value="">No topics</option> : null}
-                {publishedTopics.map((topic) => (
-                  <option key={topic.id} value={topic.id}>
-                    {topic.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <SearchBox
-              onChange={setQuery}
-              placeholder="Search topics or lessons"
-              value={query}
-            />
-
-            <button
-              className="button button--primary"
-              disabled={!selectedModule || !topicId || !contextReady}
-              onClick={openSelectedTopic}
-              type="button"
-            >
-              <Icon name="arrow-right" />
-              <span>Open Topic</span>
-            </button>
-          </div>
-
-          <div className="student-module-browser__summary">
-            <div>
-              <p className="eyebrow">{selectedSubject?.code ?? 'Subject'}</p>
-              <h2>{selectedModule?.title ?? selectedSubject?.name ?? 'Learning module'}</h2>
-              <RichLessonText
-                value={
-                  selectedModule?.description ||
-                  'Published learning content will appear here when it is available.'
-                }
-              />
-            </div>
-            {selectedModule ? (
-              <div className="student-module-browser__actions">
-                <div className="student-module-browser__meta">
-                  <span>{moduleAccessLabel(data, selectedModule)}</span>
-                  <span>
-                    {selectedModule.is_accessible
-                      ? publishedTopics.length
-                      : selectedModule.downloadable_topics.length}{' '}
-                    topic{(selectedModule.is_accessible
-                      ? publishedTopics.length
-                      : selectedModule.downloadable_topics.length) === 1 ? '' : 's'}
-                  </span>
-                  {contextReady ? <Link to={moduleTarget()}>Module Contents</Link> : <span>Select a class</span>}
-                </div>
-                {resumeTarget ? (
-                  <Link
-                    className="button button--primary lesson-resume-action"
-                    to={moduleTarget({ topic: resumeTarget.lesson.topic, lesson: resumeTarget.lesson.id })}
-                  >
-                    <Icon name="arrow-right" />
-                    <span className="lesson-resume-action__copy">
-                      <strong>{lessonResumeActionLabel(resumeTarget.mode)}</strong>
-                      <small>{resumeTarget.lesson.title}</small>
-                    </span>
-                  </Link>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          {selectedModule && !selectedModule.is_accessible ? (
-            <LockedModuleSummary
-              api={api}
-              module={selectedModule}
-            />
-          ) : searchResults.length ? (
-            <div className="student-learning-results">
-              {searchResults.map((result) => {
-                const topic = result.topic
-                const lesson = result.kind === 'lesson' ? result.lesson : null
-                const target = lesson
-                  ? moduleTarget({ topic: topic.id, lesson: lesson.id })
-                  : moduleTarget({ topic: topic.id })
-                return (
-                  <Link
-                    aria-disabled={!contextReady}
-                    className="student-learning-result"
-                    key={`${result.kind}-${lesson?.id ?? topic.id}`}
-                    onClick={(event) => { if (!contextReady) event.preventDefault() }}
-                    to={target}
-                  >
-                    <span className="student-learning-result__icon">
-                      <Icon name={lesson ? 'book' : 'module'} />
-                    </span>
-                    <div>
-                      <small>{lesson ? topic.title : topic.unit || 'Competency topic'}</small>
-                      <strong>{lesson?.title ?? topic.title}</strong>
-                      <span>
-                        {lesson
-                          ? 'Open lesson'
-                          : topic.overview || topic.competency_text}
-                      </span>
-                    </div>
-                    <Icon name="arrow-right" />
-                  </Link>
-                )
-              })}
-            </div>
-          ) : (
-            <EmptyState
-              icon={selectedModule ? 'search' : 'module'}
-              title={selectedModule ? 'No matching learning content' : 'No module available'}
-              message={
-                selectedModule
-                  ? 'Try another search or choose a different subject.'
-                  : 'No published module is available for this subject yet.'
-              }
-            />
-          )}
-        </section>
-      )}
-    </Page>
-  )
+  return <Page>
+    <PageHeader eyebrow="Learning library" title="Modules" description="Browse the modules available to you and continue learning at your own pace." />
+    {data.loading ? <div className="module-grid"><SkeletonCard /><SkeletonCard /><SkeletonCard /></div> : <section className="student-module-library">
+      <div className="student-module-library__toolbar">
+        <SearchBox onChange={setQuery} placeholder="Search modules, subjects, topics, or lessons" value={query} />
+        <span className="student-module-library__count">{visibleModules.length} module{visibleModules.length === 1 ? '' : 's'}</span>
+      </div>
+      {visibleModules.length ? <div className="module-grid student-module-library__grid">
+        {visibleModules.map((module) => <StudentModuleCard api={api} contexts={contextsFor(module)} data={data} key={module.id} module={module} onOpen={() => openModule(module)} targetFor={targetFor} />)}
+      </div> : <EmptyState icon={publishedModules.length ? 'search' : 'module'} title={publishedModules.length ? 'No matching modules' : 'No modules available'} message={publishedModules.length ? 'Try a different module, subject, topic, or lesson search.' : 'Modules will appear here when they are available for your active classes or access grants.'} />}
+    </section>}
+    {contextModule ? <ClassChoiceDialog module={contextModule} contexts={contextsFor(contextModule)} onClose={() => setContextModule(null)} onChoose={(context) => navigate(targetFor(contextModule, context))} /> : null}
+  </Page>
 }
 
-function LockedModuleSummary({
-  api,
-  module,
-}: {
-  api: AuthedRequest
-  module: RouteData['modules'][number]
-}) {
-  return (
-    <div className="locked-module-summary">
-      <span className="locked-module-summary__icon">
-        <Icon name="shield" />
-      </span>
-      <div>
-        <p className="eyebrow">Module access</p>
-        <h3>Topics available for download</h3>
-        <p>
-          Download each published topic for offline study. Ask your teacher to activate
-          the module when it is time to open web lessons, progress,
-          and Main Activities online.
-        </p>
-      </div>
-      <TopicPdfDownloads api={api} module={module} />
-    </div>
-  )
+function StudentModuleCard({ api, data, module, contexts, onOpen, targetFor }: { api: AuthedRequest; data: RouteData; module: Module; contexts: ModuleContext[]; onOpen: () => void; targetFor: (module: Module, context: ModuleContext, lesson?: { id: number; topic: number }) => string }) {
+  const topics = topicsForModule(data.moduleTopics, module.id).filter((topic) => topic.is_published)
+  const lessons = topics.flatMap((topic) => lessonsForTopic(data.moduleLessons, topic.id).filter((lesson) => lesson.is_published))
+  const resumeContext = contexts.length === 1 ? contexts[0] : null
+  const progress = resumeContext ? data.lessonProgress.filter((item) => resumeContext.type === 'CLASS' ? item.context_type === 'CLASS' && item.schedule === resumeContext.enrollment?.schedule : item.context_type === 'PERSONAL') : []
+  const resumeTarget = getLessonResumeTarget(lessons, progress, { currentUserId: data.currentUser?.id ?? null, isAccessible: module.is_accessible })
+  const topicCount = module.is_accessible ? topics.length : module.downloadable_topics.length
+  return <article className={`module-card student-module-card${module.is_accessible ? '' : ' student-module-card--locked'}`}>
+    <div className="student-module-card__header"><span className="subject-chip">{moduleSubjectLabel(data, module)}</span><span className={module.is_accessible ? 'status-pill status-pill--success' : 'status-pill'}><Icon name="shield" /> {moduleAccessLabel(data, module)}</span></div>
+    <div className="student-module-card__body"><h2>{module.title}</h2><p>{module.description || 'Published learning content is ready when you are.'}</p></div>
+    <div className="student-module-card__meta"><span><Icon name="module" /> {topicCount} topic{topicCount === 1 ? '' : 's'}</span>{module.is_accessible ? <span><Icon name="book" /> {lessons.length} lesson{lessons.length === 1 ? '' : 's'}</span> : null}</div>
+    {module.is_accessible ? <div className="student-module-card__actions">
+      {resumeTarget && resumeContext ? <Link className="button button--primary" to={targetFor(module, resumeContext, resumeTarget.lesson)}><Icon name="arrow-right" /> {lessonResumeActionLabel(resumeTarget.mode)}</Link> : <button className="button button--primary" disabled={!contexts.length} onClick={onOpen} type="button"><Icon name="arrow-right" /> {!contexts.length ? 'No active class' : contexts.length > 1 ? 'Choose class' : 'Open module'}</button>}
+    </div> : <div className="student-module-card__locked"><p>Download published topics for offline study. Ask your teacher to activate online lessons and activities.</p><TopicPdfDownloads api={api} module={module} /></div>}
+  </article>
+}
+
+function ClassChoiceDialog({ module, contexts, onClose, onChoose }: { module: Module; contexts: ModuleContext[]; onClose: () => void; onChoose: (context: ModuleContext) => void }) {
+  return <div aria-labelledby="module-context-title" aria-modal="true" className="student-module-context-dialog" role="dialog">
+    <button aria-label="Close class selection" className="student-module-context-dialog__backdrop" onClick={onClose} type="button" />
+    <section className="student-module-context-dialog__panel"><div><p className="eyebrow">Choose a class</p><h2 id="module-context-title">{module.title}</h2><p>Select the class where you want to open this module. Your progress and activities stay with that class.</p></div>
+      <div className="student-module-context-dialog__choices">{contexts.map((context) => context.enrollment ? <button className="button button--secondary" key={context.enrollment.schedule} onClick={() => onChoose(context)} type="button">{context.enrollment.schedule_display} · {context.enrollment.term_name}<Icon name="arrow-right" /></button> : null)}</div>
+      <button className="button button--ghost" onClick={onClose} type="button">Cancel</button>
+    </section>
+  </div>
+}
+
+function moduleSearchText(data: RouteData, module: Module) {
+  const subjectIds = new Set([...(module.subject ? [module.subject] : []), ...module.subjects])
+  const subjects = data.subjects.filter((subject) => subjectIds.has(subject.id))
+  const topics = topicsForModule(data.moduleTopics, module.id).filter((topic) => topic.is_published)
+  const lessons = topics.flatMap((topic) => lessonsForTopic(data.moduleLessons, topic.id).filter((lesson) => lesson.is_published))
+  return [module.title, module.description, ...subjects.flatMap((subject) => [subject.code, subject.name]), ...module.downloadable_topics.map((topic) => topic.title), ...topics.map(topicOwnSearchText), ...lessons.map(lessonSearchText)].join(' ').toLowerCase()
 }

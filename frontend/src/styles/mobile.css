@@ -931,6 +931,31 @@
   }
 }
 
+@media (max-width: 640px) {
+  .student-module-library__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .student-module-library__toolbar .search-box {
+    width: 100%;
+  }
+
+  .student-module-card {
+    min-height: 0;
+  }
+
+  .student-module-context-dialog {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .student-module-context-dialog__panel {
+    width: 100%;
+    padding: 20px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-more__panel,
   .responsive-detail__panel {
