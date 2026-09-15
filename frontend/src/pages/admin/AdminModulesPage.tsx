@@ -12,6 +12,7 @@ import type {
   ModuleLesson,
   ModuleLessonExample,
   ModuleTopic,
+  TopicPdfGenerationResponse,
 } from '../../types'
 import { formatDateTime, toErrorMessage } from '../../utils/format'
 import { cleanImportedName } from '../../utils/importCleaning'
@@ -29,6 +30,7 @@ import {
   modulesForSubject,
   topicOwnSearchText,
 } from '../../utils/modules'
+import { isAbortError, requestTopicPdfDownload, waitForTopicPdf } from '../../utils/topicPdf'
 
 export function AdminModulesPage({
   api,
@@ -1246,6 +1248,7 @@ function TopicSummaryCard({
           label="Topic PDF"
           regeneratePath={`/modules/topics/${selectedTopic.id}/regenerate_pdf/`}
           refresh={refresh}
+          topicId={selectedTopic.id}
         />
         {workspaceMessage ? <p className="admin-message">{workspaceMessage}</p> : null}
       </div>
@@ -1618,6 +1621,7 @@ function PdfControls({
   label,
   regeneratePath,
   refresh,
+  topicId,
 }: {
   api: AuthedRequest
   downloadPath: string
@@ -1626,34 +1630,65 @@ function PdfControls({
   label: string
   regeneratePath: string
   refresh: () => Promise<void>
+  topicId: number
 }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const pdfControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => pdfControllerRef.current?.abort(), [downloadPath, regeneratePath])
+
+  function beginPdfOperation() {
+    pdfControllerRef.current?.abort()
+    const controller = new AbortController()
+    pdfControllerRef.current = controller
+    return controller
+  }
 
   async function regeneratePdf() {
     setBusy(true)
     setMessage('')
+    const controller = beginPdfOperation()
     try {
-      await api(regeneratePath, { method: 'POST' })
+      await api<TopicPdfGenerationResponse>(regeneratePath, {
+        method: 'POST',
+        signal: controller.signal,
+      })
+      setMessage('Generating PDF...')
+      await waitForTopicPdf(api, topicId, {
+        onStatus: setMessage,
+        signal: controller.signal,
+      })
       await refresh()
       setMessage('Printable PDF generated.')
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      if (!isAbortError(caughtError)) setMessage(toErrorMessage(caughtError))
     } finally {
-      setBusy(false)
+      if (pdfControllerRef.current === controller) {
+        pdfControllerRef.current = null
+        setBusy(false)
+      }
     }
   }
 
   async function downloadPdf() {
     setBusy(true)
     setMessage('')
+    const controller = beginPdfOperation()
     try {
-      const blob = await api<Blob>(downloadPath)
+      const blob = await requestTopicPdfDownload(api, topicId, {
+        onStatus: setMessage,
+        signal: controller.signal,
+      })
       downloadBlob(blob, filename)
+      setMessage('')
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      if (!isAbortError(caughtError)) setMessage(toErrorMessage(caughtError))
     } finally {
-      setBusy(false)
+      if (pdfControllerRef.current === controller) {
+        pdfControllerRef.current = null
+        setBusy(false)
+      }
     }
   }
 
@@ -1678,7 +1713,7 @@ function PdfControls({
           </button>
         ) : null}
       </div>
-      {message ? <small>{message}</small> : null}
+      {message ? <small aria-live="polite" role="status">{message}</small> : null}
     </div>
   )
 }

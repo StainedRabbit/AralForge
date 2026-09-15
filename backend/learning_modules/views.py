@@ -90,6 +90,7 @@ from .services.learning_context import (
     resolve_learning_context,
 )
 from .services.markdown_export import module_markdown
+from .services.pdf_generation import enqueue_topic_pdf, latest_topic_pdf_job
 
 
 def bounded_int(value, default=0, maximum=None):
@@ -814,18 +815,45 @@ def pdf_file_response(instance, missing_message):
     )
 
 
-def enqueue_topic_pdf(topic, owner):
-    from jobs.models import BackgroundJob
-    from jobs.tasks import enqueue, generate_topic_pdf_job
+def accessible_topic_pdf(request, pk):
+    topic = ModuleTopic.objects.select_related('module').prefetch_related(
+        'module__subjects',
+    ).filter(pk=pk).first()
+    if not topic or (
+        not request.user.is_admin_teacher
+        and not (topic.is_published and topic.module.is_published)
+    ):
+        return None
+    if not request.user.is_admin_teacher and not (
+        user_has_module_class_access(request.user, topic.module)
+        or user_has_module_access(request.user, topic.module)
+    ):
+        raise PermissionDenied('This topic PDF is not available for your account.')
+    return topic
 
-    return enqueue(
-        generate_topic_pdf_job,
-        job_type=BackgroundJob.Type.PDF_GENERATION,
-        owner=owner,
-        payload={'topic_id': topic.id},
-        total=1,
-        idempotency_key=f'topic-pdf:{topic.id}',
-    )
+
+def topic_pdf_status_payload(topic, request):
+    job = latest_topic_pdf_job(topic)
+    generation = None
+    if job:
+        error = ''
+        if job.status == job.Status.FAILED:
+            error = (
+                job.error
+                if request.user.is_admin_teacher and job.error
+                else 'The topic PDF could not be generated. Please try again or ask your teacher.'
+            )
+        generation = {
+            'job': str(job.id),
+            'status': job.status,
+            'error': error,
+        }
+    return {
+        'has_pdf': bool(topic.pdf_file),
+        'pdf_generated_at': topic.pdf_generated_at,
+        'pdf_is_outdated': topic.pdf_is_outdated,
+        'generation': generation,
+    }
 
 
 def module_subject_ids(module):
@@ -1003,22 +1031,9 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
         url_path='download_pdf',
     )
     def download_pdf(self, request, pk=None):
-        topic = ModuleTopic.objects.select_related('module').prefetch_related(
-            'module__subjects',
-        ).filter(pk=pk).first()
-        if not topic or (
-            not request.user.is_admin_teacher
-            and not (
-                topic.is_published
-                and topic.module.is_published
-            )
-        ):
+        topic = accessible_topic_pdf(request, pk)
+        if not topic:
             return response.Response({'detail': 'Topic not found.'}, status=404)
-        if not request.user.is_admin_teacher and not (
-            user_has_module_class_access(request.user, topic.module)
-            or user_has_module_access(request.user, topic.module)
-        ):
-            raise PermissionDenied('This topic PDF is not available for your account.')
         if not topic.pdf_file and topic.is_published:
             job = enqueue_topic_pdf(topic, request.user)
             return response.Response({
@@ -1027,6 +1042,18 @@ class ModuleTopicViewSet(viewsets.ModelViewSet):
                 'status': job.status,
             }, status=status.HTTP_202_ACCEPTED)
         return pdf_file_response(topic, 'This topic does not have a PDF.')
+
+    @decorators.action(
+        detail=True,
+        methods=['get'],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path='pdf_status',
+    )
+    def pdf_status(self, request, pk=None):
+        topic = accessible_topic_pdf(request, pk)
+        if not topic:
+            return response.Response({'detail': 'Topic not found.'}, status=404)
+        return response.Response(topic_pdf_status_payload(topic, request))
 
     @decorators.action(
         detail=True,

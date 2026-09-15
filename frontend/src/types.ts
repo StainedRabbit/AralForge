@@ -229,6 +229,23 @@ export type DownloadableModuleTopic = {
   pdf_is_outdated: boolean
 }
 
+export type TopicPdfGenerationResponse = {
+  detail: string
+  job: string
+  status: BackgroundJob['status']
+}
+
+export type TopicPdfStatus = {
+  has_pdf: boolean
+  pdf_generated_at: string | null
+  pdf_is_outdated: boolean
+  generation: null | {
+    job: string
+    status: BackgroundJob['status']
+    error: string
+  }
+}
+
 export type ModuleTopic = {
   id: number
   module: number

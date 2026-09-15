@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AuthedRequest } from '../app/types'
 import type { Module } from '../types'
 import { toErrorMessage } from '../utils/format'
+import { isAbortError, requestTopicPdfDownload } from '../utils/topicPdf'
 import { Icon } from './Icon'
 
 export function TopicPdfDownloads({
@@ -51,22 +52,37 @@ export function TopicPdfButton({
 }) {
   const [downloading, setDownloading] = useState(false)
   const [message, setMessage] = useState('')
+  const downloadControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => downloadControllerRef.current?.abort(), [topic.id])
 
   async function downloadTopic() {
     setDownloading(true)
     setMessage('')
+    downloadControllerRef.current?.abort()
+    const controller = new AbortController()
+    downloadControllerRef.current = controller
     try {
-      const blob = await api<Blob>(`/modules/topics/${topic.id}/download_pdf/`)
+      const blob = await requestTopicPdfDownload(api, topic.id, {
+        onStatus: setMessage,
+        signal: controller.signal,
+      })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = `${module.slug || 'module'}-${slugify(topic.title) || `topic-${topic.id}`}.pdf`
       link.click()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+      setMessage('')
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError) || 'The topic PDF is not available yet.')
+      if (!isAbortError(caughtError)) {
+        setMessage(toErrorMessage(caughtError) || 'The topic PDF is not available yet.')
+      }
     } finally {
-      setDownloading(false)
+      if (downloadControllerRef.current === controller) {
+        downloadControllerRef.current = null
+        setDownloading(false)
+      }
     }
   }
 
@@ -81,7 +97,7 @@ export function TopicPdfButton({
         <Icon name="arrow-down" />
         <span>{downloading ? 'Downloading...' : 'Download Topic PDF'}</span>
       </button>
-      {message ? <p className="admin-message">{message}</p> : null}
+      {message ? <p aria-live="polite" className="admin-message" role="status">{message}</p> : null}
     </>
   )
 }

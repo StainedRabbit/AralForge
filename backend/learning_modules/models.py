@@ -1,4 +1,5 @@
 import calendar
+import logging
 
 from django.conf import settings
 from django.core.validators import FileExtensionValidator, MinValueValidator
@@ -7,6 +8,10 @@ from django.db.models import Q
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
 from django.utils import timezone
+
+
+logger = logging.getLogger(__name__)
+
 
 class Module(models.Model):
     title = models.CharField(max_length=180)
@@ -150,7 +155,7 @@ class ModuleTopic(models.Model):
             and (is_new or not previous or not previous['is_published'])
         ):
             transaction.on_commit(
-                lambda: safe_generate_topic_pdf(self),
+                lambda: safe_enqueue_topic_pdf(self),
                 using=self._state.db,
             )
 
@@ -467,15 +472,15 @@ def mark_activity_printables_outdated(activity):
         mark_topic_pdf_outdated(activity.topic)
 
 
-def safe_generate_topic_pdf(topic):
+def safe_enqueue_topic_pdf(topic):
     try:
-        from .services.pdf_generation import generate_topic_pdf
+        from .services.pdf_generation import enqueue_topic_pdf
 
-        generate_topic_pdf(topic)
+        enqueue_topic_pdf(topic)
     except Exception:
-        # Publishing should not fail just because the optional PDF renderer is
-        # unavailable. Manual regeneration reports generation errors directly.
-        return
+        # Publishing should still succeed if the background queue is temporarily
+        # unavailable, but the failure must remain visible in hosted logs.
+        logger.exception('Could not enqueue printable PDF for topic %s.', topic.pk)
 
 
 class ModuleLessonExample(models.Model):

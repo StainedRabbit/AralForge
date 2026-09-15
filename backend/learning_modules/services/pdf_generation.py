@@ -67,6 +67,29 @@ def generate_topic_pdf(topic):
     )
 
 
+def enqueue_topic_pdf(topic, owner=None):
+    from jobs.models import BackgroundJob
+    from jobs.tasks import enqueue, generate_topic_pdf_job
+
+    return enqueue(
+        generate_topic_pdf_job,
+        job_type=BackgroundJob.Type.PDF_GENERATION,
+        owner=owner,
+        payload={'topic_id': topic.id},
+        total=1,
+        idempotency_key=f'topic-pdf:{topic.id}',
+    )
+
+
+def latest_topic_pdf_job(topic):
+    from jobs.models import BackgroundJob
+
+    return BackgroundJob.objects.filter(
+        job_type=BackgroundJob.Type.PDF_GENERATION,
+        idempotency_key=f'topic-pdf:{topic.id}',
+    ).order_by('-created_at', '-id').first()
+
+
 def render_pdf_to_model(instance, filename, context):
     html = render_to_string('learning_modules/printable_pdf.html', context)
     logger.debug(

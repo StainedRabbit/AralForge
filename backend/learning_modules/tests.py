@@ -19,6 +19,7 @@ def result_rows(response):
     return response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
 
 from accounts.models import User
+from jobs.models import BackgroundJob
 from grades.models import (
     GradeCategory,
     GradeCategoryChoices,
@@ -2384,17 +2385,146 @@ class PrintablePdfApiTests(APITestCase):
         return topic
 
     def test_published_topic_pdf_generation_runs_after_commit(self):
-        with patch('learning_modules.models.safe_generate_topic_pdf') as generate_pdf:
+        with patch('learning_modules.models.safe_enqueue_topic_pdf') as enqueue_pdf:
             with self.captureOnCommitCallbacks(execute=True) as callbacks:
                 topic = ModuleTopic.objects.create(
                     module=self.module,
                     title='Deferred Printable Topic',
                     is_published=True,
                 )
-                generate_pdf.assert_not_called()
+                enqueue_pdf.assert_not_called()
 
             self.assertEqual(len(callbacks), 1)
-            generate_pdf.assert_called_once_with(topic)
+            enqueue_pdf.assert_called_once_with(topic)
+
+    def test_published_topic_creates_an_unowned_background_job(self):
+        with patch('jobs.tasks.generate_topic_pdf_job.delay') as dispatch:
+            dispatch.return_value.id = 'test-pdf-task'
+            with self.captureOnCommitCallbacks(execute=True):
+                topic = ModuleTopic.objects.create(
+                    module=self.module,
+                    title='Queued Printable Topic',
+                    is_published=True,
+                )
+
+        job = BackgroundJob.objects.get(idempotency_key=f'topic-pdf:{topic.id}')
+        self.assertEqual(job.job_type, BackgroundJob.Type.PDF_GENERATION)
+        self.assertEqual(job.payload, {'topic_id': topic.id})
+        self.assertIsNone(job.owner)
+
+    def test_missing_pdf_download_queues_and_reports_generation_status(self):
+        self.client.force_authenticate(self.student)
+
+        queued = self.client.get(
+            f'/api/modules/topics/{self.topic.id}/download_pdf/',
+        )
+
+        self.assertEqual(queued.status_code, 202)
+        job = BackgroundJob.objects.get(pk=queued.data['job'])
+        self.assertEqual(job.status, BackgroundJob.Status.PENDING)
+
+        pending = self.client.get(
+            f'/api/modules/topics/{self.topic.id}/pdf_status/',
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertFalse(pending.data['has_pdf'])
+        self.assertEqual(pending.data['generation']['status'], 'PENDING')
+
+        job.status = BackgroundJob.Status.RUNNING
+        job.save(update_fields=['status'])
+        running = self.client.get(
+            f'/api/modules/topics/{self.topic.id}/pdf_status/',
+        )
+        self.assertEqual(running.data['generation']['status'], 'RUNNING')
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.fake_topic_pdf(self.topic)
+                job.status = BackgroundJob.Status.SUCCEEDED
+                job.save(update_fields=['status'])
+
+                succeeded = self.client.get(
+                    f'/api/modules/topics/{self.topic.id}/pdf_status/',
+                )
+                self.assertTrue(succeeded.data['has_pdf'])
+                self.assertEqual(succeeded.data['generation']['status'], 'SUCCEEDED')
+
+                downloaded = self.client.get(
+                    f'/api/modules/topics/{self.topic.id}/download_pdf/',
+                )
+                self.assertEqual(downloaded.status_code, 200)
+                self.assertEqual(
+                    b''.join(downloaded.streaming_content),
+                    b'%PDF-1.4 generated topic',
+                )
+
+    def test_concurrent_downloaders_share_a_topic_job_and_can_read_status(self):
+        other_student = User.objects.create_user(
+            username='pdf-student-two',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ENROLLED,
+            activated_by=self.teacher,
+            module=self.module,
+            student=other_student,
+        )
+
+        self.client.force_authenticate(self.student)
+        first = self.client.get(f'/api/modules/topics/{self.topic.id}/download_pdf/')
+        self.client.force_authenticate(other_student)
+        second = self.client.get(f'/api/modules/topics/{self.topic.id}/download_pdf/')
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first.data['job'], second.data['job'])
+        self.assertEqual(
+            BackgroundJob.objects.filter(idempotency_key=f'topic-pdf:{self.topic.id}').count(),
+            1,
+        )
+        status_response = self.client.get(
+            f'/api/modules/topics/{self.topic.id}/pdf_status/',
+        )
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.data['generation']['job'], first.data['job'])
+
+    def test_pdf_status_protects_access_and_hides_student_failure_details(self):
+        job = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.PDF_GENERATION,
+            owner=self.teacher,
+            payload={'topic_id': self.topic.id},
+            idempotency_key=f'topic-pdf:{self.topic.id}',
+            status=BackgroundJob.Status.FAILED,
+            error='Supabase secret diagnostic detail',
+        )
+        outsider = User.objects.create_user(
+            username='pdf-outsider',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+
+        self.client.force_authenticate(outsider)
+        denied = self.client.get(f'/api/modules/topics/{self.topic.id}/pdf_status/')
+        self.assertEqual(denied.status_code, 403)
+
+        self.client.force_authenticate(self.student)
+        student_status = self.client.get(f'/api/modules/topics/{self.topic.id}/pdf_status/')
+        self.assertEqual(student_status.status_code, 200)
+        self.assertEqual(student_status.data['generation']['job'], str(job.id))
+        self.assertNotIn('Supabase', student_status.data['generation']['error'])
+
+        self.client.force_authenticate(self.teacher)
+        teacher_status = self.client.get(f'/api/modules/topics/{self.topic.id}/pdf_status/')
+        self.assertIn('Supabase', teacher_status.data['generation']['error'])
+
+    def test_weasyprint_renderer_returns_complete_pdf_bytes(self):
+        from learning_modules.services.pdf_generation import render_pdf
+
+        pdf_bytes = render_pdf('<html><body><h1>AralForge PDF smoke test</h1></body></html>')
+
+        self.assertTrue(pdf_bytes.startswith(b'%PDF-'))
+        self.assertTrue(pdf_bytes.rstrip().endswith(b'%%EOF'))
 
     def test_printable_lesson_sections_exclude_removed_fields(self):
         from learning_modules.services.pdf_generation import lesson_context

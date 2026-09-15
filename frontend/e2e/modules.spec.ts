@@ -607,6 +607,34 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
   await expect(page.getByText('Module PDF', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Lesson PDF', { exact: true })).toHaveCount(0)
 
+  let pdfStatusChecks = 0
+  await page.route(/\/api\/modules\/topics\/\d+\/regenerate_pdf\/$/, route => route.fulfill({
+    contentType: 'application/json',
+    json: { detail: 'The topic PDF is being generated.', job: 'pdf-job', status: 'PENDING' },
+    status: 202,
+  }))
+  await page.route(/\/api\/modules\/topics\/\d+\/pdf_status\/$/, route => {
+    pdfStatusChecks += 1
+    return route.fulfill({
+      contentType: 'application/json',
+      json: {
+        generation: {
+          error: '',
+          job: 'pdf-job',
+          status: pdfStatusChecks === 1 ? 'RUNNING' : 'SUCCEEDED',
+        },
+        has_pdf: pdfStatusChecks > 1,
+        pdf_generated_at: pdfStatusChecks > 1 ? new Date().toISOString() : null,
+        pdf_is_outdated: pdfStatusChecks <= 1,
+      },
+      status: 200,
+    })
+  })
+  await page.getByRole('button', { name: /Generate PDF|Regenerate PDF/ }).click()
+  await expect(page.getByText('Generating PDF...', { exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Printable PDF generated.', { exact: true })).toBeVisible({ timeout: 10_000 })
+  expect(pdfStatusChecks).toBeGreaterThanOrEqual(2)
+
   const savedUrl = page.url()
   await page.reload()
   await expect(page).toHaveURL(savedUrl)
@@ -621,11 +649,37 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
 
 test('starts, resumes, continues, and reviews lessons from module pages', async ({ page }) => {
   const topicDownloadPaths: string[] = []
+  let topicStatusChecks = 0
   await page.route(/\/api\/modules\/topics\/\d+\/download_pdf\/$/, async (route) => {
     topicDownloadPaths.push(new URL(route.request().url()).pathname)
+    if (topicDownloadPaths.length === 1) {
+      await route.fulfill({
+        contentType: 'application/json',
+        json: { detail: 'The topic PDF is being generated.', job: 'pdf-job', status: 'PENDING' },
+        status: 202,
+      })
+      return
+    }
     await route.fulfill({
       body: Buffer.from('%PDF-1.4 topic fixture'),
       contentType: 'application/pdf',
+      status: 200,
+    })
+  })
+  await page.route(/\/api\/modules\/topics\/\d+\/pdf_status\/$/, async (route) => {
+    topicStatusChecks += 1
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        generation: {
+          error: '',
+          job: 'pdf-job',
+          status: topicStatusChecks === 1 ? 'RUNNING' : 'SUCCEEDED',
+        },
+        has_pdf: topicStatusChecks > 1,
+        pdf_generated_at: topicStatusChecks > 1 ? new Date().toISOString() : null,
+        pdf_is_outdated: false,
+      },
       status: 200,
     })
   })
@@ -656,12 +710,19 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   expect((await topicDownload).suggestedFilename()).toBe(
     'e2e-resume-learning-module-resume-topic.pdf',
   )
-  expect(topicDownloadPaths).toHaveLength(1)
+  expect(topicDownloadPaths).toHaveLength(2)
+  expect(topicStatusChecks).toBeGreaterThanOrEqual(2)
 
   await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
   await expect(page.getByRole('button', { name: /Resume Lesson.*Resume Basics/ })).toBeVisible()
   await page.getByRole('button', { name: 'View topic overview' }).click()
   await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
+  const immediateTopicDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download Topic PDF' }).click()
+  expect((await immediateTopicDownload).suggestedFilename()).toBe(
+    'e2e-resume-learning-module-resume-topic.pdf',
+  )
+  expect(topicDownloadPaths).toHaveLength(3)
   await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
 
   await page.goto(moduleLibraryUrl)
@@ -719,4 +780,86 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await expect(reviewLink).toBeVisible()
   await reviewLink.click()
   await expect(page.getByRole('heading', { name: 'Resume Review' })).toBeVisible()
+})
+
+test('shows a safe error when queued topic PDF generation fails', async ({ page }) => {
+  let downloaded = false
+  page.on('download', () => { downloaded = true })
+  await page.route(/\/api\/modules\/topics\/\d+\/download_pdf\/$/, route => route.fulfill({
+    contentType: 'application/json',
+    json: { detail: 'The topic PDF is being generated.', job: 'failed-pdf-job', status: 'PENDING' },
+    status: 202,
+  }))
+  await page.route(/\/api\/modules\/topics\/\d+\/pdf_status\/$/, route => route.fulfill({
+    contentType: 'application/json',
+    json: {
+      generation: {
+        error: 'The topic PDF could not be generated. Please try again or ask your teacher.',
+        job: 'failed-pdf-job',
+        status: 'FAILED',
+      },
+      has_pdf: false,
+      pdf_generated_at: null,
+      pdf_is_outdated: true,
+    },
+    status: 200,
+  }))
+
+  await page.goto('/modules')
+  await page.getByLabel('Student number').fill('E2E-001')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL((url) => url.pathname === '/')
+  await page.goto('/modules')
+  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
+  await page.getByRole('button', { name: 'Open Topic' }).click()
+  await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Download Topic PDF' }).click()
+
+  await expect(page.getByText(
+    'The topic PDF could not be generated. Please try again or ask your teacher.',
+    { exact: true },
+  )).toBeVisible({ timeout: 10_000 })
+  expect(downloaded).toBe(false)
+})
+
+test('stops waiting for a topic PDF after the generation timeout', async ({ page }) => {
+  await page.route(/\/api\/modules\/topics\/\d+\/download_pdf\/$/, route => route.fulfill({
+    contentType: 'application/json',
+    json: { detail: 'The topic PDF is being generated.', job: 'slow-pdf-job', status: 'PENDING' },
+    status: 202,
+  }))
+  await page.route(/\/api\/modules\/topics\/\d+\/pdf_status\/$/, route => route.fulfill({
+    contentType: 'application/json',
+    json: {
+      generation: { error: '', job: 'slow-pdf-job', status: 'RUNNING' },
+      has_pdf: false,
+      pdf_generated_at: null,
+      pdf_is_outdated: true,
+    },
+    status: 200,
+  }))
+
+  await page.goto('/modules')
+  await page.getByLabel('Student number').fill('E2E-001')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL((url) => url.pathname === '/')
+  await page.goto('/modules')
+  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
+  await page.getByRole('button', { name: 'Open Topic' }).click()
+  const downloadButton = page.getByRole('button', { name: 'Download Topic PDF' })
+  await expect(downloadButton).toBeVisible()
+  await page.clock.install()
+
+  await downloadButton.click()
+  await expect(page.getByText('Generating PDF...', { exact: true })).toBeVisible()
+  await page.clock.fastForward(121_500)
+
+  await expect(page.getByText(
+    'The topic PDF is still generating. Please try again shortly.',
+    { exact: true },
+  )).toBeVisible()
+  await expect(downloadButton).toBeEnabled()
 })
