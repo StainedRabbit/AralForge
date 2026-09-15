@@ -106,7 +106,9 @@ export function ActivityCard({
         <Icon name="activity" />
       </span>
       <div>
-        <strong>{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</strong>
+        <div className="activity-card__title">
+          {activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}
+        </div>
         <span>{activityTypeLabel(activity.activity_type)}</span>
       </div>
       <span className={submitted ? 'status-pill status-pill--success' : 'status-pill'}>
@@ -139,7 +141,9 @@ export function ActivityTimelineItem({
         <Icon name="calendar" />
       </div>
       <div>
-        <strong>{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</strong>
+        <div className="timeline-item__title">
+          {activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}
+        </div>
         <span>{module?.title ?? activityTypeLabel(activity.activity_type)}</span>
         <small>{dueLabel(activity.due_at)}</small>
       </div>

@@ -342,20 +342,21 @@
 
 .resource-row strong,
 .resource-row span,
-.activity-card strong,
+.activity-card__title,
 .activity-card span,
-.timeline-item strong,
+.timeline-item__title,
 .timeline-item span,
 .timeline-item small {
   display: block;
 }
 
 .resource-row strong,
-.activity-card strong,
-.timeline-item strong {
+.activity-card__title,
+.timeline-item__title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 800;
 }
 
 .resource-row span,

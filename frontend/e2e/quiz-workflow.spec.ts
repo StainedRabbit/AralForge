@@ -92,18 +92,56 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
       }
       return rows
     }
-    const [modules, topics, lessons] = await Promise.all([
+    const [modules, topics, lessons, activities] = await Promise.all([
       load('/modules/modules/'),
       load('/modules/topics/'),
       load('/modules/lessons/'),
+      load('/modules/activities/'),
     ])
     const module = modules.find((candidate: { title: string }) => candidate.title === 'E2E Quiz Workflow')
     const topic = topics.find((candidate: { module: number }) => candidate.module === module?.id)
     const lesson = lessons.find((candidate: { topic: number; title: string }) =>
       candidate.topic === topic?.id && candidate.title === 'Quiz Workflow Lesson')
-    return { lesson: lesson?.id, module: module?.id, topic: topic?.id }
+    const activity = activities.find((candidate: { lesson: number }) => candidate.lesson === lesson?.id)
+    return { activity: activity?.id, lesson: lesson?.id, module: module?.id, topic: topic?.id }
   })
-  expect(target).toEqual({ lesson: expect.any(Number), module: expect.any(Number), topic: expect.any(Number) })
+  expect(target).toEqual({
+    activity: expect.any(Number),
+    lesson: expect.any(Number),
+    module: expect.any(Number),
+    topic: expect.any(Number),
+  })
+  await page.evaluate(async (activityId) => {
+    const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
+    const load = async (path: string) => {
+      const rows = []
+      let next: string | null = `http://127.0.0.1:8001/api${path}`
+      while (next) {
+        const response = await fetch(next, { headers })
+        const payload = await response.json()
+        if (Array.isArray(payload)) return payload
+        rows.push(...payload.results)
+        next = payload.next
+      }
+      return rows
+    }
+    const [attempts, gradeItems] = await Promise.all([
+      load('/modules/activity-attempts/'),
+      load('/grades/items/'),
+    ])
+    const requests = [
+      ...attempts
+        .filter((attempt: { activity: number }) => attempt.activity === activityId)
+        .map((attempt: { id: number }) => `/modules/activity-attempts/${attempt.id}/`),
+      ...gradeItems
+        .filter((item: { module_activity: number | null }) => item.module_activity === activityId)
+        .map((item: { id: number }) => `/grades/items/${item.id}/`),
+    ]
+    for (const path of requests) {
+      const response = await fetch(`http://127.0.0.1:8001/api${path}`, { headers, method: 'DELETE' })
+      if (!response.ok) throw new Error(`Could not reset Quiz workflow fixture: ${path}`)
+    }
+  }, target.activity)
   const editorRequests: Array<{ method: string; path: string }> = []
   page.on('request', request => {
     const url = new URL(request.url())
@@ -291,9 +329,12 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
     await expect(quizTitle.locator('code')).toHaveText('v1')
     await expect(quizTitle.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
     const quizCard = page.locator('.activity-card').filter({ hasText: 'Paper Queue Quiz v1 Guide' })
-    await expect(quizCard.locator('strong')).toHaveText('Queue')
+    const quizCardTitle = quizCard.locator('.activity-card__title')
+    await expect(quizCardTitle.locator('strong')).toHaveText('Queue')
     await expect(quizCard.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
-    await expect(page.locator('.activity-card').filter({ hasText: 'Database Reflection' }).locator('strong')).toHaveText('Database Reflection')
+    await expect(
+      page.locator('.activity-card').filter({ hasText: 'Database Reflection' }).locator('.activity-card__title'),
+    ).toHaveText('Database Reflection')
     await expect(page.getByText('Paper submission final', { exact: true })).toBeVisible()
     await expect(page.getByText(
       'The checked-paper score is final for this activity. Individual paper answers were not stored online.',
