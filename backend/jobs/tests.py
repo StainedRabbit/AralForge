@@ -2,6 +2,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from botocore.exceptions import ClientError
 from django.test import TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -10,7 +11,7 @@ from accounts.models import User
 from learning_modules.models import Module, sync_module_progress_for_students
 
 from .models import BackgroundJob
-from .tasks import enqueue, mark_running
+from .tasks import enqueue, mark_failed, mark_running
 
 
 class BackgroundJobApiTests(APITestCase):
@@ -77,6 +78,36 @@ class BackgroundJobApiTests(APITestCase):
 
 
 class BackgroundJobEnqueueTests(TransactionTestCase):
+    @patch('jobs.tasks.logger.error')
+    def test_storage_client_failure_is_persisted_with_safe_diagnostics(self, log_error):
+        job = BackgroundJob.objects.create(job_type=BackgroundJob.Type.PDF_GENERATION)
+        error = ClientError(
+            {
+                'Error': {'Code': 'AccessDenied', 'Message': 'Access denied'},
+                'ResponseMetadata': {
+                    'HTTPStatusCode': 403,
+                    'RequestId': 'r2-request-id',
+                    'HTTPHeaders': {'authorization': 'secret-request-header'},
+                },
+            },
+            'PutObject',
+        )
+
+        mark_failed(job, error)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertIn('operation=PutObject', job.error)
+        self.assertIn('code=AccessDenied', job.error)
+        self.assertIn('http_status=403', job.error)
+        self.assertIn('request_id=r2-request-id', job.error)
+        self.assertNotIn('secret-request-header', job.error)
+        log_error.assert_called_once_with(
+            'Background job %s failed: %s',
+            job.pk,
+            job.error,
+        )
+
     def test_expired_roster_job_does_not_block_resubmission(self):
         old = BackgroundJob.objects.create(
             job_type=BackgroundJob.Type.IMPORT,

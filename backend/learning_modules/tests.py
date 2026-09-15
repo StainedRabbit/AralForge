@@ -2526,6 +2526,40 @@ class PrintablePdfApiTests(APITestCase):
         self.assertTrue(pdf_bytes.startswith(b'%PDF-'))
         self.assertTrue(pdf_bytes.rstrip().endswith(b'%%EOF'))
 
+    def test_pdf_storage_failure_records_safe_worker_diagnostics(self):
+        from botocore.exceptions import ClientError
+
+        from jobs.tasks import generate_topic_pdf_job
+
+        job = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.PDF_GENERATION,
+            payload={'topic_id': self.topic.id},
+            idempotency_key=f'topic-pdf:{self.topic.id}',
+        )
+        storage_error = ClientError(
+            {
+                'Error': {'Code': 'AccessDenied', 'Message': 'Access denied'},
+                'ResponseMetadata': {
+                    'HTTPStatusCode': 403,
+                    'RequestId': 'pdf-r2-request',
+                    'HTTPHeaders': {'authorization': 'secret-request-header'},
+                },
+            },
+            'PutObject',
+        )
+
+        with patch(
+            'learning_modules.services.pdf_generation.generate_topic_pdf',
+            side_effect=storage_error,
+        ), self.assertRaises(ClientError):
+            generate_topic_pdf_job.run(str(job.id))
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertIn('operation=PutObject', job.error)
+        self.assertIn('code=AccessDenied', job.error)
+        self.assertNotIn('secret-request-header', job.error)
+
     def test_printable_lesson_sections_exclude_removed_fields(self):
         from learning_modules.services.pdf_generation import lesson_context
 

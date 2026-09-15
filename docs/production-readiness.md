@@ -24,11 +24,18 @@ Railway requires these values for each environment:
 - `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
 - `REDIS_URL` (the shared Railway Redis URL used by the API and Celery worker)
 - `CELERY_TASK_TIME_LIMIT=1800`
-- `SUPABASE_S3_ENDPOINT` (the existing compatibility name for the Cloudflare R2 S3 endpoint)
-- `SUPABASE_S3_REGION`
-- `SUPABASE_S3_ACCESS_KEY_ID`
-- `SUPABASE_S3_SECRET_ACCESS_KEY`
-- `SUPABASE_STORAGE_BUCKET`
+- `OBJECT_STORAGE_S3_ENDPOINT` (`https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, without a bucket path)
+- `OBJECT_STORAGE_S3_REGION=auto`
+- `OBJECT_STORAGE_S3_ACCESS_KEY_ID`
+- `OBJECT_STORAGE_S3_SECRET_ACCESS_KEY`
+- `OBJECT_STORAGE_BUCKET`
+- `OBJECT_STORAGE_SIGNED_URL_SECONDS=3600` (optional)
+
+The complete legacy `SUPABASE_S3_ENDPOINT`, `SUPABASE_S3_REGION`,
+`SUPABASE_S3_ACCESS_KEY_ID`, `SUPABASE_S3_SECRET_ACCESS_KEY`, and
+`SUPABASE_STORAGE_BUCKET` set remains supported for existing deployments. Do
+not mix canonical and legacy variables. R2 credentials must be scoped to the
+intended bucket and include Object Read & Write permission.
 
 Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. Keep separate frontend deployments for staging and production.
 
@@ -37,6 +44,21 @@ Each Railway environment also requires a worker service built from the same comm
 ```bash
 celery -A config worker --loglevel=info --concurrency=1
 ```
+
+Define the five object-storage values as Railway shared/reference variables and
+reference that same set from both the API and worker. After deploying either
+service, run this command in that service and compare its redacted target line:
+
+```bash
+python manage.py verify_media_storage --write-probe
+```
+
+The command uploads, reads, and removes a unique diagnostic object. The endpoint
+host, bucket, region, and one-way access-key fingerprint are safe to compare;
+credentials are never printed. Both services must report the same values and a
+successful write/read/delete probe before PDF generation is accepted. Keep the
+database-only `/api/health/` check independent from R2 so a transient storage
+outage does not cause a service restart loop.
 
 Provision Redis and start the worker before deploying frontend code that submits background roster imports. Without a reachable broker, the import job is recorded as failed and the UI will report that no students were imported.
 
@@ -116,7 +138,7 @@ Encrypt the backup directory with the organization-approved encryption tool befo
    ```bash
    python manage.py sync_media_to_storage --source /secure/media --dry-run
    python manage.py sync_media_to_storage --source /secure/media
-   python manage.py verify_media_storage --source /secure/media
+   python manage.py verify_media_storage --source /secure/media --write-probe
    ```
 
 5. Back up the staging database, preflight every student number, then synchronize all active and inactive student credentials:
@@ -137,7 +159,7 @@ Encrypt the backup directory with the organization-approved encryption tool befo
 - Students cannot see another student's grades, attendance, attempts, submissions, or uploaded files.
 - Teacher-controlled module access, mock exams, activity grading, attendance, and gradebook workflows pass.
 - Uploaded files remain available after a Railway redeploy; unsigned private bucket URLs fail.
-- Lesson and module PDFs render remote images and download correctly.
+- Topic PDFs render remote images and download correctly.
 - The browser E2E suite passes against the release code.
 - The authenticated benchmark completes with no errors, read p50 at or below
   500 ms, and read p95 at or below 750 ms:

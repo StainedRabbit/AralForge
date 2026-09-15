@@ -8,10 +8,22 @@ from django.test import RequestFactory
 from django.test import SimpleTestCase, override_settings
 
 from config.middleware import RequestTimingMiddleware
+from config.object_storage import (
+    object_storage_summary,
+    resolve_object_storage_config,
+)
 from config.settings import append_unique, env_origin_list, env_regex_list, load_env_file
 
 
 class DeploymentEnvironmentTests(SimpleTestCase):
+    canonical_storage = {
+        'OBJECT_STORAGE_S3_ENDPOINT': 'https://account.r2.cloudflarestorage.com',
+        'OBJECT_STORAGE_S3_REGION': 'auto',
+        'OBJECT_STORAGE_S3_ACCESS_KEY_ID': 'canonical-access-key',
+        'OBJECT_STORAGE_S3_SECRET_ACCESS_KEY': 'canonical-secret-key',
+        'OBJECT_STORAGE_BUCKET': 'aralforge-media',
+    }
+
     @patch.dict(os.environ, {'ARALFORGE_TEST_SETTING': 'platform-value'})
     def test_local_env_file_does_not_override_platform_values(self):
         with TemporaryDirectory() as directory:
@@ -70,6 +82,64 @@ class DeploymentEnvironmentTests(SimpleTestCase):
             hosts,
             ['api.example.test', 'aralforge-staging.up.railway.app'],
         )
+
+    def test_canonical_object_storage_configuration_is_resolved(self):
+        config = resolve_object_storage_config(self.canonical_storage, required=True)
+
+        self.assertEqual(config['source'], 'OBJECT_STORAGE')
+        self.assertEqual(config['bucket'], 'aralforge-media')
+        self.assertEqual(config['region'], 'auto')
+
+    def test_legacy_object_storage_configuration_remains_supported(self):
+        legacy = {
+            'SUPABASE_S3_ENDPOINT': 'https://account.r2.cloudflarestorage.com/',
+            'SUPABASE_S3_REGION': 'auto',
+            'SUPABASE_S3_ACCESS_KEY_ID': 'legacy-access-key',
+            'SUPABASE_S3_SECRET_ACCESS_KEY': 'legacy-secret-key',
+            'SUPABASE_STORAGE_BUCKET': 'aralforge-media',
+        }
+
+        config = resolve_object_storage_config(legacy, required=True)
+
+        self.assertEqual(config['source'], 'SUPABASE')
+        self.assertEqual(config['endpoint'], 'https://account.r2.cloudflarestorage.com')
+
+    def test_partial_or_mixed_object_storage_configuration_is_rejected(self):
+        partial = {'OBJECT_STORAGE_S3_ENDPOINT': self.canonical_storage['OBJECT_STORAGE_S3_ENDPOINT']}
+        mixed = {
+            **self.canonical_storage,
+            'SUPABASE_STORAGE_BUCKET': 'legacy-bucket',
+        }
+
+        with self.assertRaisesRegex(RuntimeError, 'Incomplete OBJECT_STORAGE'):
+            resolve_object_storage_config(partial)
+        with self.assertRaisesRegex(RuntimeError, 'mixes OBJECT_STORAGE'):
+            resolve_object_storage_config(mixed)
+
+    def test_r2_endpoint_and_region_are_validated(self):
+        with self.assertRaisesRegex(RuntimeError, 'R2 account endpoint'):
+            resolve_object_storage_config({
+                **self.canonical_storage,
+                'OBJECT_STORAGE_S3_ENDPOINT': (
+                    'https://account.r2.cloudflarestorage.com/aralforge-media'
+                ),
+            })
+        with self.assertRaisesRegex(RuntimeError, 'region must be auto'):
+            resolve_object_storage_config({
+                **self.canonical_storage,
+                'OBJECT_STORAGE_S3_REGION': 'us-east-1',
+            })
+
+    def test_object_storage_summary_never_contains_credentials(self):
+        config = resolve_object_storage_config(self.canonical_storage)
+
+        summary = object_storage_summary(config)
+        rendered = repr(summary)
+
+        self.assertEqual(summary['endpoint_host'], 'account.r2.cloudflarestorage.com')
+        self.assertEqual(len(summary['access_key_fingerprint']), 12)
+        self.assertNotIn('canonical-access-key', rendered)
+        self.assertNotIn('canonical-secret-key', rendered)
 
 
 class HealthCheckTests(SimpleTestCase):

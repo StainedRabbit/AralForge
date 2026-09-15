@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from celery import shared_task
@@ -6,7 +7,12 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
+from config.object_storage import safe_exception_message
+
 from .models import BackgroundJob
+
+
+logger = logging.getLogger(__name__)
 
 
 def expire_pending_roster_imports(queryset):
@@ -38,9 +44,10 @@ def mark_running(job):
 
 def mark_failed(job, error):
     job.status = BackgroundJob.Status.FAILED
-    job.error = str(error)[:4000]
+    job.error = safe_exception_message(error)
     job.finished_at = timezone.now()
     job.save(update_fields=('status', 'error', 'finished_at'))
+    logger.error('Background job %s failed: %s', job.pk, job.error)
 
 
 @shared_task(bind=True, autoretry_for=(ConnectionError,), retry_backoff=True, retry_kwargs={'max_retries': 3})

@@ -4,6 +4,8 @@ from urllib.parse import parse_qsl, urlparse
 
 from pathlib import Path
 
+from .object_storage import object_storage_summary, resolve_object_storage_config
+
 
 # Keep local development configuration in the ignored project-root .env file.
 # Hosted environments do not include this file and continue to use platform
@@ -306,14 +308,8 @@ STATIC_ROOT = os.getenv('STATIC_ROOT', BASE_DIR / 'staticfiles')
 MEDIA_URL = os.getenv('MEDIA_URL', '/media/')
 MEDIA_ROOT = os.getenv('MEDIA_ROOT', BASE_DIR / 'media')
 
-SUPABASE_STORAGE_ENV_VARS = (
-    'SUPABASE_S3_ENDPOINT',
-    'SUPABASE_S3_REGION',
-    'SUPABASE_S3_ACCESS_KEY_ID',
-    'SUPABASE_S3_SECRET_ACCESS_KEY',
-    'SUPABASE_STORAGE_BUCKET',
-)
-USE_SUPABASE_STORAGE = all(os.getenv(name) for name in SUPABASE_STORAGE_ENV_VARS)
+OBJECT_STORAGE_CONFIG = resolve_object_storage_config(os.environ, required=not DEBUG)
+OBJECT_STORAGE_CONFIG_SUMMARY = object_storage_summary(OBJECT_STORAGE_CONFIG)
 
 STORAGES = {
     'default': {
@@ -324,21 +320,24 @@ STORAGES = {
     },
 }
 
-if USE_SUPABASE_STORAGE:
+if OBJECT_STORAGE_CONFIG:
     STORAGES['default'] = {
         'BACKEND': 'storages.backends.s3.S3Storage',
         'OPTIONS': {
-            'access_key': os.environ['SUPABASE_S3_ACCESS_KEY_ID'],
-            'secret_key': os.environ['SUPABASE_S3_SECRET_ACCESS_KEY'],
-            'bucket_name': os.environ['SUPABASE_STORAGE_BUCKET'],
-            'endpoint_url': os.environ['SUPABASE_S3_ENDPOINT'],
-            'region_name': os.environ['SUPABASE_S3_REGION'],
+            'access_key': OBJECT_STORAGE_CONFIG['access_key'],
+            'secret_key': OBJECT_STORAGE_CONFIG['secret_key'],
+            'bucket_name': OBJECT_STORAGE_CONFIG['bucket'],
+            'endpoint_url': OBJECT_STORAGE_CONFIG['endpoint'],
+            'region_name': OBJECT_STORAGE_CONFIG['region'],
             'addressing_style': 'path',
             'signature_version': 's3v4',
             'default_acl': None,
             'querystring_auth': True,
             'querystring_expire': int(
-                os.getenv('SUPABASE_STORAGE_SIGNED_URL_SECONDS', '3600')
+                os.getenv(
+                    'OBJECT_STORAGE_SIGNED_URL_SECONDS',
+                    os.getenv('SUPABASE_STORAGE_SIGNED_URL_SECONDS', '3600'),
+                )
             ),
             'file_overwrite': False,
         },
@@ -390,7 +389,6 @@ if not DEBUG:
         'REDIS_URL',
         'CORS_ALLOWED_ORIGINS',
         'CSRF_TRUSTED_ORIGINS',
-        *SUPABASE_STORAGE_ENV_VARS,
     ))
     if urlparse(DATABASE_URL).scheme not in {'postgres', 'postgresql'}:
         raise RuntimeError('Production DATABASE_URL must use PostgreSQL.')
