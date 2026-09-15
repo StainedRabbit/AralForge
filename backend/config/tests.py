@@ -92,17 +92,22 @@ class DeploymentEnvironmentTests(SimpleTestCase):
 
     def test_legacy_object_storage_configuration_remains_supported(self):
         legacy = {
-            'SUPABASE_S3_ENDPOINT': 'https://account.r2.cloudflarestorage.com/',
+            'SUPABASE_S3_ENDPOINT': (
+                'https://exampleaccountid.r2.cloudflarestorage.com'
+            ),
             'SUPABASE_S3_REGION': 'auto',
-            'SUPABASE_S3_ACCESS_KEY_ID': 'legacy-access-key',
-            'SUPABASE_S3_SECRET_ACCESS_KEY': 'legacy-secret-key',
-            'SUPABASE_STORAGE_BUCKET': 'aralforge-media',
+            'SUPABASE_S3_ACCESS_KEY_ID': 'test-access-key',
+            'SUPABASE_S3_SECRET_ACCESS_KEY': 'test-secret-key',
+            'SUPABASE_STORAGE_BUCKET': 'aralforge-production-media',
         }
 
         config = resolve_object_storage_config(legacy, required=True)
 
         self.assertEqual(config['source'], 'SUPABASE')
-        self.assertEqual(config['endpoint'], 'https://account.r2.cloudflarestorage.com')
+        self.assertEqual(
+            config['endpoint'],
+            'https://exampleaccountid.r2.cloudflarestorage.com',
+        )
 
     def test_partial_or_mixed_object_storage_configuration_is_rejected(self):
         partial = {'OBJECT_STORAGE_S3_ENDPOINT': self.canonical_storage['OBJECT_STORAGE_S3_ENDPOINT']}
