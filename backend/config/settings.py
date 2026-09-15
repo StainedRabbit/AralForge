@@ -50,6 +50,19 @@ def env_bool(name, default=False):
     return value.strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def env_bounded_int(name, default, minimum, maximum):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise RuntimeError(f'{name} must be a whole number.') from error
+    if not minimum <= parsed <= maximum:
+        raise RuntimeError(f'{name} must be between {minimum} and {maximum}.')
+    return parsed
+
+
 def env_list(name, default=None):
     value = os.getenv(name)
 
@@ -374,6 +387,9 @@ AUTH_REFRESH_COOKIE_SECURE = env_bool('AUTH_REFRESH_COOKIE_SECURE', default=not 
 AUTH_REFRESH_COOKIE_SAMESITE = os.getenv(
     'AUTH_REFRESH_COOKIE_SAMESITE',
     'None' if not DEBUG else 'Lax',
+)
+AUTH_REFRESH_TOKEN_DAYS = env_bounded_int(
+    'AUTH_REFRESH_TOKEN_DAYS', 90, 1, 400,
 )
 
 CORS_EXPOSE_HEADERS = ['Server-Timing', 'X-Response-Time-Ms']

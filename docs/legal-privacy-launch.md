@@ -2,7 +2,8 @@
 
 AralForge uses essential browser and session storage only:
 
-- a rotated Secure/HttpOnly refresh cookie for signed-in sessions;
+- a rotated Secure/HttpOnly refresh cookie for signed-in sessions; sessions
+  persist for up to 90 inactive days by default and renew on use;
 - a short-lived access token held only in memory;
 - CSRF protection for cookie-session operations;
 - local editing drafts, interface preferences, and the storage-notice acknowledgment.

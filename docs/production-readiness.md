@@ -20,6 +20,7 @@ Railway requires these values for each environment:
 - `CSRF_TRUSTED_ORIGINS` (the exact HTTPS origins)
 - `AUTH_REFRESH_COOKIE_SECURE=True`
 - `AUTH_REFRESH_COOKIE_SAMESITE=None` (required when the reviewed frontend and API are cross-site; use the narrowest deployment topology possible)
+- `AUTH_REFRESH_TOKEN_DAYS=90` (rolling inactivity window for all signed-in roles; keep at or below the browser-supported 400-day maximum)
 - `API_SLOW_REQUEST_MS=750`
 - `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
 - `REDIS_URL` (the shared Railway Redis URL used by the API and Celery worker)

@@ -2,16 +2,16 @@ import { expect, test, type Page } from '@playwright/test'
 
 const refreshPath = '**/api/auth/token/refresh/'
 
-async function signIn(page: Page) {
+async function signIn(page: Page, username = 'e2e-teacher') {
   await page.goto('/admin')
-  await page.getByLabel('Student number or username').fill('e2e-teacher')
+  await page.getByLabel('Student number or username').fill(username)
   await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 }
 
-test('tokens stay out of browser storage and the HttpOnly session restores after reload', async ({ page }) => {
-  await signIn(page)
+test('student session restores after reload without storing tokens in the browser', async ({ page }) => {
+  await signIn(page, 'E2E-001')
   const stored = await page.evaluate(() => ({
     current: localStorage.getItem('aralforge.session'),
     legacy: localStorage.getItem('ezoryx.session'),

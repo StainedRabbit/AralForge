@@ -12,7 +12,13 @@ from config.object_storage import (
     object_storage_summary,
     resolve_object_storage_config,
 )
-from config.settings import append_unique, env_origin_list, env_regex_list, load_env_file
+from config.settings import (
+    append_unique,
+    env_bounded_int,
+    env_origin_list,
+    env_regex_list,
+    load_env_file,
+)
 
 
 class DeploymentEnvironmentTests(SimpleTestCase):
@@ -82,6 +88,18 @@ class DeploymentEnvironmentTests(SimpleTestCase):
             hosts,
             ['api.example.test', 'aralforge-staging.up.railway.app'],
         )
+
+    @patch.dict(os.environ, {'TEST_REFRESH_SESSION_DAYS': '90'})
+    def test_bounded_integer_environment_value_is_accepted(self):
+        self.assertEqual(
+            env_bounded_int('TEST_REFRESH_SESSION_DAYS', 30, 1, 400),
+            90,
+        )
+
+    @patch.dict(os.environ, {'TEST_REFRESH_SESSION_DAYS': '401'})
+    def test_bounded_integer_environment_value_rejects_invalid_range(self):
+        with self.assertRaisesRegex(RuntimeError, 'between 1 and 400'):
+            env_bounded_int('TEST_REFRESH_SESSION_DAYS', 30, 1, 400)
 
     def test_canonical_object_storage_configuration_is_resolved(self):
         config = resolve_object_storage_config(self.canonical_storage, required=True)

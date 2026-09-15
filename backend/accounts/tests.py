@@ -1,9 +1,12 @@
 from datetime import time, timedelta
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
@@ -444,17 +447,47 @@ class CookieSessionSecurityTests(APITestCase):
         self.user = get_user_model().objects.create_user(
             username='cookie-user', password='CookiePass!482', role=get_user_model().Role.STUDENT,
         )
+        self.teacher = get_user_model().objects.create_user(
+            username='cookie-teacher', password='CookiePass!482',
+            role=get_user_model().Role.TEACHER,
+        )
+        self.admin = get_user_model().objects.create_user(
+            username='cookie-admin', password='CookiePass!482',
+            role=get_user_model().Role.ADMIN,
+        )
+
+    def login(self, user):
+        response = self.client.post('/api/auth/token/', {
+            'username': user.username, 'password': 'CookiePass!482',
+        }, format='json')
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def assert_refresh_lifetime(self, cookie, lifetime):
+        refresh = RefreshToken(cookie.value)
+        self.assertEqual(
+            refresh['exp'] - refresh['iat'],
+            int(lifetime.total_seconds()),
+        )
+        self.assertGreaterEqual(
+            int(cookie['max-age']),
+            int(lifetime.total_seconds()) - 2,
+        )
+        return refresh
 
     def test_refresh_token_is_httponly_rotated_and_revoked_on_logout(self):
-        login = self.client.post('/api/auth/token/', {
-            'username': self.user.username, 'password': 'CookiePass!482',
-        }, format='json')
-        self.assertEqual(login.status_code, 200)
+        login = self.login(self.user)
         self.assertIn('access', login.data)
         self.assertNotIn('refresh', login.data)
         refresh_cookie = login.cookies['aralforge_refresh']
         self.assertTrue(refresh_cookie['httponly'])
         original_refresh = refresh_cookie.value
+        original_token = self.assert_refresh_lifetime(
+            refresh_cookie,
+            timedelta(days=settings.AUTH_REFRESH_TOKEN_DAYS),
+        )
+        outstanding = OutstandingToken.objects.get(jti=original_token['jti'])
+        self.assertEqual(int(outstanding.expires_at.timestamp()), original_token['exp'])
 
         csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
         refreshed = self.client.post(
@@ -462,8 +495,13 @@ class CookieSessionSecurityTests(APITestCase):
         )
         self.assertEqual(refreshed.status_code, 200, refreshed.data)
         self.assertIn('access', refreshed.data)
-        rotated_refresh = refreshed.cookies['aralforge_refresh'].value
+        rotated_cookie = refreshed.cookies['aralforge_refresh']
+        rotated_refresh = rotated_cookie.value
         self.assertNotEqual(rotated_refresh, original_refresh)
+        self.assert_refresh_lifetime(
+            rotated_cookie,
+            timedelta(days=settings.AUTH_REFRESH_TOKEN_DAYS),
+        )
 
         logged_out = self.client.post(
             '/api/auth/logout/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
@@ -475,3 +513,31 @@ class CookieSessionSecurityTests(APITestCase):
         csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
         after_logout = self.client.post('/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf)
         self.assertEqual(after_logout.status_code, 204)
+
+    def test_teacher_refresh_token_uses_the_configured_lifetime(self):
+        login = self.login(self.teacher)
+
+        self.assert_refresh_lifetime(
+            login.cookies['aralforge_refresh'],
+            timedelta(days=settings.AUTH_REFRESH_TOKEN_DAYS),
+        )
+
+    def test_admin_refresh_token_uses_the_configured_lifetime(self):
+        login = self.login(self.admin)
+
+        self.assert_refresh_lifetime(
+            login.cookies['aralforge_refresh'],
+            timedelta(days=settings.AUTH_REFRESH_TOKEN_DAYS),
+        )
+
+    def test_disabled_account_cannot_refresh_a_durable_session(self):
+        self.login(self.user)
+        self.user.is_active = False
+        self.user.save(update_fields=('is_active',))
+
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        refreshed = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+
+        self.assertEqual(refreshed.status_code, status.HTTP_204_NO_CONTENT)
