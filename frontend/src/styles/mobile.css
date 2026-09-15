@@ -209,6 +209,17 @@
     backdrop-filter: blur(18px);
   }
 
+  .mobile-header--scrolling {
+    position: static;
+    z-index: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
   .mobile-header .brand__icon {
     width: 42px;
     height: 42px;

@@ -47,7 +47,7 @@ export function AuthenticatedApp({ session, setSession, onLogout }: {
   return <div className="app-shell">
     <Sidebar currentUser={user} pendingCount={0} onLogout={onLogout} />
     <main className="app-main">
-      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} />
+      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} showAccountAvatar={false} stickyHeader={false} />
       <Suspense fallback={<Page><SkeletonList count={4} /></Page>}>
         <Routes>
           <Route path="/" element={<DashboardPage api={api} currentUser={user} />} />
