@@ -1491,19 +1491,106 @@
 .student-lesson-material {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 32px;
+  width: 100%;
+  gap: 18px;
   max-width: none;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
   scroll-padding-top: 96px;
 }
 
+.student-lesson-material :is(.lesson-content-section, .rich-text, .lesson-example-list, .lesson-example-card, .lesson-table-wrap, .lesson-image, .flowchart-example-list, .flowchart-example-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .student-lesson-material .lesson-content-section {
-  gap: 12px;
-  padding-bottom: 26px;
+  gap: 10px;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--border);
 }
 
 .student-lesson-material .lesson-content-section:last-child {
   border-bottom: 0;
+}
+
+.student-lesson-material .lesson-content-section > h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.student-lesson-material .rich-text {
+  line-height: 1.55;
+}
+
+.student-lesson-material .rich-text :is(h1, h2, h3, h4) {
+  line-height: 1.25;
+}
+
+.student-lesson-material .rich-text h1 { font-size: 26px; }
+.student-lesson-material .rich-text h2 { font-size: 22px; }
+.student-lesson-material .rich-text h3 { font-size: 19px; }
+.student-lesson-material .rich-text h4 { font-size: 17px; }
+
+.student-lesson-material .rich-text :is(p, ul, ol, pre) {
+  margin-bottom: 10px;
+}
+
+.student-lesson-material .rich-text :is(ul, ol) {
+  gap: 5px;
+  padding-left: 20px;
+}
+
+.student-lesson-material .rich-text pre {
+  min-width: 0;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.student-lesson-material .lesson-table {
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.student-lesson-material .lesson-table :is(th, td) {
+  padding: 8px;
+  font-size: 13px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.student-lesson-material :is(.lesson-image, .lesson-example-card__media) {
+  min-width: 0;
+  padding: 8px;
+}
+
+.student-lesson-material :is(.lesson-image img, .lesson-example-card__media img) {
+  max-width: 100%;
+  max-height: min(52vh, 480px);
+  height: auto;
+  object-fit: contain;
+}
+
+.student-lesson-material .lesson-example-list {
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.student-lesson-material .lesson-example-card {
+  gap: 10px;
+  padding: 14px;
+}
+
+.student-lesson-material .lesson-main-activity {
+  gap: 12px;
+  padding: 16px;
 }
 
 .lesson-main-activity {

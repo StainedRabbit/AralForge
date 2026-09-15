@@ -116,10 +116,22 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(lessonHref!)
   await expect(page.locator('.student-lesson-reader')).toBeVisible()
+  const lessonPanel = page.locator('.student-lesson-material')
+  await expect(lessonPanel).toBeVisible()
+  expect(await lessonPanel.evaluate((element) => {
+    const styles = getComputedStyle(element)
+    return styles.overflowY === 'visible' && element.scrollWidth <= element.clientWidth + 1
+  })).toBe(true)
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-lesson-desktop-1440x900.png` })
 
+  await page.setViewportSize({ width: 768, height: 1024 })
+  expect(await lessonPanel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/student-lesson-tablet-768x1024.png` })
+
   await page.setViewportSize({ width: 430, height: 932 })
+  expect(await lessonPanel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-lesson-mobile-430x932.png` })
 
