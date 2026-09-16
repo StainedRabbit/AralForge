@@ -976,7 +976,7 @@ function StudentLessonReader({
             <h3>{mainActivityStatus}</h3>
             <p>
               {bestMainActivityAttempt
-                ? `Best score: ${mainActivityState?.best_percentage}% (${bestMainActivityAttempt.score}/${bestMainActivityAttempt.max_score}). `
+                ? `Best score: ${mainActivityState?.best_grade}% (${bestMainActivityAttempt.score}/${bestMainActivityAttempt.max_score}). `
                 : ''}
               {mainActivityReviewUnlocked
                 ? mainActivity.passing_score !== null && !mainActivityPassed

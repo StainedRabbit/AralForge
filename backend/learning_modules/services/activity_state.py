@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from grades.models import SubjectGradingPolicy, transmute_score
 from learning_modules.models import ModuleActivityAttempt
 
 
@@ -65,9 +66,19 @@ def evaluate_main_activity_state(activity, attempts):
         0,
     )
     best_percentage = None
+    best_grade = None
     if best:
         best_percentage = (
             Decimal(best.score) / Decimal(best.max_score) * Decimal('100')
+        ).quantize(Decimal('0.1'))
+        policy = SubjectGradingPolicy.objects.filter(
+            subject_id=activity.module.subject_id,
+        ).only('transmutation_base', 'transmutation_scale').first()
+        best_grade = transmute_score(
+            Decimal(best.score),
+            Decimal(best.max_score),
+            getattr(policy, 'transmutation_base', Decimal('60')),
+            getattr(policy, 'transmutation_scale', Decimal('40')),
         ).quantize(Decimal('0.1'))
 
     return {
@@ -79,6 +90,7 @@ def evaluate_main_activity_state(activity, attempts):
         'active_attempt_id': active.id if active else None,
         'best_attempt_id': best.id if best else None,
         'best_percentage': str(best_percentage) if best_percentage is not None else None,
+        'best_grade': str(best_grade) if best_grade is not None else None,
         'passed': bool(passed_attempts),
         'review_unlocked': review_unlocked,
         'requirement_met': requirement_met,

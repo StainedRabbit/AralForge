@@ -306,7 +306,7 @@ export function LessonMainActivityPanel({
           <span className={bestAttempt ? 'status-pill status-pill--success' : 'status-pill'}>
             <Icon name={bestAttempt ? 'check' : 'activity'} />
             {bestAttempt
-              ? `Best ${activityState?.best_percentage}% · ${numeric(bestAttempt.score)}/${numeric(bestAttempt.max_score)}`
+              ? `Best ${activityState?.best_grade}% · ${numeric(bestAttempt.score)}/${numeric(bestAttempt.max_score)}`
               : `${attemptsRemaining} attempt${attemptsRemaining === 1 ? '' : 's'} left`}
           </span>
           {activeAttemptSummary && !activeAttemptSummary.is_submitted ? (

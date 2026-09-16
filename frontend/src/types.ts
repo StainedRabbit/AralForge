@@ -463,6 +463,7 @@ export type MainActivityState = {
   active_attempt_id: number | null
   best_attempt_id: number | null
   best_percentage: string | null
+  best_grade: string | null
   passed: boolean
   review_unlocked: boolean
   requirement_met: boolean

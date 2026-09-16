@@ -26,6 +26,7 @@ from grades.models import (
     GradeItem,
     GradeItemSourceType,
     GradingPeriod,
+    SubjectGradingPolicy,
     StudentGradeItemScore,
 )
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
@@ -4329,6 +4330,52 @@ class LessonMainActivityApiTests(APITestCase):
 
         self.assertEqual(state['best_attempt_id'], lower_points_better_percentage.id)
         self.assertEqual(state['best_percentage'], '80.0')
+        self.assertEqual(state['best_grade'], '92.0')
+
+    def test_best_attempt_grade_uses_subject_transmutation_policy(self):
+        from learning_modules.services.activity_state import evaluate_main_activity_state
+
+        SubjectGradingPolicy.objects.update_or_create(
+            subject=self.subject,
+            defaults={
+                'transmutation_base': Decimal('50.00'),
+                'transmutation_scale': Decimal('50.00'),
+            },
+        )
+        attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            score=Decimal('4.00'),
+            max_score=Decimal('20.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+
+        state = evaluate_main_activity_state(self.activity, [attempt])
+
+        self.assertEqual(state['best_percentage'], '20.0')
+        self.assertEqual(state['best_grade'], '60.0')
+
+    def test_best_attempt_grade_uses_default_transmutation(self):
+        from learning_modules.services.activity_state import evaluate_main_activity_state
+
+        attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            score=Decimal('4.00'),
+            max_score=Decimal('20.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        )
+
+        state = evaluate_main_activity_state(self.activity, [attempt])
+
+        self.assertEqual(state['best_percentage'], '20.0')
+        self.assertEqual(state['best_grade'], '68.0')
 
 
 @skipUnless(
