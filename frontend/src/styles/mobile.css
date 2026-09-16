@@ -200,9 +200,9 @@
 
   .mobile-header {
     min-height: var(--mobile-header-height);
-    position: sticky;
-    top: max(8px, env(safe-area-inset-top));
-    z-index: 28;
+    position: static;
+    top: auto;
+    z-index: auto;
     padding: 8px 10px;
     border: 1px solid rgba(226, 232, 240, 0.9);
     border-radius: 16px;
@@ -468,8 +468,22 @@
 
   .student-lesson-reader .lesson-section-nav,
   .lesson-editor-workspace .lesson-section-nav {
-    top: calc(var(--mobile-header-height) + 14px + env(safe-area-inset-top));
-    z-index: 22;
+    position: static;
+    top: auto;
+    z-index: auto;
+  }
+
+  .student-reading-position,
+  .activity-question-navigator,
+  .grade-hub-tabs,
+  .lesson-editor-mobile-outline,
+  .main-activity-tabs,
+  .class-roster-table thead th,
+  .progressive-resource__table .admin-table thead,
+  .gradebook-panel .table-wrap .admin-table thead {
+    position: static;
+    top: auto;
+    z-index: auto;
   }
 
   .lesson-save-bar,

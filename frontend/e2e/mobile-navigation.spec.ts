@@ -48,6 +48,7 @@ test('student mobile shell reaches primary and secondary destinations accessibly
   await expect(tabbar.getByRole('button', { name: 'More navigation' })).toBeVisible()
   await expect(tabbar.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   await expectTouchTargets(page)
+  await expect(page.locator('.mobile-header')).toHaveCSS('position', 'static')
 
   const accountButton = page.getByRole('button', { name: 'Open account and more navigation' })
   await accountButton.focus()
@@ -83,6 +84,7 @@ test('teacher mobile shell maps nested routes and exposes every secondary area',
   const tabbar = page.getByRole('navigation', { name: 'Primary mobile' })
   await expect(tabbar.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   await expectTouchTargets(page)
+  await expect(page.locator('.mobile-header')).toHaveCSS('position', 'static')
 
   await tabbar.getByRole('button', { name: 'More navigation' }).click()
   const sheet = page.getByRole('dialog', { name: /E2E Teacher/ })

@@ -38,8 +38,6 @@ test('student module search icon remains inside the full-width mobile field', as
   await signIn(page)
   await page.goto('/modules')
   const search = page.locator('.student-module-library__toolbar .search-box')
-  const input = search.locator('input[type="search"]')
-  const icon = search.locator('.icon')
 
   for (const viewport of [
     { width: 360, height: 800 },
