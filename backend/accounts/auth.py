@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from datetime import timedelta
@@ -23,6 +24,7 @@ from rest_framework_simplejwt.utils import datetime_from_epoch
 from .models import StudentProfile
 
 
+logger = logging.getLogger('aralforge.auth')
 LEGACY_STUDENT_USERNAME_PATTERN = re.compile(r'^student-(\d+)$')
 class PasswordSetupToken(Token):
     token_type = 'password_setup'
@@ -258,7 +260,15 @@ def enforce_csrf(request):
     check.process_request(request._request)
     reason = check.process_view(request._request, None, (), {})
     if reason:
+        logger.warning(
+            'CSRF validation failed for refresh-session operation: origin=%s reason=%s',
+            request.headers.get('Origin', '<none>'),
+            reason,
+        )
         # A bad CSRF token does not mean the refresh credential is expired or
         # revoked.  Keep it distinguishable from authentication failures so
         # clients can bootstrap a fresh token without signing the user out.
-        raise PermissionDenied(f'CSRF validation failed: {reason}')
+        raise PermissionDenied({
+            'code': 'csrf_failed',
+            'detail': f'CSRF validation failed: {reason}',
+        })

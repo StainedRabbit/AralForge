@@ -524,6 +524,7 @@ class CookieSessionSecurityTests(APITestCase):
         )
 
         self.assertEqual(rejected.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(rejected.data['code'], 'csrf_failed')
         self.assertIn('CSRF validation failed:', rejected.data['detail'])
 
         recovered = self.client.post(

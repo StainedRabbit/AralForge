@@ -54,11 +54,60 @@ test('module workspace uses attempt summaries and hydrates only the opened attem
   expect(hydrationRequests).toHaveLength(1)
 })
 
+test('persistent CSRF failure keeps quiz answers and the student signed in', async ({ page }) => {
+  const target = await signInAndFindTarget(page)
+  await page.goto(`/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&context=PERSONAL`)
+  const answer = page.getByLabel('Answer for Question 1')
+  await expect(answer).toHaveValue('The saved draft')
+
+  let forceAccessRefresh = true
+  await page.route('**/api/modules/activity-attempts/*/draft/**', async route => {
+    if (!forceAccessRefresh) {
+      await route.continue()
+      return
+    }
+    forceAccessRefresh = false
+    await route.fulfill({
+      body: JSON.stringify({ detail: 'Access token expired' }),
+      contentType: 'application/json',
+      status: 401,
+    })
+  })
+  await page.route('**/api/auth/token/refresh/', route => route.fulfill({
+    body: JSON.stringify({
+      code: 'csrf_failed',
+      detail: 'CSRF validation failed: CSRF token missing or incorrect.',
+    }),
+    contentType: 'application/json',
+    status: 403,
+  }))
+
+  await answer.fill('Keep this answer after a CSRF failure')
+  await page.getByRole('button', { name: 'Review and submit' }).click()
+  await page.getByRole('button', { name: 'Confirm submission' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('Your sign-in security check could not be renewed')
+  await expect(answer).toHaveValue('Keep this answer after a CSRF failure')
+  await expect(page.getByRole('button', { name: 'Retry submission' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toHaveCount(0)
+})
+
 test('failed final draft save blocks submission and preserves answers for retry', async ({ page }) => {
   const target = await signInAndFindTarget(page)
   let blockDraftSave = true
+  let forceAccessRefresh = true
+  let rejectFirstRefresh = true
   let submitRequests = 0
   await page.route('**/api/modules/activity-attempts/*/draft/**', async route => {
+    if (forceAccessRefresh) {
+      forceAccessRefresh = false
+      await route.fulfill({
+        body: JSON.stringify({ detail: 'Access token expired' }),
+        contentType: 'application/json',
+        status: 401,
+      })
+      return
+    }
     if (blockDraftSave) {
       await route.fulfill({
         body: JSON.stringify({ detail: 'Temporary draft failure' }),
@@ -68,6 +117,21 @@ test('failed final draft save blocks submission and preserves answers for retry'
       return
     }
     await route.continue()
+  })
+  await page.route('**/api/auth/token/refresh/', async route => {
+    if (!rejectFirstRefresh) {
+      await route.continue()
+      return
+    }
+    rejectFirstRefresh = false
+    await route.fulfill({
+      body: JSON.stringify({
+        code: 'csrf_failed',
+        detail: 'CSRF validation failed: CSRF token missing or incorrect.',
+      }),
+      contentType: 'application/json',
+      status: 403,
+    })
   })
   page.on('request', request => {
     if (
@@ -87,6 +151,8 @@ test('failed final draft save blocks submission and preserves answers for retry'
 
   await expect(page.getByRole('alert')).toContainText('Nothing was submitted')
   expect(submitRequests).toBe(0)
+  expect(rejectFirstRefresh).toBe(false)
+  await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toHaveCount(0)
   await expect(answer).toHaveValue('Latest answer survives retry')
 
   blockDraftSave = false

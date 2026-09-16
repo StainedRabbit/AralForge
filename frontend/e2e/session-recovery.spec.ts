@@ -42,7 +42,7 @@ test('a stale CSRF token is renewed and does not end an active session', async (
     rejectFirstRefresh = false
     return route.fulfill({
       status: 403,
-      json: { detail: 'CSRF validation failed: CSRF token missing or incorrect.' },
+      json: { code: 'csrf_failed', detail: 'CSRF validation failed: CSRF token missing or incorrect.' },
     })
   })
 
@@ -50,6 +50,20 @@ test('a stale CSRF token is renewed and does not end an active session', async (
 
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   expect(rejectFirstRefresh).toBe(false)
+})
+
+test('a persistent CSRF failure offers session reconnection instead of signing out', async ({ page }) => {
+  await signIn(page)
+  await page.route(refreshPath, route => route.fulfill({
+    status: 403,
+    json: { code: 'csrf_failed', detail: 'CSRF validation failed: CSRF token missing or incorrect.' },
+  }))
+
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Reconnect your session' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
 })
 
 test('manual sign out revokes the cookie session and reload stays signed out', async ({ page }) => {

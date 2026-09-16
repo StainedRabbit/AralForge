@@ -106,10 +106,18 @@ async function refreshSessionWithCsrf(csrf: string) {
   return parseResponse<{ access: string }>(response)
 }
 
-function isCsrfValidationError(error: unknown) {
-  return error instanceof ApiError && error.status === 403 &&
-    typeof error.data === 'object' && error.data !== null &&
-    'detail' in error.data && typeof error.data.detail === 'string' &&
+export function isCsrfValidationError(error: unknown) {
+  if (!(error instanceof ApiError) || error.status !== 403 || !error.data || typeof error.data !== 'object') {
+    return false
+  }
+
+  if ('code' in error.data && error.data.code === 'csrf_failed') {
+    return true
+  }
+
+  // Keep a compatibility path for an API deployment that has not yet been
+  // updated with the structured response.
+  return 'detail' in error.data && typeof error.data.detail === 'string' &&
     error.data.detail.startsWith('CSRF validation failed:')
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { isCsrfValidationError } from '../api'
 import type { AuthedRequest, RouteData } from '../app/types'
 import type {
   ModuleActivity,
@@ -255,7 +256,9 @@ export function LessonMainActivityPanel({
       setSubmissionFailed(true)
       setMessageTone('error')
       setMessage(
-        latestAnswersSaved
+        isCsrfValidationError(caughtError)
+          ? 'Your sign-in security check could not be renewed. Your answers are still here; retry submission.'
+          : latestAnswersSaved
           ? `Submission could not be confirmed. Your answers are saved; try again. ${toErrorMessage(caughtError)}`
           : `Could not save your latest answers. Nothing was submitted; check your connection and try again. ${toErrorMessage(caughtError)}`,
       )

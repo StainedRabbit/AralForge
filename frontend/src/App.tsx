@@ -3,7 +3,8 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, logoutSession, refreshToken } from './api'
 import type { Session } from './api'
-import { Page, SkeletonList } from './components/ui'
+import { Icon } from './components/Icon'
+import { Page, PageHeader, SkeletonList } from './components/ui'
 import { EssentialStorageNotice } from './legal/EssentialStorageNotice'
 import { clearSession, loadSession, saveSession } from './services/session'
 import './App.css'
@@ -16,9 +17,12 @@ function App() {
   const queryClient = useQueryClient()
   const [session, setSession] = useState<Session | null>(() => loadSession())
   const [sessionReady, setSessionReady] = useState(false)
+  const [sessionRestoreError, setSessionRestoreError] = useState(false)
 
-  useEffect(() => {
+  const restoreSession = useCallback(() => {
     let active = true
+    setSessionReady(false)
+    setSessionRestoreError(false)
     initialSessionPromise ??= refreshToken()
     initialSessionPromise
       .then(nextSession => {
@@ -28,6 +32,13 @@ function App() {
         }
       })
       .catch(error => {
+        if (error instanceof ApiError && error.status === 401) {
+          return
+        }
+        initialSessionPromise = null
+        if (active) {
+          setSessionRestoreError(true)
+        }
         if (!(error instanceof ApiError) || error.status !== 401) {
           console.warn('Session restore failed.', error)
         }
@@ -36,7 +47,17 @@ function App() {
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    let cleanup: (() => void) | undefined
+    const timer = window.setTimeout(() => { cleanup = restoreSession() }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      cleanup?.()
+    }
+  }, [restoreSession])
+
   const handleLogin = useCallback((nextSession: Session) => {
+    setSessionRestoreError(false)
     saveSession(nextSession)
     setSession(nextSession)
   }, [])
@@ -61,11 +82,34 @@ function App() {
                 setSession={setSession}
                 onLogout={handleLogout}
               />
+            ) : sessionRestoreError ? (
+              <SessionReconnect onRetry={restoreSession} onSignIn={() => setSessionRestoreError(false)} />
             ) : <LoginPage onLogin={handleLogin} />}
           />
         </Routes>
       </Suspense>
     </BrowserRouter>
+  )
+}
+
+function SessionReconnect({ onRetry, onSignIn }: { onRetry: () => void; onSignIn: () => void }) {
+  return (
+    <main className="app-main">
+      <Page>
+        <section className="empty-state empty-state--large" aria-live="polite">
+          <span className="empty-state__visual" aria-hidden="true"><Icon name="warning" /></span>
+          <PageHeader
+            description="Your sign-in could not be renewed because the browser security check failed. Your account has not been signed out."
+            eyebrow="Connection interrupted"
+            title="Reconnect your session"
+          />
+          <div className="button-row">
+            <button className="button button--primary" onClick={onRetry} type="button"><Icon name="spark" /><span>Retry</span></button>
+            <button className="button button--secondary" onClick={onSignIn} type="button"><span>Sign in instead</span></button>
+          </div>
+        </section>
+      </Page>
+    </main>
   )
 }
 

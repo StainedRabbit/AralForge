@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest } from '../app/types'
 import type { ModuleActivity, ModuleActivitySubmission, User } from '../types'
+import { isCsrfValidationError } from '../api'
 import { toErrorMessage } from '../utils/format'
 import { Icon } from './Icon'
 import { SectionHeading } from './ui'
@@ -66,7 +67,11 @@ export function ModuleSubmissionForm({
       setMessage('Submission saved.')
       await onSubmitted()
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      setMessage(
+        isCsrfValidationError(caughtError)
+          ? 'Your sign-in security check could not be renewed. Your work is still here; retry submission.'
+          : toErrorMessage(caughtError),
+      )
     } finally {
       setSaving(false)
     }
