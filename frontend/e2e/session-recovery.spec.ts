@@ -61,9 +61,13 @@ test('a persistent CSRF failure offers session reconnection instead of signing o
 
   await page.reload()
 
-  await expect(page.getByRole('heading', { name: 'Reconnect your session' })).toBeVisible()
+  await expect(page.getByText('Unable to restore your session', { exact: true })).toBeVisible()
+  await expect(page.getByText('Reconnect your session', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await page.unroute(refreshPath)
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 })
 
 test('manual sign out revokes the cookie session and reload stays signed out', async ({ page }) => {

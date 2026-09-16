@@ -86,7 +86,7 @@ test('persistent CSRF failure keeps quiz answers and the student signed in', asy
   await page.getByRole('button', { name: 'Review and submit' }).click()
   await page.getByRole('button', { name: 'Confirm submission' }).click()
 
-  await expect(page.getByRole('alert')).toContainText('Your sign-in security check could not be renewed')
+  await expect(page.getByRole('alert')).toContainText('Security connection interrupted. Your answers are still here.')
   await expect(answer).toHaveValue('Keep this answer after a CSRF failure')
   await expect(page.getByRole('button', { name: 'Retry submission' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toHaveCount(0)

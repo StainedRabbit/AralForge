@@ -257,7 +257,7 @@ export function LessonMainActivityPanel({
       setMessageTone('error')
       setMessage(
         isCsrfValidationError(caughtError)
-          ? 'Your sign-in security check could not be renewed. Your answers are still here; retry submission.'
+          ? 'Security connection interrupted. Your answers are still here.'
           : latestAnswersSaved
           ? `Submission could not be confirmed. Your answers are saved; try again. ${toErrorMessage(caughtError)}`
           : `Could not save your latest answers. Nothing was submitted; check your connection and try again. ${toErrorMessage(caughtError)}`,
@@ -564,7 +564,9 @@ function ActivityQuestionForm({
       setDraftStatus('saved')
     } catch (error) {
       setDraftStatus('error')
-      setDraftError(toErrorMessage(error))
+      setDraftError(isCsrfValidationError(error)
+        ? 'Security connection interrupted. Your answers are still here.'
+        : toErrorMessage(error))
     }
   }, [onSaveDraft])
 

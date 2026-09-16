@@ -3,8 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, logoutSession, refreshToken } from './api'
 import type { Session } from './api'
-import { Icon } from './components/Icon'
-import { Page, PageHeader, SkeletonList } from './components/ui'
+import { Page, SkeletonList, StatusBanner } from './components/ui'
 import { EssentialStorageNotice } from './legal/EssentialStorageNotice'
 import { clearSession, loadSession, saveSession } from './services/session'
 import './App.css'
@@ -83,7 +82,7 @@ function App() {
                 onLogout={handleLogout}
               />
             ) : sessionRestoreError ? (
-              <SessionReconnect onRetry={restoreSession} onSignIn={() => setSessionRestoreError(false)} />
+              <SessionRestoreStatus onRetry={restoreSession} />
             ) : <LoginPage onLogin={handleLogin} />}
           />
         </Routes>
@@ -92,21 +91,13 @@ function App() {
   )
 }
 
-function SessionReconnect({ onRetry, onSignIn }: { onRetry: () => void; onSignIn: () => void }) {
+function SessionRestoreStatus({ onRetry }: { onRetry: () => void }) {
   return (
     <main className="app-main">
       <Page>
-        <section className="empty-state empty-state--large" aria-live="polite">
-          <span className="empty-state__visual" aria-hidden="true"><Icon name="warning" /></span>
-          <PageHeader
-            description="Your sign-in could not be renewed because the browser security check failed. Your account has not been signed out."
-            eyebrow="Connection interrupted"
-            title="Reconnect your session"
-          />
-          <div className="button-row">
-            <button className="button button--primary" onClick={onRetry} type="button"><Icon name="spark" /><span>Retry</span></button>
-            <button className="button button--secondary" onClick={onSignIn} type="button"><span>Sign in instead</span></button>
-          </div>
+        <section className="form-stack" aria-live="polite">
+          <StatusBanner tone="warning" title="Unable to restore your session" message="The connection could not be renewed. Retry to continue." />
+          <div><button className="button button--secondary" onClick={onRetry} type="button">Retry</button></div>
         </section>
       </Page>
     </main>

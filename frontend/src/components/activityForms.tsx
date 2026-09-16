@@ -69,7 +69,7 @@ export function ModuleSubmissionForm({
     } catch (caughtError) {
       setMessage(
         isCsrfValidationError(caughtError)
-          ? 'Your sign-in security check could not be renewed. Your work is still here; retry submission.'
+          ? 'Security connection interrupted. Your answers are still here.'
           : toErrorMessage(caughtError),
       )
     } finally {
