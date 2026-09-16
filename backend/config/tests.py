@@ -1,4 +1,5 @@
 import os
+import runpy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -29,6 +30,54 @@ class DeploymentEnvironmentTests(SimpleTestCase):
         'OBJECT_STORAGE_S3_SECRET_ACCESS_KEY': 'canonical-secret-key',
         'OBJECT_STORAGE_BUCKET': 'aralforge-media',
     }
+
+    def production_environment(self, **overrides):
+        return {
+            **self.canonical_storage,
+            'DEBUG': 'False',
+            'SECRET_KEY': 'production-configuration-test-key-only',
+            'ALLOWED_HOSTS': 'api.example.test',
+            'DATABASE_URL': 'postgresql://test:test@localhost/aralforge_test',
+            'REDIS_URL': 'redis://localhost:6379/0',
+            'CELERY_TASK_ALWAYS_EAGER': 'False',
+            'CORS_ALLOWED_ORIGINS': 'https://frontend.example.test',
+            'CSRF_TRUSTED_ORIGINS': 'https://frontend.example.test',
+            'AUTH_REFRESH_COOKIE_SECURE': 'True',
+            'CSRF_COOKIE_SECURE': 'True',
+            **overrides,
+        }
+
+    def test_production_accepts_same_origin_and_legacy_secure_cookies(self):
+        for same_site in ('Lax', 'None'):
+            with self.subTest(same_site=same_site), patch.dict(
+                os.environ,
+                self.production_environment(
+                    AUTH_REFRESH_COOKIE_SAMESITE=same_site,
+                    CSRF_COOKIE_SAMESITE=same_site,
+                ),
+                clear=True,
+            ):
+                configured = runpy.run_path(
+                    str(Path(__file__).with_name('settings.py')),
+                    run_name='config.production_cookie_validation',
+                )
+                self.assertEqual(configured['AUTH_REFRESH_COOKIE_SAMESITE'], same_site)
+                self.assertEqual(configured['CSRF_COOKIE_SAMESITE'], same_site)
+                self.assertTrue(configured['AUTH_REFRESH_COOKIE_SECURE'])
+                self.assertTrue(configured['CSRF_COOKIE_SECURE'])
+
+    def test_production_still_rejects_insecure_session_cookies(self):
+        for setting in ('AUTH_REFRESH_COOKIE_SECURE', 'CSRF_COOKIE_SECURE'):
+            with self.subTest(setting=setting), patch.dict(
+                os.environ,
+                self.production_environment(**{setting: 'False'}),
+                clear=True,
+            ):
+                with self.assertRaisesRegex(RuntimeError, f'{setting} must be enabled'):
+                    runpy.run_path(
+                        str(Path(__file__).with_name('settings.py')),
+                        run_name='config.production_cookie_validation',
+                    )
 
     @patch.dict(os.environ, {'ARALFORGE_TEST_SETTING': 'platform-value'})
     def test_local_env_file_does_not_override_platform_values(self):

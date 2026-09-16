@@ -77,7 +77,7 @@ test('feature navigation loads only that route resources', async ({ page }) => {
   expect(uniqueRouteRequests.length).toBeLessThanOrEqual(10)
 })
 
-test('cookie login, refresh, authenticated requests, and logout stay on the configured API', async ({ page }) => {
+test('cookie login, refresh, authenticated requests, and logout use the frontend origin', async ({ page }) => {
   const apiRequests: Array<{ authorization: string | null; pathname: string; origin: string }> = []
   page.on('request', request => {
     const url = new URL(request.url())
@@ -97,7 +97,8 @@ test('cookie login, refresh, authenticated requests, and logout stay on the conf
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   const loginRequest = apiRequests.find(request => request.pathname === '/api/auth/token/')
-  expect(loginRequest?.origin).toBe('http://127.0.0.1:8001')
+  const frontendOrigin = new URL(page.url()).origin
+  expect(loginRequest?.origin).toBe(frontendOrigin)
   expect(loginRequest?.authorization).toBeNull()
 
   expect(await page.evaluate(() => localStorage.getItem('aralforge.session'))).toBeNull()
@@ -106,7 +107,7 @@ test('cookie login, refresh, authenticated requests, and logout stay on the conf
   await page.reload()
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
-  expect(apiRequests.every(request => request.origin === 'http://127.0.0.1:8001')).toBe(true)
+  expect(apiRequests.every(request => request.origin === frontendOrigin)).toBe(true)
   const refreshRequest = apiRequests.find(
     request => request.pathname === '/api/auth/token/refresh/',
   )
@@ -124,12 +125,14 @@ test('cookie login, refresh, authenticated requests, and logout stay on the conf
   ).toBe(true)
 
   apiRequests.length = 0
+  const signedOut = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
   await page.locator('button[title="Sign out"]:visible').click()
+  expect((await signedOut).status()).toBe(204)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   const storedSession = await page.evaluate(() => localStorage.getItem('aralforge.session'))
 
   expect(storedSession).toBeNull()
   const logoutRequest = apiRequests.find(request => request.pathname === '/api/auth/logout/')
-  expect(logoutRequest?.origin).toBe('http://127.0.0.1:8001')
+  expect(logoutRequest?.origin).toBe(frontendOrigin)
   expect(logoutRequest?.authorization).toBeNull()
 })

@@ -2,6 +2,7 @@ from datetime import time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
@@ -474,6 +475,55 @@ class CookieSessionSecurityTests(APITestCase):
             int(lifetime.total_seconds()) - 2,
         )
         return refresh
+
+    def test_cookie_free_refresh_does_not_require_csrf(self):
+        self.client = APIClient(enforce_csrf_checks=True)
+        fresh = self.client.post('/api/auth/token/refresh/', {}, format='json')
+        self.assertEqual(fresh.status_code, status.HTTP_204_NO_CONTENT)
+
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        self.client.cookies.clear()
+        blocked = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+        self.assertEqual(blocked.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_session_cookie_still_requires_csrf_before_rotation(self):
+        self.client = APIClient(enforce_csrf_checks=True)
+        login = self.login(self.user)
+        original = login.cookies['aralforge_refresh'].value
+        rejected = self.client.post('/api/auth/token/refresh/', {}, format='json')
+        self.assertEqual(rejected.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(rejected.data['code'], 'csrf_failed')
+        self.assertNotIn('aralforge_refresh', rejected.cookies)
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        recovered = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+        self.assertEqual(recovered.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(recovered.cookies['aralforge_refresh'].value, original)
+
+    def test_expired_refresh_is_unauthenticated_without_clearing_another_tabs_cookie(self):
+        self.client = APIClient(enforce_csrf_checks=True)
+        login = self.login(self.user)
+        expired = RefreshToken(login.cookies['aralforge_refresh'].value)
+        expired.set_exp(lifetime=timedelta(seconds=-1))
+        self.client.cookies['aralforge_refresh'] = str(expired)
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+        response = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertNotIn('aralforge_refresh', response.cookies)
+
+    @override_settings(AUTH_REFRESH_COOKIE_SECURE=True, AUTH_REFRESH_COOKIE_SAMESITE='Lax')
+    def test_same_origin_refresh_cookie_is_secure_httponly_and_host_only(self):
+        cookie = self.login(self.user).cookies['aralforge_refresh']
+        self.assertTrue(cookie['secure'])
+        self.assertTrue(cookie['httponly'])
+        self.assertEqual(cookie['samesite'], 'Lax')
+        self.assertEqual(cookie['domain'], '')
+        self.assertEqual(cookie['path'], '/api/auth/')
 
     def test_refresh_token_is_httponly_rotated_and_revoked_on_logout(self):
         login = self.login(self.user)

@@ -8,12 +8,13 @@ function validateProductionApiBaseUrl(value: string | undefined) {
   if (!configuredUrl) {
     throw new Error('VITE_API_BASE_URL is required for production builds.')
   }
+  if (configuredUrl === '/api') return
 
   let parsedUrl: URL
   try {
     parsedUrl = new URL(configuredUrl)
   } catch {
-    throw new Error('VITE_API_BASE_URL must be an absolute HTTPS URL ending in /api.')
+    throw new Error('VITE_API_BASE_URL must be /api or an absolute HTTPS URL ending in /api.')
   }
 
   const normalizedPath = parsedUrl.pathname.replace(/\/+$/, '')
@@ -27,19 +28,31 @@ function validateProductionApiBaseUrl(value: string | undefined) {
     || parsedUrl.hash
   ) {
     throw new Error(
-      'VITE_API_BASE_URL must be a non-loopback HTTPS origin followed by /api.',
+      'VITE_API_BASE_URL must be /api or a non-loopback HTTPS origin followed by /api.',
     )
   }
 }
 
 // https://vite.dev/config/
 export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
   if (command === 'build') {
-    const env = loadEnv(mode, process.cwd(), 'VITE_')
-    validateProductionApiBaseUrl(env.VITE_API_BASE_URL)
+    validateProductionApiBaseUrl(process.env.VITE_API_BASE_URL ?? env.VITE_API_BASE_URL)
   }
 
   return {
     plugins: [react()],
+    server: {
+      proxy: {
+        '/api': {
+          target: env.API_UPSTREAM_ORIGIN || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+        },
+        '/media': {
+          target: env.API_UPSTREAM_ORIGIN || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+        },
+      },
+    },
   }
 })

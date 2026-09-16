@@ -158,10 +158,10 @@ class CookieTokenRefreshView(APIView):
     throttle_scope = 'token_refresh'
 
     def post(self, request):
-        enforce_csrf(request)
         raw_refresh = request.COOKIES.get(settings.AUTH_REFRESH_COOKIE_NAME)
         if not raw_refresh:
             return Response(status=204)
+        enforce_csrf(request)
         serializer = AralForgeTokenRefreshSerializer(data={'refresh': raw_refresh})
         try:
             serializer.is_valid(raise_exception=True)

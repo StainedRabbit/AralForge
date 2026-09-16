@@ -19,7 +19,9 @@ Railway requires these values for each environment:
 - `CORS_ALLOWED_ORIGIN_REGEXES` (leave empty unless a reviewed, narrowly scoped pattern is required)
 - `CSRF_TRUSTED_ORIGINS` (the exact HTTPS origins)
 - `AUTH_REFRESH_COOKIE_SECURE=True`
-- `AUTH_REFRESH_COOKIE_SAMESITE=None` (required when the reviewed frontend and API are cross-site; use the narrowest deployment topology possible)
+- `AUTH_REFRESH_COOKIE_SAMESITE=Lax` (frontend-origin API proxy; `None` remains supported for legacy cross-site deployments)
+- `CSRF_COOKIE_SECURE=True`
+- `CSRF_COOKIE_SAMESITE=Lax` (use the same topology as the refresh cookie)
 - `AUTH_REFRESH_TOKEN_DAYS=90` (rolling inactivity window for all signed-in roles; keep at or below the browser-supported 400-day maximum)
 - `API_SLOW_REQUEST_MS=750`
 - `API_DB_TIMING_ENABLED=False` (enable temporarily during latency investigations)
@@ -38,7 +40,7 @@ The complete legacy `SUPABASE_S3_ENDPOINT`, `SUPABASE_S3_REGION`,
 not mix canonical and legacy variables. R2 credentials must be scoped to the
 intended bucket and include Object Read & Write permission.
 
-Cloudflare requires `VITE_API_BASE_URL` as a build variable, including the backend `/api` suffix. Keep separate frontend deployments for staging and production.
+Cloudflare requires `VITE_API_BASE_URL=/api` as a build variable and `API_UPSTREAM_ORIGIN` as a runtime variable on each existing frontend Worker. The upstream is that environment's exact Railway HTTPS origin, without `/api`. Keep separate frontend deployments and upstreams for staging and production; there is deliberately no default upstream.
 
 Each Railway environment also requires a worker service built from the same commit and configured with the same database, application, storage, and Redis variables as the API. Its start command is:
 
@@ -77,14 +79,17 @@ A reachable Redis service does not mean a worker is running. If a roster import 
    ```
 
    Leave `CORS_ALLOWED_ORIGIN_REGEXES` unset or empty. Railway also supplies `RAILWAY_PUBLIC_DOMAIN`, which Django adds to `ALLOWED_HOSTS` automatically.
-3. In the existing Cloudflare Worker, open **Settings > Builds**, record the current build/deploy commands, disconnect the incorrect `StainedRabbit/frontend` source, and reconnect `StainedRabbit/AralForge` with branch `main` and root directory `frontend`. Keep the existing Worker name and deploy command.
-4. Add this Cloudflare build variable before rebuilding:
+3. In the existing Cloudflare Worker, open **Settings > Builds**, record the current build/deploy commands, reconnect `StainedRabbit/AralForge` with branch `main` and root directory `frontend` if necessary. Keep the existing Worker name and domain routes. Use `npm run build` and `npm run deploy:cloudflare -- --name <existing-staging-worker-name>` so the checked-in Worker handler is deployed with the assets.
+4. Add this Cloudflare build variable and the separate runtime variable before rebuilding:
 
    ```text
-   VITE_API_BASE_URL=https://<railway-host>/api
+   # Build variable:
+   VITE_API_BASE_URL=/api
+   # Runtime Worker variable (Settings > Variables and Secrets):
+   API_UPSTREAM_ORIGIN=https://<railway-host>
    ```
 
-5. Verify `https://<railway-host>/api/health/`, the HttpOnly refresh cookie, CSRF bootstrap, token rotation, logout revocation, bearer-authenticated requests, CSP/security headers, and the exact credentialed CORS response before treating staging as ready.
+5. Configure Railway with Secure refresh/CSRF cookies and `SameSite=Lax`, then verify the frontend's `/api/health/`, HttpOnly refresh cookie, CSRF bootstrap, token rotation, logout revocation, bearer-authenticated requests, CSP/security headers, and the exact credentialed CORS response before treating staging as ready. API requests must reach Railway through the Worker and must not return the SPA HTML or be cached.
 
 Production must remain separate and restricted to:
 
@@ -94,7 +99,18 @@ CSRF_TRUSTED_ORIGINS=https://aralforge.com,https://www.aralforge.com
 CORS_ALLOWED_ORIGIN_REGEXES=
 ```
 
-Production Cloudflare must use the exact production Railway API URL followed by `/api`; it must never reuse the staging URL.
+Production Cloudflare must use `VITE_API_BASE_URL=/api` and the exact production Railway origin as its runtime `API_UPSTREAM_ORIGIN`; it must never reuse the staging upstream. Deploy through the existing production Worker name, with its existing `aralforge.com` and `www.aralforge.com` routes.
+
+## Session proxy rollout
+
+1. Deploy the backend changes first. While the old frontend still calls Railway directly, retain legacy `SameSite=None` on both cookies.
+2. Review the authenticated Cloudflare account and copy the existing Worker's domain routes and any additional bindings into `wrangler.jsonc`. Set the correct per-environment Worker upstream and `/api` build variable, then deploy the Worker handler and rebuilt frontend assets together using the existing Worker name. `keep_vars` preserves dashboard-managed runtime variables, not routes; a missing upstream fails with an uncached `503`.
+3. Set Railway `AUTH_REFRESH_COOKIE_SECURE=True`, `AUTH_REFRESH_COOKIE_SAMESITE=Lax`, `CSRF_COOKIE_SECURE=True`, and `CSRF_COOKIE_SAMESITE=Lax`, keeping the exact trusted frontend origins above. Redeploy Railway without changing signing keys or the 90-day rolling refresh lifetime.
+4. Test a fresh incognito sign-in, reload, expired-access renewal, simultaneous reloads in two tabs, and sign-out during renewal. Confirm separate host-only `Set-Cookie` headers and `Cache-Control: no-store` for API responses. Requests must remain on the frontend origin.
+
+Railway-domain refresh cookies cannot transfer to the frontend domain. Existing users may need one sign-in after the switch. Cookies on `aralforge.com` and `www.aralforge.com` are host-only, so persistence is per hostname; preserve an existing canonical-domain redirect if one is configured. Closing all incognito windows clears that private session by browser design.
+
+For rollback, deploy the previous frontend and configure its legacy absolute Railway API build URL together with `SameSite=None` Secure cookies in Railway. Keep staging and production values separate throughout rollout and rollback.
 
 Never place production values in `.env`, GitHub Actions, fixtures, screenshots, or support messages. S3-compatible storage access keys are server-only and the R2 media buckets must remain private.
 

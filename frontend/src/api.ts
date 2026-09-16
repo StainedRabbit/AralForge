@@ -1,6 +1,6 @@
 import type { ApiList, TokenPair } from './types'
 
-const DEVELOPMENT_API_BASE_URL = 'http://127.0.0.1:8000/api'
+const DEVELOPMENT_API_BASE_URL = '/api'
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 const API_BASE_URL = resolveApiBaseUrl()
 
@@ -36,10 +36,11 @@ export function asArray<T>(payload: ApiList<T>): T[] {
 }
 
 export async function login(username: string, password: string) {
-  return request<LoginResponse>('/auth/token/', {
+  return withSessionLock(() => request<LoginResponse>('/auth/token/', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
-  })
+    signal: AbortSignal.timeout(20_000),
+  }))
 }
 
 export async function completePasswordSetup(
@@ -47,14 +48,15 @@ export async function completePasswordSetup(
   newPassword: string,
   confirmPassword: string,
 ) {
-  return request<Session>('/auth/complete-password-setup/', {
+  return withSessionLock(() => request<Session>('/auth/complete-password-setup/', {
     method: 'POST',
     body: JSON.stringify({
       password_setup_token: passwordSetupToken,
       new_password: newPassword,
       confirm_password: confirmPassword,
     }),
-  })
+    signal: AbortSignal.timeout(20_000),
+  }))
 }
 
 let csrfToken: string | null = null
@@ -62,7 +64,7 @@ let csrfInFlight: Promise<string> | null = null
 
 async function getCsrfToken() {
   if (csrfToken) return csrfToken
-  csrfInFlight ??= request<{ csrf_token: string }>('/auth/csrf/')
+  csrfInFlight ??= request<{ csrf_token: string }>('/auth/csrf/', { signal: AbortSignal.timeout(20_000) })
     .then(payload => {
       csrfToken = payload.csrf_token
       return payload.csrf_token
@@ -76,21 +78,86 @@ function invalidateCsrfToken() {
 }
 
 let refreshSessionInFlight: Promise<{ access: string }> | null = null
+let sessionVersion = 0
+let activeAccess: string | null = null
+let cookieOperationQueue: Promise<unknown> = Promise.resolve()
+const signOutListeners = new Set<() => void>()
+const sessionChannel = typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel('aralforge-session')
+  : null
 
-export function refreshToken() {
-  refreshSessionInFlight ??= refreshSessionWithCsrfRetry()
-    .finally(() => { refreshSessionInFlight = null })
-  return refreshSessionInFlight
+sessionChannel?.addEventListener('message', event => {
+  if (event.data?.type !== 'signed-out') return
+  invalidateActiveSession()
+  signOutListeners.forEach(listener => listener())
+})
+
+export function subscribeToSignOut(listener: () => void) {
+  signOutListeners.add(listener)
+  return () => { signOutListeners.delete(listener) }
 }
 
-async function refreshSessionWithCsrfRetry() {
+export function activateSession(session: Session) {
+  invalidateActiveSession()
+  activeAccess = session.access
+}
+
+export function invalidateActiveSession() {
+  sessionVersion += 1
+  activeAccess = null
+  refreshSessionInFlight = null
+}
+
+export function getActiveSessionVersion() {
+  return sessionVersion
+}
+
+export function getActiveAccessToken() {
+  return activeAccess
+}
+
+function supersededSession() {
+  return new DOMException('This session operation was superseded.', 'AbortError')
+}
+
+function withSessionLock<T>(operation: () => Promise<T>): Promise<T> {
+  const next = cookieOperationQueue.then(() => {
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      return navigator.locks.request('aralforge-auth-cookie', operation)
+    }
+    return operation()
+  })
+  cookieOperationQueue = next.catch(() => undefined)
+  return next
+}
+
+export function refreshToken(rejectedAccess?: string) {
+  if (activeAccess && rejectedAccess && activeAccess !== rejectedAccess) {
+    return Promise.resolve({ access: activeAccess })
+  }
+  if (refreshSessionInFlight) return refreshSessionInFlight
+  const version = sessionVersion
+  const pending = withSessionLock(async () => {
+    if (version !== sessionVersion) throw supersededSession()
+    const refreshed = await withCsrfRetry(refreshSessionWithCsrf)
+    if (version !== sessionVersion) throw supersededSession()
+    activeAccess = refreshed.access
+    return refreshed
+  }).finally(() => {
+    if (refreshSessionInFlight === pending) refreshSessionInFlight = null
+  })
+  refreshSessionInFlight = pending
+  return pending
+}
+
+async function withCsrfRetry<T>(operation: (csrf: string) => Promise<T>) {
   try {
-    return await refreshSessionWithCsrf(await getCsrfToken())
+    return await operation(await getCsrfToken())
   } catch (error) {
     if (!isCsrfValidationError(error)) throw error
 
     invalidateCsrfToken()
-    return refreshSessionWithCsrf(await getCsrfToken())
+    return operation(await getCsrfToken())
   }
 }
 
@@ -99,6 +166,7 @@ async function refreshSessionWithCsrf(csrf: string) {
     credentials: 'include',
     headers: createHeaders({ headers: { 'X-CSRFToken': csrf } }),
     method: 'POST',
+    signal: AbortSignal.timeout(20_000),
   })
   if (response.status === 204) {
     throw new ApiError('No active session was found.', 401)
@@ -122,11 +190,13 @@ export function isCsrfValidationError(error: unknown) {
 }
 
 export async function logoutSession() {
-  const csrf = await getCsrfToken()
-  await request<void>('/auth/logout/', {
+  await withSessionLock(() => withCsrfRetry(csrf => request<void>('/auth/logout/', {
     method: 'POST',
     headers: { 'X-CSRFToken': csrf },
-  })
+    signal: AbortSignal.timeout(20_000),
+  })))
+  invalidateCsrfToken()
+  sessionChannel?.postMessage({ type: 'signed-out' })
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}) {
@@ -163,6 +233,7 @@ function buildUrl(path: string) {
 
 function resolveApiBaseUrl() {
   const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (configuredUrl === '/api') return configuredUrl
 
   if (!configuredUrl) {
     if (import.meta.env.DEV) {
@@ -175,7 +246,7 @@ function resolveApiBaseUrl() {
   try {
     parsedUrl = new URL(configuredUrl)
   } catch {
-    throw new Error('VITE_API_BASE_URL must be an absolute URL.')
+    throw new Error('VITE_API_BASE_URL must be /api or an absolute URL.')
   }
 
   const normalizedPath = parsedUrl.pathname.replace(/\/+$/, '')

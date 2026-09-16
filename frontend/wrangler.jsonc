@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Deploy with --name <existing Worker name>; do not create a replacement site.
+  // Before deployment, copy and review that Worker's existing domain routes
+  // and any additional bindings here. keep_vars preserves variables, not routes.
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-09-16",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*"]
+  },
+  // API_UPSTREAM_ORIGIN is a per-Worker runtime variable. There is deliberately
+  // no default so an unconfigured staging Worker cannot reach production.
+  "keep_vars": true
+}

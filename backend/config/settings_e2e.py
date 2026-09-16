@@ -7,6 +7,10 @@ from .settings import *  # noqa: E402,F403
 
 E2E_TESTING = True
 DEBUG = True
+AUTH_REFRESH_COOKIE_SECURE = False
+AUTH_REFRESH_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SAMESITE = 'Lax'
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 CORS_ALLOWED_ORIGINS = ['http://127.0.0.1:4173', 'http://localhost:4173']
 CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:4173', 'http://localhost:4173']

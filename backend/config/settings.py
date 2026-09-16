@@ -412,8 +412,8 @@ if not DEBUG:
         )
     if not AUTH_REFRESH_COOKIE_SECURE:
         raise RuntimeError('AUTH_REFRESH_COOKIE_SECURE must be enabled when DEBUG=False.')
-    if AUTH_REFRESH_COOKIE_SAMESITE != 'None':
-        raise RuntimeError('AUTH_REFRESH_COOKIE_SAMESITE must be None for the cross-site deployment.')
+    if AUTH_REFRESH_COOKIE_SAMESITE not in {'Lax', 'None'}:
+        raise RuntimeError('AUTH_REFRESH_COOKIE_SAMESITE must be Lax (same-origin) or None (legacy cross-site).')
     if urlparse(DATABASE_URL).scheme not in {'postgres', 'postgresql'}:
         raise RuntimeError('Production DATABASE_URL must use PostgreSQL.')
     if CELERY_TASK_ALWAYS_EAGER:
@@ -424,8 +424,8 @@ if not DEBUG:
     CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'None')
     if not CSRF_COOKIE_SECURE:
         raise RuntimeError('CSRF_COOKIE_SECURE must be enabled when DEBUG=False.')
-    if CSRF_COOKIE_SAMESITE != 'None':
-        raise RuntimeError('CSRF_COOKIE_SAMESITE must be None for the cross-site deployment.')
+    if CSRF_COOKIE_SAMESITE not in {'Lax', 'None'}:
+        raise RuntimeError('CSRF_COOKIE_SAMESITE must be Lax (same-origin) or None (legacy cross-site).')
     SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', default=True)
     SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(

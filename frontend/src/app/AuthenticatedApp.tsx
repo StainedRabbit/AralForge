@@ -25,10 +25,10 @@ const ProfilePage = lazy(() => import('../pages/ProfilePage').then(module => ({ 
 type Identity = { user: User; student_profile: StudentProfile | null }
 type Navigation = { role: 'student' | 'teacher'; pending_count: number }
 
-export function AuthenticatedApp({ session, setSession, onLogout }: {
-  session: Session; setSession: (session: Session) => void; onLogout: () => void
+export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpired }: {
+  session: Session; setSession: (session: Session) => void; onLogout: () => void; onSessionExpired: () => void
 }) {
-  const api = useAuthenticatedRequest(session, setSession, onLogout)
+  const api = useAuthenticatedRequest(session, setSession, onSessionExpired)
   const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: 600_000 })
   const isAdminTeacher = Boolean(
     identity.data?.user.is_admin_teacher || identity.data?.user.role === 'ADMIN',
