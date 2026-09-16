@@ -913,6 +913,27 @@ function StudentLessonReader({
           <span>{nextActionLabel}</span>
         </button>
       </section>
+      <nav className="floating-lesson-nav floating-lesson-nav--top" aria-label="Module lesson navigation">
+        <button
+          aria-label={previousLesson ? `Previous lesson: ${previousLesson.title}` : 'No previous lesson'}
+          disabled={!previousLesson}
+          onClick={() => previousLesson && onSelectLesson(previousLesson)}
+          type="button"
+        >
+          <Icon name="arrow-left" />
+          <span><small>Previous</small><strong>{previousLesson?.title ?? 'First lesson'}</strong></span>
+        </button>
+        <span className="floating-lesson-nav__count">Lesson {lessonIndex + 1} of {publishedLessons.length}</span>
+        <button
+          aria-label={nextLesson ? `Next lesson: ${nextLesson.title}` : 'No next lesson'}
+          disabled={!nextLesson}
+          onClick={() => nextLesson && onSelectLesson(nextLesson)}
+          type="button"
+        >
+          <span><small>Next</small><strong>{nextLesson?.title ?? 'Last lesson'}</strong></span>
+          <Icon name="arrow-right" />
+        </button>
+      </nav>
       <section
         className="student-lesson-context section-block"
         id="selected-lesson"
@@ -1102,27 +1123,6 @@ function StudentLessonReader({
         </button>
       </nav>
       <TopicActivities data={data} topic={topic} />
-      <nav className="floating-lesson-nav" aria-label="Module lesson navigation">
-        <button
-          aria-label={previousLesson ? `Previous lesson: ${previousLesson.title}` : 'No previous lesson'}
-          disabled={!previousLesson}
-          onClick={() => previousLesson && onSelectLesson(previousLesson)}
-          type="button"
-        >
-          <Icon name="arrow-left" />
-          <span><small>Previous</small><strong>{previousLesson?.title ?? 'First lesson'}</strong></span>
-        </button>
-        <span className="floating-lesson-nav__count">Lesson {lessonIndex + 1} of {publishedLessons.length}</span>
-        <button
-          aria-label={nextLesson ? `Next lesson: ${nextLesson.title}` : 'No next lesson'}
-          disabled={!nextLesson}
-          onClick={() => nextLesson && onSelectLesson(nextLesson)}
-          type="button"
-        >
-          <span><small>Next</small><strong>{nextLesson?.title ?? 'Last lesson'}</strong></span>
-          <Icon name="arrow-right" />
-        </button>
-      </nav>
     </div>
   )
 }

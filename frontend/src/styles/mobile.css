@@ -465,10 +465,6 @@
     z-index: 22;
   }
 
-  .student-lesson-reader .floating-lesson-nav {
-    bottom: calc(var(--mobile-tabbar-height) + 10px + env(safe-area-inset-bottom));
-  }
-
   .lesson-save-bar,
   .gradebook-save-button {
     position: sticky;

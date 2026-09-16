@@ -2176,6 +2176,10 @@
   max-width: min(32vw, 260px);
 }
 
+.student-lesson-reader .floating-lesson-nav--top {
+  margin-top: 0;
+}
+
 .student-topic-work {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
