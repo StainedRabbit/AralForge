@@ -952,7 +952,30 @@
   }
 
   .student-module-library__toolbar .search-box {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    min-width: 0;
     width: 100%;
+  }
+
+  .student-module-library__toolbar .search-box input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding-left: 40px;
+  }
+
+  .student-module-library__toolbar .search-box .icon {
+    position: absolute;
+    z-index: 1;
+    left: 12px;
+    top: 50%;
+    width: 18px;
+    height: 18px;
+    flex: none;
+    pointer-events: none;
+    transform: translateY(-50%);
   }
 
   .student-module-card {

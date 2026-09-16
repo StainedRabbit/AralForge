@@ -34,6 +34,48 @@ test('student classes include active and past enrollments', async ({ page }) => 
 })
 
 
+test('student module search icon remains inside the full-width mobile field', async ({ page }) => {
+  await signIn(page)
+  await page.goto('/modules')
+  const search = page.locator('.student-module-library__toolbar .search-box')
+  const input = search.locator('input[type="search"]')
+  const icon = search.locator('.icon')
+
+  for (const viewport of [
+    { width: 360, height: 800 },
+    { width: 390, height: 844 },
+    { width: 430, height: 932 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const bounds = await search.evaluate((element) => {
+      const input = element.querySelector<HTMLElement>('input[type="search"]')
+      const icon = element.querySelector<HTMLElement>('.icon')
+      const field = input?.getBoundingClientRect()
+      const mark = icon?.getBoundingClientRect()
+      return {
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        fieldBottom: field?.bottom ?? 0,
+        fieldLeft: field?.left ?? 0,
+        fieldRight: field?.right ?? 0,
+        fieldTop: field?.top ?? 0,
+        iconBottom: mark?.bottom ?? 0,
+        iconLeft: mark?.left ?? 0,
+        iconRight: mark?.right ?? 0,
+        iconTop: mark?.top ?? 0,
+      }
+    })
+
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth + 1)
+    expect(bounds.iconLeft).toBeGreaterThanOrEqual(bounds.fieldLeft)
+    expect(bounds.iconRight).toBeLessThanOrEqual(bounds.fieldRight)
+    expect(Math.abs(
+      (bounds.iconTop + bounds.iconBottom) / 2 - (bounds.fieldTop + bounds.fieldBottom) / 2,
+    )).toBeLessThanOrEqual(1)
+  }
+})
+
+
 test('locked enrolled module exposes topic downloads but no online content', async ({ page }) => {
   await signIn(page)
   await page.goto('/modules')
