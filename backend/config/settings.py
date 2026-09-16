@@ -406,6 +406,12 @@ if not DEBUG:
         'CORS_ALLOWED_ORIGINS',
         'CSRF_TRUSTED_ORIGINS',
     ))
+    if set(CORS_ALLOWED_ORIGINS) != set(CSRF_TRUSTED_ORIGINS):
+        raise RuntimeError(
+            'CORS_ALLOWED_ORIGINS and CSRF_TRUSTED_ORIGINS must contain the same exact frontend origins.'
+        )
+    if not AUTH_REFRESH_COOKIE_SECURE:
+        raise RuntimeError('AUTH_REFRESH_COOKIE_SECURE must be enabled when DEBUG=False.')
     if urlparse(DATABASE_URL).scheme not in {'postgres', 'postgresql'}:
         raise RuntimeError('Production DATABASE_URL must use PostgreSQL.')
     if CELERY_TASK_ALWAYS_EAGER:

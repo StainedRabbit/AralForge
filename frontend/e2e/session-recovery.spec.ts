@@ -33,6 +33,25 @@ test('a rejected refresh returns to sign in without exposing a refresh token', a
   expect(await page.evaluate(() => localStorage.getItem('aralforge.session'))).toBeNull()
 })
 
+test('a stale CSRF token is renewed and does not end an active session', async ({ page }) => {
+  await signIn(page)
+
+  let rejectFirstRefresh = true
+  await page.route(refreshPath, route => {
+    if (!rejectFirstRefresh) return route.continue()
+    rejectFirstRefresh = false
+    return route.fulfill({
+      status: 403,
+      json: { detail: 'CSRF validation failed: CSRF token missing or incorrect.' },
+    })
+  })
+
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
+  expect(rejectFirstRefresh).toBe(false)
+})
+
 test('manual sign out revokes the cookie session and reload stays signed out', async ({ page }) => {
   await signIn(page)
   const logoutResponse = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))

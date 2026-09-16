@@ -7,7 +7,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.middleware.csrf import get_token
 from rest_framework import serializers
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
@@ -258,4 +258,7 @@ def enforce_csrf(request):
     check.process_request(request._request)
     reason = check.process_view(request._request, None, (), {})
     if reason:
-        raise AuthenticationFailed(f'CSRF validation failed: {reason}')
+        # A bad CSRF token does not mean the refresh credential is expired or
+        # revoked.  Keep it distinguishable from authentication failures so
+        # clients can bootstrap a fresh token without signing the user out.
+        raise PermissionDenied(f'CSRF validation failed: {reason}')

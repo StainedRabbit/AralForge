@@ -71,23 +71,46 @@ async function getCsrfToken() {
   return csrfInFlight
 }
 
+function invalidateCsrfToken() {
+  csrfToken = null
+}
+
 let refreshSessionInFlight: Promise<{ access: string }> | null = null
 
 export function refreshToken() {
-  refreshSessionInFlight ??= getCsrfToken()
-    .then(async csrf => {
-      const response = await fetch(buildUrl('/auth/token/refresh/'), {
-        credentials: 'include',
-        headers: createHeaders({ headers: { 'X-CSRFToken': csrf } }),
-        method: 'POST',
-      })
-      if (response.status === 204) {
-        throw new ApiError('No active session was found.', 401)
-      }
-      return parseResponse<{ access: string }>(response)
-    })
+  refreshSessionInFlight ??= refreshSessionWithCsrfRetry()
     .finally(() => { refreshSessionInFlight = null })
   return refreshSessionInFlight
+}
+
+async function refreshSessionWithCsrfRetry() {
+  try {
+    return await refreshSessionWithCsrf(await getCsrfToken())
+  } catch (error) {
+    if (!isCsrfValidationError(error)) throw error
+
+    invalidateCsrfToken()
+    return refreshSessionWithCsrf(await getCsrfToken())
+  }
+}
+
+async function refreshSessionWithCsrf(csrf: string) {
+  const response = await fetch(buildUrl('/auth/token/refresh/'), {
+    credentials: 'include',
+    headers: createHeaders({ headers: { 'X-CSRFToken': csrf } }),
+    method: 'POST',
+  })
+  if (response.status === 204) {
+    throw new ApiError('No active session was found.', 401)
+  }
+  return parseResponse<{ access: string }>(response)
+}
+
+function isCsrfValidationError(error: unknown) {
+  return error instanceof ApiError && error.status === 403 &&
+    typeof error.data === 'object' && error.data !== null &&
+    'detail' in error.data && typeof error.data.detail === 'string' &&
+    error.data.detail.startsWith('CSRF validation failed:')
 }
 
 export async function logoutSession() {

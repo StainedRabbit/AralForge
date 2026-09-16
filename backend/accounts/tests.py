@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -513,6 +513,25 @@ class CookieSessionSecurityTests(APITestCase):
         csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
         after_logout = self.client.post('/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf)
         self.assertEqual(after_logout.status_code, 204)
+
+    def test_refresh_with_invalid_csrf_token_is_forbidden_without_revoking_session(self):
+        self.client = APIClient(enforce_csrf_checks=True)
+        self.login(self.user)
+        csrf = self.client.get('/api/auth/csrf/').data['csrf_token']
+
+        rejected = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN='invalid-token',
+        )
+
+        self.assertEqual(rejected.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('CSRF validation failed:', rejected.data['detail'])
+
+        recovered = self.client.post(
+            '/api/auth/token/refresh/', {}, format='json', HTTP_X_CSRFTOKEN=csrf,
+        )
+
+        self.assertEqual(recovered.status_code, status.HTTP_200_OK)
+        self.assertIn('access', recovered.data)
 
     def test_teacher_refresh_token_uses_the_configured_lifetime(self):
         login = self.login(self.teacher)
