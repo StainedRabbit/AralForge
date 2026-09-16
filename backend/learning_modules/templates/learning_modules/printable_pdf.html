@@ -171,12 +171,6 @@
       text-transform: uppercase;
     }
 
-    .generated {
-      color: #64748b;
-      font-size: 9pt;
-      margin-top: 2.5mm;
-    }
-
     .student-details {
       display: flex;
       gap: 4mm;
@@ -363,7 +357,6 @@
         <span class="student-detail__line"></span>
       </div>
     </div>
-    <p class="generated">Generated {{ generated_at|date:"M j, Y g:i A" }}</p>
   </header>
 
   {% for topic in topics %}

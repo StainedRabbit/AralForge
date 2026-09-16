@@ -2696,7 +2696,9 @@ class PrintablePdfApiTests(APITestCase):
         self.assertIn('>Name:</span>', html)
         self.assertIn('>Year:</span>', html)
         self.assertIn('>Schedule:</span>', html)
-        self.assertLess(html.index('>Name:</span>'), html.index('Generated '))
+        self.assertNotIn('Generated ', html)
+        self.assertIn('PDF101 / Printable PDF', html)
+        self.assertNotIn('PDF101 / Printable PDF / Printable Module', html)
         self.assertRegex(
             html,
             r'\.section\s*\{\s*break-inside:\s*auto;',

@@ -59,8 +59,7 @@ def generate_topic_pdf(topic):
         topic,
         f'{slugify(module.slug or module.title) or "module"}-{slugify(topic.title) or "topic"}.pdf',
         {
-            'context_label': compact_join(subject_label(module), module.title),
-            'generated_at': timezone.now(),
+            'context_label': subject_label(module),
             'title': topic.title,
             'topics': [rendered_topic],
         },
