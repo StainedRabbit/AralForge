@@ -37,16 +37,17 @@ test('student classes include active and past enrollments', async ({ page }) => 
 test('locked enrolled module exposes topic downloads but no online content', async ({ page }) => {
   await signIn(page)
   await page.goto('/modules')
-  await page.getByLabel('Subject').selectOption({ label: 'E2EQ1 - Quiz Workflow' })
+  const moduleCard = page.locator('.student-module-card').filter({
+    has: page.getByRole('heading', { name: 'E2E Quiz Workflow' }),
+  })
 
-  await expect(page.getByRole('heading', { name: 'E2E Quiz Workflow' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Topics available for download' })).toBeVisible()
-  await expect(page.getByText('Quiz Workflow Topic', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Download Module PDF' })).toHaveCount(0)
-  await expect(page.locator('a[href*="lesson="]')).toHaveCount(0)
+  await expect(moduleCard).toBeVisible()
+  await expect(moduleCard).toContainText('Download published topics for offline study.')
+  await expect(moduleCard.getByText('Quiz Workflow Topic', { exact: true })).toBeVisible()
+  await expect(moduleCard.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
+  await expect(moduleCard.locator('a[href*="lesson="]')).toHaveCount(0)
 
-  await expect(page.getByRole('link', { name: 'Module Contents' })).toHaveCount(0)
+  await expect(moduleCard.getByRole('link')).toHaveCount(0)
   await expect(page.locator('.student-lesson-reader')).toHaveCount(0)
   await expect(page.getByText('Paper Queue Quiz', { exact: true })).toHaveCount(0)
 })

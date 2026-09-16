@@ -87,31 +87,16 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
 
   await page.goto('/modules')
   await expect(page.getByRole('heading', { name: 'Modules' })).toBeVisible()
-  await expect(page.locator('.student-module-browser')).toBeVisible()
+  const moduleCard = page.locator('.student-module-card').filter({
+    has: page.getByRole('heading', { name: 'E2E Resume Learning Module' }),
+  })
+  await expect(page.locator('.student-module-library')).toBeVisible()
+  await expect(moduleCard).toBeVisible()
   await page.setViewportSize({ width: 768, height: 1024 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-modules-tablet-768x1024.png` })
 
-  const personalStudySubjectId = await page.evaluate(() => {
-    const subjectSelect = document.querySelector<HTMLSelectElement>('.student-module-control select')
-    return Array.from(subjectSelect?.options ?? []).find(
-      (option) => option.textContent?.includes('E2EH1 - Attempt Hydration Fixture'),
-    )?.value
-  })
-  expect(personalStudySubjectId).toBeTruthy()
-  await page.goto(`/modules?subject=${personalStudySubjectId}&context=PERSONAL`)
-  await expect(page.locator('.student-module-browser')).toBeVisible()
-  const classSelect = page.getByLabel('Class')
-  if (await classSelect.count()) {
-    const classValue = await classSelect.locator('option').evaluateAll((options) =>
-      options.map((option) => (option as HTMLOptionElement).value).find(Boolean),
-    )
-    expect(classValue).toBeTruthy()
-    await classSelect.selectOption(classValue!)
-  }
-  const lessonLinks = page.locator('a[href*="lesson="]')
-  expect(await lessonLinks.count()).toBeGreaterThan(0)
-  const lessonHref = await lessonLinks.first().getAttribute('href')
+  const lessonHref = await moduleCard.getByRole('link').getAttribute('href')
   expect(lessonHref).toBeTruthy()
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(lessonHref!)
@@ -136,7 +121,7 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.screenshot({ path: `${screenshotRoot}/student-lesson-mobile-430x932.png` })
 
   await page.goto('/modules')
-  await expect(page.locator('.student-module-browser')).toBeVisible()
+  await expect(page.locator('.student-module-library')).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
   await assertNoViewportOverflow(page)
   await expect(page.locator('.mobile-tabbar')).toBeVisible()

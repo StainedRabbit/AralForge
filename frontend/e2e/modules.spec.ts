@@ -690,15 +690,16 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await page.waitForURL((url) => url.pathname === '/')
   await page.goto('/modules')
 
-  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
-  await expect(page).toHaveURL(/subject=\d+/)
   const moduleLibraryUrl = page.url()
-  await expect(page.getByRole('heading', { name: 'E2E Resume Learning Module' })).toBeVisible()
+  const moduleCard = page.locator('.student-module-card').filter({
+    has: page.getByRole('heading', { name: 'E2E Resume Learning Module' }),
+  })
+  await expect(moduleCard).toBeVisible()
 
   let progressPromise = page.waitForResponse(
     (response) => response.url().includes('/api/modules/lesson-progress/') && response.request().method() === 'POST',
   )
-  await page.getByRole('link', { name: /Start Lesson.*Resume Basics/ }).click()
+  await moduleCard.getByRole('link').click()
   await progressPromise
   await expect(page.getByRole('heading', { name: 'Resume Basics' })).toBeVisible()
   await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible()
@@ -726,8 +727,8 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
 
   await page.goto(moduleLibraryUrl)
-  await expect(page.getByRole('link', { name: /Resume Lesson.*Resume Basics/ })).toBeVisible()
-  await page.getByRole('link', { name: /Resume Lesson.*Resume Basics/ }).click()
+  await expect(moduleCard.getByRole('link', { name: 'Resume Lesson' })).toBeVisible()
+  await moduleCard.getByRole('link', { name: 'Resume Lesson' }).click()
 
   let completionPromise = page.waitForResponse(
     (response) => response.url().includes('/api/modules/lesson-progress/') && response.request().method() === 'PATCH',
@@ -776,7 +777,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await expect(page.getByRole('button', { name: /Review Last Lesson.*Resume Review/ })).toBeVisible()
 
   await page.goto(moduleLibraryUrl)
-  const reviewLink = page.getByRole('link', { name: /Review Last Lesson.*Resume Review/ })
+  const reviewLink = moduleCard.getByRole('link', { name: 'Review Last Lesson' })
   await expect(reviewLink).toBeVisible()
   await reviewLink.click()
   await expect(page.getByRole('heading', { name: 'Resume Review' })).toBeVisible()
@@ -811,8 +812,10 @@ test('shows a safe error when queued topic PDF generation fails', async ({ page 
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((url) => url.pathname === '/')
   await page.goto('/modules')
-  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
-  await page.getByRole('button', { name: 'Open Topic' }).click()
+  const moduleCard = page.locator('.student-module-card').filter({
+    has: page.getByRole('heading', { name: 'E2E Resume Learning Module' }),
+  })
+  await moduleCard.getByRole('link').click()
   await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Download Topic PDF' }).click()
@@ -847,8 +850,10 @@ test('stops waiting for a topic PDF after the generation timeout', async ({ page
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL((url) => url.pathname === '/')
   await page.goto('/modules')
-  await page.getByLabel('Subject').selectOption({ label: 'E2E102 - Database Systems' })
-  await page.getByRole('button', { name: 'Open Topic' }).click()
+  const moduleCard = page.locator('.student-module-card').filter({
+    has: page.getByRole('heading', { name: 'E2E Resume Learning Module' }),
+  })
+  await moduleCard.getByRole('link').click()
   const downloadButton = page.getByRole('button', { name: 'Download Topic PDF' })
   await expect(downloadButton).toBeVisible()
   await page.clock.install()

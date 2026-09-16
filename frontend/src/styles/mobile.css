@@ -12,9 +12,11 @@
 }
 
 .mobile-account-button {
+  min-width: 44px;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 3px 8px 3px 3px;
   border: 1px solid var(--border);
@@ -274,6 +276,11 @@
 
   .page-header > div > p:last-child {
     max-width: 62ch;
+  }
+
+  .content-grid,
+  .content-grid--dashboard {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .class-list {

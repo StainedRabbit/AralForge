@@ -297,9 +297,13 @@
 
 .module-row {
   display: flex;
+  box-sizing: border-box;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 70px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -317,12 +321,20 @@ button.module-row {
 }
 
 .module-row > span {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .module-row strong,
 .module-row small {
   display: block;
+}
+
+.module-row strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .module-row small {
