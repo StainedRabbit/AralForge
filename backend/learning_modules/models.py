@@ -607,9 +607,6 @@ class ModuleActivity(models.Model):
     )
     order = models.PositiveIntegerField(default=0)
     points_possible = models.DecimalField(max_digits=6, decimal_places=2, default=100)
-    opens_at = models.DateTimeField(null=True, blank=True)
-    due_at = models.DateTimeField(null=True, blank=True)
-    allow_late_submissions = models.BooleanField(default=False)
     accepts_text = models.BooleanField(default=True)
     accepts_file = models.BooleanField(default=False)
     max_attempts = models.PositiveSmallIntegerField(
@@ -630,7 +627,6 @@ class ModuleActivity(models.Model):
     class Meta:
         ordering = ['module', 'order', 'id']
         verbose_name_plural = 'module activities'
-        indexes = [models.Index(fields=['module', 'is_published', 'due_at'], name='activity_module_due_idx')]
 
     def __str__(self):
         return f'{self.module}: {self.title}'
@@ -642,11 +638,6 @@ class ModuleActivity(models.Model):
             self.activity_type = self.ActivityType.INTERACTIVE
             self.accepts_text = False
             self.accepts_file = False
-            # Lesson Main Activities are governed by class/module access. The
-            # legacy global window cannot represent different linked classes.
-            self.opens_at = None
-            self.due_at = None
-            self.allow_late_submissions = False
         super().save(*args, **kwargs)
         if self.lesson_id:
             mark_lesson_topic_pdf_outdated(self.lesson)
@@ -921,41 +912,6 @@ class ModuleActivityAttempt(models.Model):
             self.activity_revision = self.activity.revision
             self.passing_score_snapshot = self.activity.passing_score
         super().save(*args, **kwargs)
-
-
-class ModuleActivityExtension(models.Model):
-    activity = models.ForeignKey(
-        ModuleActivity,
-        on_delete=models.CASCADE,
-        related_name='extensions',
-    )
-    student = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='module_activity_extensions',
-    )
-    due_at = models.DateTimeField()
-    granted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        related_name='granted_module_activity_extensions',
-        null=True,
-        blank=True,
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['activity', 'student'],
-                name='unique_module_activity_extension_student',
-            ),
-        ]
-        ordering = ['due_at', 'student_id']
-
-    def __str__(self):
-        return f'{self.activity} extension for {self.student}'
 
 
 class ModuleActivityAnswer(models.Model):

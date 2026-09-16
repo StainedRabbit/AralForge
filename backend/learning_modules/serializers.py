@@ -15,7 +15,6 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
-    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -33,7 +32,6 @@ from .models import (
     user_has_module_class_access,
 )
 from .services.learning_context import learning_context_query, resolve_learning_context
-from .services.activity_snapshots import validate_activity_window
 from .services.activity_state import evaluate_main_activity_state
 
 
@@ -664,9 +662,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'activity_type',
             'order',
             'points_possible',
-            'opens_at',
-            'due_at',
-            'allow_late_submissions',
             'accepts_text',
             'accepts_file',
             'max_attempts',
@@ -698,8 +693,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
             'grading_period',
             getattr(self.instance, 'grading_period', None),
         )
-        opens_at = attrs.get('opens_at', getattr(self.instance, 'opens_at', None))
-        due_at = attrs.get('due_at', getattr(self.instance, 'due_at', None))
         if lesson and not grading_period:
             raise serializers.ValidationError({
                 'grading_period': 'Select a grading period for this Quiz.',
@@ -711,10 +704,6 @@ class ModuleActivitySerializer(serializers.ModelSerializer):
         if passing_score is not None and passing_score < 0:
             raise serializers.ValidationError({
                 'passing_score': 'Passing score cannot be negative.',
-            })
-        if not lesson and opens_at and due_at and opens_at >= due_at:
-            raise serializers.ValidationError({
-                'due_at': 'Due date must be after the opening date.',
             })
         return attrs
 
@@ -1015,7 +1004,6 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('This activity is not available.')
 
             if not self.instance and activity:
-                validate_activity_window(activity, request.user)
                 student = attrs.get('student', request.user)
                 context_type, schedule = resolve_learning_context(
                     student,
@@ -1124,20 +1112,6 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
             }
             for question_id, answer in answers.items()
         }
-
-
-class ModuleActivityExtensionSerializer(serializers.ModelSerializer):
-    student_name = serializers.SerializerMethodField()
-    student_full_name = serializers.CharField(source='student.get_full_name', read_only=True)
-
-    class Meta:
-        model = ModuleActivityExtension
-        fields = ('id', 'activity', 'student', 'student_name', 'student_full_name', 'due_at', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'activity', 'student_name', 'student_full_name', 'created_at', 'updated_at')
-
-    def get_student_name(self, obj):
-        full_name = obj.student.get_display_name().strip()
-        return full_name or obj.student.username
 
 
 class PaperActivityScoreRowSerializer(serializers.Serializer):
@@ -1316,8 +1290,6 @@ class ModuleActivityAnswerSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('Students can only answer their own attempts.')
             if attempt and attempt.status != ModuleActivityAttempt.Status.IN_PROGRESS:
                 raise serializers.ValidationError('Submitted attempts cannot be edited.')
-            if attempt:
-                validate_activity_window(attempt.activity, request.user)
             if question and not question.is_published:
                 raise serializers.ValidationError('This question is not available.')
 

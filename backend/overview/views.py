@@ -66,7 +66,7 @@ def student_dashboard(request):
     submissions = ModuleActivitySubmission.objects.filter(student=user)
     submitted_activity_ids = submissions.values_list('activity_id', flat=True)
     upcoming = activities.exclude(id__in=submitted_activity_ids).order_by(
-        'due_at', 'order', 'id',
+        'module__title', 'order', 'id',
     )[:5]
     recent_modules = list(modules.order_by('-updated_at')[:4])
     points = PointLedger.objects.filter(student=user).aggregate(total=Sum('points'))['total'] or 0

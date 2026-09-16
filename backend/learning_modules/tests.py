@@ -37,7 +37,6 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
-    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -181,6 +180,9 @@ class ModuleMarkdownExportApiTests(APITestCase):
             'Markdown is the correct answer.',
         ):
             self.assertIn(expected, markdown)
+        self.assertNotIn('Opens At', markdown)
+        self.assertNotIn('Due At', markdown)
+        self.assertNotIn('Allow Late Submissions', markdown)
         self.assertLess(markdown.index('Question 1: Matching'), markdown.index('Question 2: Multiple Choice'))
         self.assertLess(markdown.index('- [x] Markdown'), markdown.index('- [ ] Plain text'))
 
@@ -3747,20 +3749,15 @@ class LessonMainActivityApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_student_extension_management_endpoint_is_retired(self):
+    def test_activity_api_omits_retired_timing_fields(self):
         self.client.force_authenticate(self.teacher)
 
-        response = self.client.put(
-            f'/api/modules/activities/{self.activity.id}/extensions/',
-            {
-                'student': self.student.id,
-                'due_at': (timezone.now() + timezone.timedelta(hours=2)).isoformat(),
-            },
-            format='json',
-        )
+        response = self.client.get(f'/api/modules/activities/{self.activity.id}/')
 
-        self.assertEqual(response.status_code, 404)
-        self.assertFalse(ModuleActivityExtension.objects.filter(activity=self.activity).exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('opens_at', response.data)
+        self.assertNotIn('due_at', response.data)
+        self.assertNotIn('allow_late_submissions', response.data)
 
     def test_attempt_draft_is_saved_once_and_graded_from_frozen_snapshot(self):
         question = self.create_question(ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE, 1)
@@ -3801,15 +3798,11 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual(submitted.status_code, 200)
         self.assertEqual(Decimal(submitted.data['attempt']['score']), Decimal('1.00'))
 
-    def test_lesson_activity_ignores_hidden_global_window(self):
-        self.activity.due_at = timezone.now() - timezone.timedelta(hours=1)
-        self.activity.save(update_fields=['due_at'])
+    def test_lesson_activity_starts_normally_without_timing_restrictions(self):
         self.client.force_authenticate(self.student)
         started = self.start_attempt()
         repeated = self.start_attempt()
 
-        self.activity.refresh_from_db()
-        self.assertIsNone(self.activity.due_at)
         self.assertEqual(started.status_code, 201, started.data)
         self.assertEqual(repeated.status_code, 200)
         self.assertFalse(repeated.data['created'])

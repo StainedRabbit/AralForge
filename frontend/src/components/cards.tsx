@@ -8,7 +8,7 @@ import {
   moduleAccessLabel,
   moduleSubjectLabel,
 } from '../utils/student'
-import { dueLabel, percent } from '../utils/format'
+import { percent } from '../utils/format'
 import { Icon } from './Icon'
 import { InlineMarkdown } from './RichLessonText'
 
@@ -112,7 +112,7 @@ export function ActivityCard({
         <span>{activityTypeLabel(activity.activity_type)}</span>
       </div>
       <span className={submitted ? 'status-pill status-pill--success' : 'status-pill'}>
-        {submitted ? 'Submitted' : dueLabel(activity.due_at)}
+        {submitted ? 'Submitted' : 'Not submitted'}
       </span>
     </article>
   )
@@ -145,7 +145,7 @@ export function ActivityTimelineItem({
           {activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}
         </div>
         <span>{module?.title ?? activityTypeLabel(activity.activity_type)}</span>
-        <small>{dueLabel(activity.due_at)}</small>
+        <small>{activityTypeLabel(activity.activity_type)}</small>
       </div>
     </article>
   )

@@ -20,10 +20,6 @@ export function displayScore(value: string | null) {
   return value ? Number(value).toFixed(2) : 'Pending'
 }
 
-export function dueLabel(value: string | null) {
-  return value ? formatDateTime(value) : 'No due date'
-}
-
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',

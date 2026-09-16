@@ -362,9 +362,6 @@ export type ModuleActivity = {
   activity_type: ModuleActivityType
   order: number
   points_possible: string
-  opens_at: string | null
-  due_at: string | null
-  allow_late_submissions: boolean
   accepts_text: boolean
   accepts_file: boolean
   max_attempts: number

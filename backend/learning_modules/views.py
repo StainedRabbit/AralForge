@@ -78,7 +78,6 @@ from .services.activity_grading import submit_activity_attempt
 from .services.activity_snapshots import (
     ensure_attempt_snapshot,
     normalize_draft_answers,
-    validate_activity_window,
 )
 from .services.activity_state import (
     activity_states_for_attempts,
@@ -1328,7 +1327,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             key: payload.get(key)
             for key in (
                 'module', 'topic', 'lesson', 'title', 'instructions',
-                'activity_type', 'order', 'opens_at', 'due_at', 'allow_late_submissions',
+                'activity_type', 'order',
                 'max_attempts', 'passing_score', 'accepts_text', 'accepts_file',
                 'grading_period', 'is_published',
             )
@@ -1519,7 +1518,6 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({
                 'detail': 'You have reached the maximum number of attempts.',
             })
-        validate_activity_window(activity, request.user)
         attempt_number = attempts.aggregate(maximum=Max('attempt_number'))['maximum'] or 0
         attempt = ModuleActivityAttempt.objects.create(
             activity=activity,
@@ -1901,7 +1899,6 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
         if attempt.status == ModuleActivityAttempt.Status.SUBMITTED:
             return response.Response(serialize_attempt_with_state(attempt, request))
 
-        validate_activity_window(attempt.activity, attempt.student)
         attempt = submit_activity_attempt(attempt)
         return response.Response(serialize_attempt_with_state(attempt, request))
 
@@ -1930,7 +1927,6 @@ class ModuleActivityAttemptViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
-        validate_activity_window(attempt.activity, attempt.student)
         ensure_attempt_snapshot(attempt)
         answers = request.data.get('answers')
         if not isinstance(answers, dict):

@@ -6,7 +6,6 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
-    ModuleActivityExtension,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -146,7 +145,7 @@ class ModuleAccessAdmin(admin.ModelAdmin):
 
 @admin.register(ModuleActivity)
 class ModuleActivityAdmin(admin.ModelAdmin):
-    list_display = ('title', 'module', 'topic', 'lesson', 'grading_period', 'activity_type', 'order', 'points_possible', 'due_at', 'is_published')
+    list_display = ('title', 'module', 'topic', 'lesson', 'grading_period', 'activity_type', 'order', 'points_possible', 'is_published')
     list_filter = ('grading_period', 'activity_type', 'is_published', 'accepts_text', 'accepts_file', 'topic')
     search_fields = ('title', 'module__title', 'topic__title', 'lesson__title')
 
@@ -187,14 +186,6 @@ class ModuleActivityAttemptAdmin(admin.ModelAdmin):
     list_display = ('activity', 'student', 'attempt_number', 'score', 'max_score', 'status', 'started_at')
     list_filter = ('status', 'activity__module')
     search_fields = ('activity__title', 'student__username')
-
-
-@admin.register(ModuleActivityExtension)
-class ModuleActivityExtensionAdmin(admin.ModelAdmin):
-    list_display = ('activity', 'student', 'due_at', 'granted_by', 'updated_at')
-    list_filter = ('activity__module', 'due_at')
-    search_fields = ('activity__title', 'student__username', 'student__first_name', 'student__middle_name', 'student__last_name')
-    autocomplete_fields = ('activity', 'student', 'granted_by')
 
 
 @admin.register(ModuleActivityAnswer)

@@ -91,31 +91,6 @@ def ensure_attempt_snapshot(attempt):
     return attempt
 
 
-def effective_activity_due_at(activity, student):
-    prefetched = getattr(activity, '_prefetched_objects_cache', {}).get('extensions')
-    extension = (
-        next((item for item in prefetched if item.student_id == student.id), None)
-        if prefetched is not None
-        else activity.extensions.filter(student=student).only('due_at').first()
-    )
-    return extension.due_at if extension else activity.due_at
-
-
-def validate_activity_window(activity, student):
-    if activity.lesson_id:
-        return
-    now = timezone.now()
-    if activity.opens_at and now < activity.opens_at:
-        raise serializers.ValidationError({
-            'activity': f'This activity opens on {activity.opens_at.isoformat()}.',
-        })
-    due_at = effective_activity_due_at(activity, student)
-    if due_at and now > due_at and not activity.allow_late_submissions:
-        raise serializers.ValidationError({
-            'activity': 'The due date for this activity has passed.',
-        })
-
-
 def normalize_draft_answers(snapshot, payload, existing=None):
     if len(payload or {}) > MAX_DRAFT_PAYLOAD_QUESTIONS:
         raise serializers.ValidationError({

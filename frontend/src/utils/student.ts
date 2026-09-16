@@ -170,25 +170,6 @@ export function activityTypeLabel(type: ModuleActivity['activity_type']) {
   return labels[type]
 }
 
-export function compareActivitiesByDueDate(
-  first: ModuleActivity,
-  second: ModuleActivity,
-) {
-  if (!first.due_at && !second.due_at) {
-    return first.order - second.order
-  }
-
-  if (!first.due_at) {
-    return 1
-  }
-
-  if (!second.due_at) {
-    return -1
-  }
-
-  return new Date(first.due_at).getTime() - new Date(second.due_at).getTime()
-}
-
 export function greeting(user: User | null) {
   const name = user?.first_name || user?.username || 'there'
   return `Welcome back, ${name}.`

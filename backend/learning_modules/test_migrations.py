@@ -350,9 +350,15 @@ class MainActivityHardeningMigrationTests(TransactionTestCase):
             granted_by_id=teacher.id,
         )
 
+        hardening_targets = [
+            ('learning_modules', '0028_remove_attempt_is_submitted')
+            if app_label == 'learning_modules'
+            else (app_label, migration_name)
+            for app_label, migration_name in self.latest_targets
+        ]
         executor = MigrationExecutor(connection)
-        executor.migrate(self.latest_targets)
-        apps = executor.loader.project_state(self.latest_targets).apps
+        executor.migrate(hardening_targets)
+        apps = executor.loader.project_state(hardening_targets).apps
         MigratedActivity = apps.get_model('learning_modules', 'ModuleActivity')
         MigratedAttempt = apps.get_model('learning_modules', 'ModuleActivityAttempt')
         MigratedExtension = apps.get_model('learning_modules', 'ModuleActivityExtension')

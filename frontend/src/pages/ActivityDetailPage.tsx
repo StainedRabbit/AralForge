@@ -5,7 +5,7 @@ import { Icon } from '../components/Icon'
 import { InlineMarkdown } from '../components/RichLessonText'
 import { MetaStrip, NotFoundState, Page, PageHeader, SectionHeading } from '../components/ui'
 import { activityTypeLabel, hasActiveModuleAccess } from '../utils/student'
-import { formatDateTime, numeric } from '../utils/format'
+import { numeric } from '../utils/format'
 
 export function ActivityDetailPage({
   api,
@@ -76,7 +76,6 @@ export function ActivityDetailPage({
           </div>
           <MetaStrip
             items={[
-              ['Due', activity.due_at ? formatDateTime(activity.due_at) : 'No due date'],
               ['Text', activity.accepts_text ? 'Accepted' : 'Off'],
               ['File', activity.accepts_file ? 'Accepted' : 'Off'],
             ]}
