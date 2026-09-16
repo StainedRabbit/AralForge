@@ -797,6 +797,14 @@
     grid-column: 1 / -1;
   }
 
+  .grade-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grade-summary-grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
   .class-card,
   .module-card,
   .period-card,
@@ -870,6 +878,25 @@
   .grade-row {
     gap: 8px;
     padding: 14px;
+  }
+
+  .grade-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .grade-row > * {
+    min-width: 0;
+  }
+
+  .grade-row :is(strong, span) {
+    overflow-wrap: anywhere;
+  }
+
+  .grade-row .progress-line {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .profile-panel,

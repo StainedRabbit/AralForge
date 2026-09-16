@@ -1,13 +1,10 @@
 import type { RouteData } from '../app/types'
-import { Icon } from '../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading, StatCard } from '../components/ui'
 import type { SubjectSchedule } from '../types'
-import { calculateLevelState, gradeCategoryLabel, subjectLabel } from '../utils/student'
-import { displayScore, formatDateTime, numeric, percent } from '../utils/format'
+import { gradeCategoryLabel, subjectLabel } from '../utils/student'
+import { displayScore, numeric, percent } from '../utils/format'
 
 export function GradesPage({ data }: { data: RouteData }) {
-  const totalPoints = data.points.reduce((sum, item) => sum + item.points, 0)
-  const levelState = calculateLevelState(data.levels, totalPoints)
   const schedules = data.schedules.filter((schedule) => hasScheduleGrades(data, schedule.id))
   const hasLegacy = data.finalGrades.some((grade) => grade.schedule === null)
     || data.periodGrades.some((grade) => grade.schedule === null)
@@ -24,8 +21,6 @@ export function GradesPage({ data }: { data: RouteData }) {
       <section className="stat-grid">
         <StatCard icon="grade" label="Class records" value={schedules.length} detail="Separate class summaries" />
         <StatCard icon="activity" label="Category grades" value={data.categoryGrades.filter((grade) => grade.schedule !== null).length} detail="Weighted components" />
-        <StatCard icon="spark" label="Points" value={totalPoints} detail={`${data.points.length} ledger entries`} />
-        <StatCard icon="award" label="Level" value={levelState.current?.level ?? 1} detail={levelState.current?.name ?? 'Getting started'} />
       </section>
 
       {schedules.map((schedule) => (
@@ -40,35 +35,6 @@ export function GradesPage({ data }: { data: RouteData }) {
 
       {hasLegacy ? <LegacyGradeSection data={data} /> : null}
 
-      <section className="content-grid">
-        <div className="section-block">
-          <SectionHeading subtitle="Recent gamification events." title="Points" />
-          <div className="timeline-list">
-            {data.points.length ? data.points.slice(0, 8).map((item) => (
-              <div className="timeline-item" key={item.id}>
-                <div className="timeline-dot"><Icon name="spark" /></div>
-                <div>
-                  <strong>{item.points} points</strong>
-                  <span>{item.description || item.source}</span>
-                  <small>{formatDateTime(item.created_at)}</small>
-                </div>
-              </div>
-            )) : <EmptyState icon="spark" title="No point activity" message="Point ledger entries will appear after graded work." />}
-          </div>
-        </div>
-
-        <aside className="level-panel">
-          <SectionHeading subtitle="Gamified progress." title="Level Progress" />
-          <div className="level-ring">
-            <strong>{levelState.current?.level ?? 1}</strong>
-            <span>{levelState.current?.name ?? 'Student'}</span>
-          </div>
-          <div className="progress-line"><span style={{ width: `${levelState.progress}%` }} /></div>
-          <p>{levelState.next
-            ? `${Math.max(levelState.next.points_required - totalPoints, 0)} points until ${levelState.next.name}.`
-            : 'You have reached the highest configured level.'}</p>
-        </aside>
-      </section>
     </Page>
   )
 }

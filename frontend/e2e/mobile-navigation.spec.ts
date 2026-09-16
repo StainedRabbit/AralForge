@@ -101,3 +101,23 @@ test('teacher mobile shell maps nested routes and exposes every secondary area',
   await expect(tabbar.getByRole('link', { name: 'Modules' })).toHaveAttribute('aria-current', 'page')
   await expectNoDocumentOverflow(page)
 })
+
+test('student Grades stays within phone viewports without gamification panels', async ({ page }) => {
+  await signIn(page, 'E2E-001')
+  await expect(page.getByText('Total points', { exact: true })).toHaveCount(0)
+  await page.goto('/grades')
+  await expect(page.getByRole('heading', { name: 'Grades', exact: true })).toBeVisible()
+  await expect(page.getByText('Total points', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Level Progress', exact: true })).toHaveCount(0)
+
+  const tabbar = page.getByRole('navigation', { name: 'Primary mobile' })
+  for (const viewport of phoneViewports) {
+    await page.setViewportSize(viewport)
+    await expectNoDocumentOverflow(page)
+    const widths = await tabbar.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }))
+    expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth + 1)
+  }
+})

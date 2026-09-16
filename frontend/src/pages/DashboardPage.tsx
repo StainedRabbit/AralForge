@@ -56,7 +56,6 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
     <section className="stat-grid" aria-label="Learning summary">
       <StatCard icon="module" label="Published modules" value={metrics.module_count} detail={`${metrics.completed_modules} completed`} />
       <StatCard icon="activity" label="Pending activities" value={metrics.pending_activities} detail={`${metrics.submitted_activities} submitted`} />
-      <StatCard icon="award" label="Total points" value={metrics.total_points} detail={`${metrics.earned_badges} earned badges`} />
     </section>
     <section className="content-grid content-grid--dashboard">
       <div className="section-block"><SectionHeading action={<Link to="/modules">View all</Link>} subtitle="Your recently updated course material." title="Continue Modules" />
