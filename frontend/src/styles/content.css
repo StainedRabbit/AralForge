@@ -295,6 +295,44 @@
   gap: 10px;
 }
 
+.module-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+button.module-row {
+  width: 100%;
+  cursor: pointer;
+}
+
+.module-row > span {
+  min-width: 0;
+}
+
+.module-row strong,
+.module-row small {
+  display: block;
+}
+
+.module-row small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .resource-row,
 .activity-card,
 .timeline-item {

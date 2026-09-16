@@ -15,6 +15,7 @@ from learning_modules.models import (
     module_enrollment_filter,
 )
 from learning_modules.serializers import ModuleActivitySerializer, ModuleSerializer
+from learning_modules.services.learning_context import active_matching_enrollments
 from subjects.models import ScheduleStudent, SubjectSchedule
 from subjects.scheduling import WEEKDAY_CODES
 
@@ -67,7 +68,7 @@ def student_dashboard(request):
     upcoming = activities.exclude(id__in=submitted_activity_ids).order_by(
         'due_at', 'order', 'id',
     )[:5]
-    recent_modules = modules.order_by('-updated_at')[:4]
+    recent_modules = list(modules.order_by('-updated_at')[:4])
     points = PointLedger.objects.filter(student=user).aggregate(total=Sum('points'))['total'] or 0
 
     return {
@@ -84,9 +85,39 @@ def student_dashboard(request):
             'total_points': points,
             'earned_badges': StudentBadge.objects.filter(student=user).count(),
         },
-        'recent_modules': ModuleSerializer(recent_modules, many=True, context={'request': request}).data,
+        'recent_modules': dashboard_modules(request, recent_modules),
         'upcoming_activities': ModuleActivitySerializer(upcoming, many=True, context={'request': request}).data,
     }
+
+
+def dashboard_modules(request, modules):
+    serialized_modules = ModuleSerializer(
+        modules,
+        many=True,
+        context={'request': request},
+    ).data
+    for module, payload in zip(modules, serialized_modules):
+        if not payload['is_accessible']:
+            payload['learning_contexts'] = []
+            continue
+
+        enrollments = active_matching_enrollments(request.user, module).order_by(
+            'schedule__subject__code',
+            'schedule__section',
+            'schedule_id',
+        )
+        payload['learning_contexts'] = [
+            {
+                'type': 'CLASS',
+                'schedule': enrollment.schedule_id,
+                'schedule_display': str(enrollment.schedule),
+                'term_name': enrollment.schedule.school_year_semester.name,
+            }
+            for enrollment in enrollments
+        ]
+        if not payload['learning_contexts'] and payload['access_status'] == 'ADVANCE_ACTIVE':
+            payload['learning_contexts'] = [{'type': 'PERSONAL'}]
+    return serialized_modules
 
 
 def teacher_dashboard(request):

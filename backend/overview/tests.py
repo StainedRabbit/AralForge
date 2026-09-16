@@ -10,7 +10,7 @@ from rest_framework.test import APITestCase
 
 from accounts.models import StudentProfile
 from attendance.models import AttendanceRecord, AttendanceSession
-from learning_modules.models import Module, ModuleActivity, ModuleActivitySubmission
+from learning_modules.models import Module, ModuleAccess, ModuleActivity, ModuleActivitySubmission
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 from subjects.scheduling import WEEKDAY_CODES
 
@@ -46,6 +46,53 @@ class OverviewApiTests(APITestCase):
         self.assertNotIn('problem_count', response.data['metrics'])
         self.assertNotIn('blank_count', response.data['metrics'])
         self.assertLessEqual(len(queries), 25)
+
+    def test_student_dashboard_includes_valid_module_learning_contexts(self):
+        school_year = SchoolYear.objects.create(start_year=2038, end_year=2039)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year,
+            semester=Semester.FIRST,
+            is_active=True,
+        )
+        class_subject = Subject.objects.create(code='CTX101', name='Context Class')
+        advance_subject = Subject.objects.create(code='ADV101', name='Advance Study')
+        first_class = SubjectSchedule.objects.create(
+            subject=class_subject, school_year_semester=term,
+            days='MWF', start_time='08:00', end_time='09:00', section='A',
+        )
+        second_class = SubjectSchedule.objects.create(
+            subject=class_subject, school_year_semester=term,
+            days='TTH', start_time='10:00', end_time='11:00', section='B',
+        )
+        ScheduleStudent.objects.create(schedule=first_class, student=self.student)
+        ScheduleStudent.objects.create(schedule=second_class, student=self.student)
+        class_module = Module.objects.create(
+            title='Class Module', slug='class-module', subject=class_subject, is_published=True,
+        )
+        locked_module = Module.objects.create(
+            title='Locked Module', slug='locked-module', is_published=True,
+        )
+        locked_module.subjects.add(class_subject)
+        advance_module = Module.objects.create(
+            title='Advance Module', slug='advance-module', subject=advance_subject, is_published=True,
+        )
+        ModuleAccess.objects.create(module=class_module, student=self.student, activated_by=self.teacher)
+        ModuleAccess.objects.create(
+            module=advance_module, student=self.student, activated_by=self.teacher,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(reverse('overview:dashboard'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        modules = {item['id']: item for item in response.data['recent_modules']}
+        self.assertEqual(
+            {context['schedule'] for context in modules[class_module.id]['learning_contexts']},
+            {first_class.id, second_class.id},
+        )
+        self.assertEqual(modules[advance_module.id]['learning_contexts'], [{'type': 'PERSONAL'}])
+        self.assertEqual(modules[locked_module.id]['learning_contexts'], [])
 
     def test_teacher_navigation_reports_teacher_role(self):
         self.client.force_authenticate(self.teacher)

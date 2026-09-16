@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import type { AuthedRequest } from '../app/types'
@@ -17,12 +18,13 @@ type StudentDashboard = {
     submitted_activities: number
     total_points: number; earned_badges: number
   }
-  recent_modules: Module[]
+  recent_modules: DashboardModule[]
   upcoming_activities: ModuleActivity[]
 }
 
 export function DashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
   const navigate = useNavigate()
+  const [contextModule, setContextModule] = useState<DashboardModule | null>(null)
   const dashboard = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: ({ signal }) => api<StudentDashboard>('/overview/dashboard/', { signal }),
@@ -59,14 +61,48 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
     </section>
     <section className="content-grid content-grid--dashboard">
       <div className="section-block"><SectionHeading action={<Link to="/modules">View all</Link>} subtitle="Your recently updated course material." title="Continue Modules" />
-        <div className="card-list">{modules.length ? modules.map((module) => <Link className="module-row" key={module.id} to={`/modules/${module.id}`}><span><strong>{module.title}</strong><small>{module.description || 'Learning module'}</small></span><Icon name="arrow-right" /></Link>) : <EmptyState icon="book" title="No modules yet" message="Published modules will appear here." />}</div>
+        <div className="card-list">{modules.length ? modules.map((module) => <DashboardModuleRow key={module.id} module={module} onChooseContext={() => setContextModule(module)} />) : <EmptyState icon="book" title="No modules yet" message="Published modules will appear here." />}</div>
       </div>
       <div className="section-block"><SectionHeading action={<Link to="/modules">Open modules</Link>} subtitle="Unsubmitted work sorted by due date." title="Upcoming Work" />
         <div className="timeline-list">{activities.length ? activities.map((activity) => <article aria-label={`Open ${activity.title}`} className="timeline-item" key={activity.id} onClick={(event) => navigateDashboardActivity(event, navigate, `/activities/${activity.id}`)} onKeyDown={(event) => navigateDashboardActivityByKey(event, navigate, `/activities/${activity.id}`)} role="link" tabIndex={0}><span className="timeline-dot"><Icon name="activity" /></span><span><span className="timeline-item__title">{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</span><small>{activity.due_at ? formatDateTime(activity.due_at) : 'No due date'}</small></span></article>) : <EmptyState icon="check" title="Nothing pending" message="All visible activities have a submission." />}</div>
       </div>
     </section>
+    {contextModule ? <DashboardContextDialog module={contextModule} onClose={() => setContextModule(null)} onChoose={(context) => navigate(moduleTarget(contextModule, context))} /> : null}
   </Page>
 }
+
+function DashboardModuleRow({ module, onChooseContext }: { module: DashboardModule; onChooseContext: () => void }) {
+  const content = <><span><strong>{module.title}</strong><small>{module.description || 'Learning module'}</small></span><Icon name="arrow-right" /></>
+  if (!module.is_accessible) return <Link className="module-row" to="/modules">{content}</Link>
+  if (!module.learning_contexts.length) return <Link className="module-row" to="/modules">{content}</Link>
+  if (module.learning_contexts.length === 1) return <Link className="module-row" to={moduleTarget(module, module.learning_contexts[0])}>{content}</Link>
+  return <button className="module-row" onClick={onChooseContext} type="button">{content}</button>
+}
+
+function DashboardContextDialog({ module, onClose, onChoose }: { module: DashboardModule; onClose: () => void; onChoose: (context: LearningContext) => void }) {
+  return <div aria-labelledby="dashboard-module-context-title" aria-modal="true" className="student-module-context-dialog" role="dialog">
+    <button aria-label="Close class selection" className="student-module-context-dialog__backdrop" onClick={onClose} type="button" />
+    <section className="student-module-context-dialog__panel"><div><p className="eyebrow">Choose a class</p><h2 id="dashboard-module-context-title">{module.title}</h2><p>Select the class where you want to continue this module.</p></div>
+      <div className="student-module-context-dialog__choices">{module.learning_contexts.map((context) => context.type === 'CLASS' ? <button className="button button--secondary" key={context.schedule} onClick={() => onChoose(context)} type="button">{context.schedule_display} · {context.term_name}<Icon name="arrow-right" /></button> : null)}</div>
+      <button className="button button--ghost" onClick={onClose} type="button">Cancel</button>
+    </section>
+  </div>
+}
+
+function moduleTarget(module: DashboardModule, context: LearningContext) {
+  return context.type === 'CLASS' && context.schedule
+    ? `/modules/${module.id}?schedule=${context.schedule}`
+    : `/modules/${module.id}?context=PERSONAL`
+}
+
+type LearningContext = {
+  type: 'CLASS' | 'PERSONAL'
+  schedule?: number
+  schedule_display?: string
+  term_name?: string
+}
+
+type DashboardModule = Module & { learning_contexts: LearningContext[] }
 
 function navigateDashboardActivity(event: React.MouseEvent<HTMLElement>, navigate: ReturnType<typeof useNavigate>, to: string) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.target instanceof Element && event.target.closest('a'))) return
