@@ -1,11 +1,14 @@
 from datetime import time, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -282,8 +285,17 @@ class AvailableStudentPickerTests(APITestCase):
         self.assertEqual([item['id'] for item in response.data['results']], [self.inactive.id])
 
 
+@override_settings(CACHES={
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'temporary-password-setup-tests',
+    },
+})
 class TemporaryPasswordSetupTests(APITestCase):
     def setUp(self):
+        # Database rollback does not reset DRF's IP-based throttle history.
+        cache.clear()
+        self.addCleanup(cache.clear)
         user_model = get_user_model()
         self.student = user_model.objects.create_user(
             username='internal-student-login',
@@ -348,6 +360,15 @@ class TemporaryPasswordSetupTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
+
+    def test_login_rate_limit_remains_enforced(self):
+        with patch.object(ScopedRateThrottle, 'THROTTLE_RATES', {'login': '2/minute'}):
+            responses = [self.client.post(
+                reverse('token_obtain_pair'),
+                {'username': self.student.username, 'password': 'TemporaryPass!482'},
+                format='json',
+            ) for _ in range(3)]
+        self.assertEqual([response.status_code for response in responses], [200, 200, 429])
 
     def test_number_only_student_accepts_number_and_legacy_prefixed_login(self):
         self.student.username = '130183'
