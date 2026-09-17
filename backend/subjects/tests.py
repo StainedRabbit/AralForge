@@ -465,6 +465,42 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['student'], self.student.id)
 
+    def test_roster_search_fields_are_opt_in_and_match_server_search(self):
+        schedule = self.create_schedule()
+        self.student.first_name = 'Alex'
+        self.student.middle_name = 'Marie'
+        self.student.last_name = 'Rivera'
+        self.student.email = 'alex@example.test'
+        self.student.save()
+        StudentProfile.objects.create(user=self.student, student_number='SEARCH-001')
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student, is_active=False)
+        other = get_user_model().objects.create_user(username='missing-profile', role='STUDENT')
+        ScheduleStudent.objects.create(schedule=schedule, student=other)
+        duplicate = get_user_model().objects.create_user(
+            username='duplicate-name', role='STUDENT', first_name='Alex', last_name='Rivera',
+        )
+        StudentProfile.objects.create(user=duplicate, student_number='SEARCH-002')
+        ScheduleStudent.objects.create(schedule=schedule, student=duplicate)
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-roster', args=[schedule.id])
+        ordinary = self.client.get(url)
+        self.assertNotIn('search_fields', ordinary.data['results'][0])
+        snapshot = self.client.get(url, {'include_search_fields': '1', 'limit': 100})
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual(snapshot.data['count'], 3)
+        self.assertEqual(snapshot.data['inactive_count'], 1)
+        by_student = {row['student']: row for row in snapshot.data['results']}
+        self.assertEqual(by_student[other.id]['search_fields'][-1], '')
+        for query in ('aLeX', 'Marie', 'River', 'student-api', '@example', 'SEARCH-001', 'no-match'):
+            with self.subTest(query=query):
+                expected = {row['student'] for row in snapshot.data['results']
+                            if any(query.lower() in field.lower() for field in row['search_fields'])}
+                actual = self.client.get(url, {'search': query})
+                self.assertEqual({row['student'] for row in actual.data['results']}, expected)
+        self.client.force_authenticate(self.student)
+        self.assertEqual(self.client.get(url, {'include_search_fields': '1'}).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
     def test_class_workspace_loads_only_the_requested_section(self):
         from attendance.models import AttendanceRecord, AttendanceSession
         from grades.models import GradeCategory, GradeCategoryChoices, GradeItem, StudentGradeItemScore

@@ -22,6 +22,8 @@ async function openClasses(page: Page) {
   await page.waitForURL(/\/admin(?:\/)?$/)
   await page.goto('/admin/classes')
   await expect(page.getByRole('heading', { name: 'Classes' })).toBeVisible()
+  const storageNoticeButton = page.getByRole('button', { name: 'Got it', exact: true })
+  if (await storageNoticeButton.isVisible()) await storageNoticeButton.click()
 }
 
 async function selectClass(page: Page, code: string) {
@@ -39,6 +41,10 @@ test('debounces roster search, retains rows, ignores superseded responses, and r
   const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve })
   const fastGate = new Promise<void>((resolve) => { releaseFast = resolve })
   await page.route(/\/subjects\/subject-schedules\/\d+\/roster\/.*/, async (route) => {
+    if (new URL(route.request().url()).searchParams.has('include_search_fields')) {
+      await route.fulfill({ status: 400, json: { detail: 'Background preparation unavailable.' } })
+      return
+    }
     const search = new URL(route.request().url()).searchParams.get('search') ?? ''
     searches.push(search)
     if (search === 'error' && failSearch) {
@@ -98,6 +104,154 @@ test('debounces roster search, retains rows, ignores superseded responses, and r
   await page.getByRole('button', { name: 'Retry roster' }).click()
   await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('prepares only the selected roster after first paint and searches full cached rows without network', async ({ page }) => {
+  let releaseFirst: () => void = () => {}
+  let releaseSecond: () => void = () => {}
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve })
+  const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve })
+  const requests: Array<{ background: boolean; offset: number; schedule: number }> = []
+  let blockNetwork = false
+  let blockedRequests = 0
+  let selectedId = 0
+  const students = Array.from({ length: 105 }, (_, index) => {
+    const number = String(index + 1).padStart(3, '0')
+    return {
+      id: 1000 + index, student: 2000 + index, schedule: 1,
+      student_name: `Roster Student ${number}`, student_full_name: `Roster Student ${number}`,
+      student_number: `CACHE-${number}`, email: `cache-${number}@example.test`,
+      search_fields: ['Roster', '', `Student ${number}`, `cache-${number}`, `cache-${number}@example.test`, `CACHE-${number}`],
+      is_active: index < 104, grade_summary: { prelim: '87.50' },
+      subject: 1, subject_code: 'E2E101', subject_name: 'Programming Fundamentals',
+      school_year_semester: 1, term_name: 'First Semester', schedule_display: 'E2E101 A',
+      added_at: '2026-08-04T00:00:00Z', added_by: null, deactivated_at: null,
+      deactivated_by: null, updated_at: '2026-08-04T00:00:00Z',
+    }
+  })
+  await page.route(/\/subjects\/subject-schedules\/\d+\/roster\/.*/, async (route) => {
+    const url = new URL(route.request().url())
+    const background = url.searchParams.has('include_search_fields')
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    const limit = Number(url.searchParams.get('limit') ?? 10)
+    const schedule = Number(url.pathname.match(/subject-schedules\/(\d+)/)?.[1])
+    requests.push({ background, offset, schedule })
+    selectedId ||= schedule
+    if (blockNetwork) {
+      blockedRequests += 1
+      await route.fulfill({ status: 503, json: { detail: 'Network blocked after preparation.' } })
+      return
+    }
+    if (!background && !url.searchParams.has('search')) await firstGate
+    if (background && offset === 100) await secondGate
+    const source = schedule === selectedId ? students : []
+    const status = url.searchParams.get('status')
+    const search = (url.searchParams.get('search') ?? '').toLowerCase()
+    const matches = source.filter((row) => (!status || row.is_active === (status === 'active'))
+      && (!search || row.search_fields.some((field) => field.toLowerCase().includes(search))))
+    await route.fulfill({ json: {
+      count: matches.length, total_count: source.length,
+      active_count: source.filter((row) => row.is_active).length,
+      inactive_count: source.filter((row) => !row.is_active).length,
+      next: offset + limit < matches.length ? offset + limit : null,
+      previous: offset ? Math.max(0, offset - limit) : null,
+      results: matches.slice(offset, offset + limit).map((row) => ({ ...row, schedule })),
+    } })
+  })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  selectedId = Number(new URL(page.url()).searchParams.get('schedule'))
+  await expect.poll(() => requests.length).toBeGreaterThan(0)
+  expect(requests.every((request) => !request.background)).toBe(true)
+  releaseFirst()
+  const table = page.locator('.class-roster-table')
+  const rows = table.locator('tbody tr')
+  await expect(rows).toHaveCount(10)
+  await expect.poll(() => requests.filter((request) => request.background).length).toBe(2)
+  await expect(table).toHaveAttribute('data-roster-search-ready', 'false')
+  expect(requests.every((request) => request.schedule === selectedId)).toBe(true)
+  const search = page.getByPlaceholder('Search roster by name or student number')
+  await search.fill('cache-104')
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toContainText('Roster Student 104')
+  await expect(table).toHaveAttribute('data-roster-search-ready', 'false')
+  releaseSecond()
+  await expect(table).toHaveAttribute('data-roster-search-ready', 'true')
+  blockNetwork = true
+  await search.fill('cache-104')
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toContainText('Roster Student 104')
+  await expect(rows).toContainText('87.5')
+  await search.fill('@example.test')
+  await expect(rows).toHaveCount(10)
+  await page.getByRole('button', { name: 'Load more', exact: true }).click()
+  await expect(rows).toHaveCount(20)
+  await search.clear()
+  await expect(rows).toHaveCount(10)
+  await page.getByRole('button', { name: '1 Inactive', exact: true }).click()
+  await expect(rows).toContainText('Roster Student 105')
+  await search.fill('unknown-student')
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await expect(page.getByText('Searching...', { exact: true })).toHaveCount(0)
+  expect(blockedRequests).toBe(0)
+  blockNetwork = false
+  await search.clear()
+  await page.getByRole('button', { name: '104 Active', exact: true }).click()
+  await search.fill('cache-104')
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('menuitem', { name: 'Export roster CSV' }).click()
+  const download = await downloadPromise
+  const exportedCsv = await readFile((await download.path())!, 'utf8')
+  expect(exportedCsv).toContain('CACHE-104')
+  expect(exportedCsv).not.toContain('CACHE-105')
+  await page.route('**/api/subjects/schedule-students/1103/', async (route) => {
+    students[103].is_active = false
+    await route.fulfill({ json: students[103] })
+  })
+  await rows.getByRole('button', { name: 'More actions for Roster Student 104' }).click()
+  await page.getByRole('menuitem', { name: 'Deactivate', exact: true }).click()
+  await expect(page.getByRole('button', { name: '2 Inactive', exact: true })).toBeVisible()
+  await expect(table).toHaveAttribute('data-roster-search-ready', 'true')
+  await page.getByRole('button', { name: '2 Inactive', exact: true }).click()
+  await expect(rows).toContainText('Roster Student 104')
+  await search.clear()
+  await selectClass(page, 'E2E102')
+  await expect(table).not.toContainText('Roster Student')
+})
+
+test('cancels unfinished roster preparation when switching classes', async ({ page }) => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let pendingUrl = ''
+  let finished = false
+  await page.route('**/roster/**', async (route) => {
+    if (!route.request().url().includes('include_search_fields=1') || pendingUrl) {
+      await route.continue()
+      return
+    }
+    pendingUrl = route.request().url()
+    const response = await route.fetch()
+    const body = await response.json()
+    body.results = body.results.map((row: Record<string, unknown>) => ({ ...row, student_name: 'Stale class response' }))
+    await gate
+    try {
+      await route.fulfill({ response, json: body })
+    } catch {
+      // The old class's browser request should have been cancelled.
+    } finally {
+      finished = true
+    }
+  })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  await expect.poll(() => pendingUrl).not.toBe('')
+  const cancelled = page.waitForEvent('requestfailed', (request) => request.url() === pendingUrl)
+  await selectClass(page, 'E2E102')
+  await cancelled
+  release()
+  await expect.poll(() => finished).toBe(true)
+  await expect(page.locator('.class-roster-table')).not.toContainText('Stale class response')
 })
 
 test('downloads detailed grades from roster More actions and reports failures', async ({ page }) => {

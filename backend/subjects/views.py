@@ -198,6 +198,9 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         # to the parent schedule selected by this detail action.
         schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
         self.check_object_permissions(request, schedule)
+        include_search_fields = request.query_params.get('include_search_fields') == '1'
+        if include_search_fields and not request.user.is_admin_teacher:
+            raise PermissionDenied('Only teachers and administrators can prepare roster search.')
         queryset = self.filtered_roster(schedule, request)
         totals = schedule.students.aggregate(
             total=Count('id'), active=Count('id', filter=Q(is_active=True)),
@@ -214,6 +217,12 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
             item = ScheduleStudentSerializer(enrollment).data
             item['email'] = enrollment.student.email
             item['grade_summary'] = summaries.get(enrollment.student_id, {})
+            if include_search_fields:
+                student = enrollment.student
+                item['search_fields'] = [
+                    student.first_name, student.middle_name, student.last_name,
+                    student.username, student.email, item['student_number'],
+                ]
             results.append(item)
 
         return Response({

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -139,6 +139,7 @@ type CreateStudentField = 'email' | 'first_name' | 'middle_name' | 'last_name' |
 type CreateStudentErrors = Partial<Record<CreateStudentField, string>>
 
 type RosterApiItem = ScheduleStudent & {
+  search_fields?: string[]
   email: string
   grade_summary: Partial<Record<
     'prelim' | 'midterm' | 'prefinal' | 'final' | 'overall' | 'remarks',
@@ -986,21 +987,36 @@ function ClassRoster({
   const gradeData = mergeClassWorkspace(data, gradeWorkspaceQuery.data)
   const localRoster: ScheduleStudent[] = []
   const normalizedRosterQuery = rosterQuery.trim()
+  const foregroundRosterBusy = useRef(false)
+  const [rosterPreparation, setRosterPreparation] = useState<number | null>(null)
+  const [localRosterPage, setLocalRosterPage] = useState({ key: '', limit: ROSTER_PAGE_SIZE })
+  const localRosterKey = `${selectedSchedule?.id}:${rosterStatus}:${normalizedRosterQuery}`
+  const localRosterLimit = localRosterPage.key === localRosterKey ? localRosterPage.limit : ROSTER_PAGE_SIZE
+  const rosterSnapshotQuery = useQuery({
+    queryKey: ['class-roster-search', selectedSchedule?.id],
+    enabled: Boolean(selectedSchedule && (rosterPreparation === selectedSchedule.id
+      || queryClient.getQueryData(['class-roster-search', selectedSchedule.id]))),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    retry: false,
+    queryFn: ({ signal }) => fetchRosterSnapshot(api, selectedSchedule!.id, signal, foregroundRosterBusy),
+  })
+  const rosterSnapshot = rosterSnapshotQuery.data
   const [settledRosterQuery, setSettledRosterQuery] = useState(normalizedRosterQuery)
   const requestedRosterQuery = normalizedRosterQuery ? settledRosterQuery : ''
   useEffect(() => {
-    if (normalizedRosterQuery === requestedRosterQuery) return
+    if (rosterSnapshot || normalizedRosterQuery === requestedRosterQuery) return
     void queryClient.cancelQueries({
       queryKey: ['class-roster', selectedSchedule?.id, requestedRosterQuery, rosterStatus],
       exact: true,
     })
     const timeout = window.setTimeout(() => setSettledRosterQuery(normalizedRosterQuery), 150)
     return () => window.clearTimeout(timeout)
-  }, [normalizedRosterQuery, requestedRosterQuery, queryClient, selectedSchedule?.id, rosterStatus])
+  }, [normalizedRosterQuery, requestedRosterQuery, queryClient, selectedSchedule?.id, rosterStatus, rosterSnapshot])
   const localRosterRows = localRoster.map((enrollment) => getRosterRow(enrollment, data))
   const localFilteredRows = filterRosterRows(localRosterRows, normalizedRosterQuery, rosterStatus)
   const rosterPageQuery = useInfiniteQuery<RosterApiPage>({
-    enabled: Boolean(selectedSchedule),
+    enabled: Boolean(selectedSchedule && !rosterSnapshot),
     initialPageParam: 0,
     queryKey: ['class-roster', selectedSchedule?.id, requestedRosterQuery, rosterStatus],
     staleTime: 30_000,
@@ -1021,27 +1037,59 @@ function ClassRoster({
     getNextPageParam: (lastPage) => lastPage.next ?? undefined,
   })
   const {
-    fetchNextPage: fetchNextRosterPage,
-    hasNextPage: hasNextRosterPage,
-    isFetchingNextPage: isFetchingNextRosterPage,
-    isFetchNextPageError: isNextRosterPageError,
+    fetchNextPage: fetchNextServerRosterPage,
   } = rosterPageQuery
-  const isRosterSearchUpdating = normalizedRosterQuery !== requestedRosterQuery
+  const isRosterSearchUpdating = !rosterSnapshot && (normalizedRosterQuery !== requestedRosterQuery
     || rosterPageQuery.isPlaceholderData
-    || (rosterPageQuery.isFetching && !isFetchingNextRosterPage)
+    || (rosterPageQuery.isFetching && !rosterPageQuery.isFetchingNextPage))
+  useEffect(() => {
+    foregroundRosterBusy.current = !rosterSnapshot && (rosterPageQuery.isFetching || isRosterSearchUpdating)
+  }, [rosterSnapshot, rosterPageQuery.isFetching, isRosterSearchUpdating])
+  useEffect(() => {
+    if (!selectedSchedule || !rosterPageQuery.isSuccess || rosterPageQuery.isFetching) return
+    const prepare = () => setRosterPreparation(selectedSchedule.id)
+    if (typeof window.requestIdleCallback === 'function') {
+      const idle = window.requestIdleCallback(prepare)
+      return () => window.cancelIdleCallback(idle)
+    }
+    const timeout = window.setTimeout(prepare, 250)
+    return () => window.clearTimeout(timeout)
+  }, [selectedSchedule, rosterPageQuery.isSuccess, rosterPageQuery.isFetching])
+  const snapshotMatches = useMemo(() => rosterSnapshot?.results.filter((row) => (
+    row.is_active === (rosterStatus === 'active')
+    && (!normalizedRosterQuery || row.search_fields!.some((field) => field.toLowerCase().includes(normalizedRosterQuery.toLowerCase())))
+  )), [rosterSnapshot, rosterStatus, normalizedRosterQuery])
+  const hasNextRosterPage = snapshotMatches ? snapshotMatches.length > localRosterLimit : rosterPageQuery.hasNextPage
+  const isFetchingNextRosterPage = !rosterSnapshot && rosterPageQuery.isFetchingNextPage
+  const isNextRosterPageError = !rosterSnapshot && rosterPageQuery.isFetchNextPageError
+  const fetchNextRosterPage = useCallback(() => {
+    if (rosterSnapshot) {
+      setLocalRosterPage({ key: localRosterKey, limit: localRosterLimit + ROSTER_PAGE_SIZE })
+      return
+    }
+    return fetchNextServerRosterPage().then((result) => {
+      if (result.isSuccess) setLocalRosterPage({
+        key: localRosterKey,
+        limit: result.data.pages.reduce((total, page) => total + page.results.length, 0),
+      })
+    })
+  }, [rosterSnapshot, localRosterKey, localRosterLimit, fetchNextServerRosterPage])
   const firstRosterPage = rosterPageQuery.data?.pages[0]
-  const visibleRows = rosterPageQuery.data
+  const visibleRows = snapshotMatches ? snapshotMatches.slice(0, localRosterLimit).map(apiRosterRow) : rosterPageQuery.data
     ? rosterPageQuery.data.pages.flatMap((page) => page.results.map(apiRosterRow))
     : localFilteredRows.slice(0, ROSTER_PAGE_SIZE)
-  const filteredCount = firstRosterPage?.count ?? localFilteredRows.length
-  const activeCount = firstRosterPage?.active_count
+  const filteredCount = snapshotMatches?.length ?? firstRosterPage?.count ?? localFilteredRows.length
+  const activeCount = rosterSnapshot?.active_count ?? firstRosterPage?.active_count
     ?? localRoster.filter((enrollment) => enrollment.is_active).length
-  const inactiveCount = firstRosterPage?.inactive_count
+  const inactiveCount = rosterSnapshot?.inactive_count ?? firstRosterPage?.inactive_count
     ?? localRoster.length - activeCount
-  const totalCount = firstRosterPage?.total_count ?? localRoster.length
+  const totalCount = rosterSnapshot?.total_count ?? firstRosterPage?.total_count ?? localRoster.length
 
   const refreshClassRoster = useCallback(async () => {
+    foregroundRosterBusy.current = true
+    await queryClient.cancelQueries({ queryKey: ['class-roster-search', selectedSchedule?.id] })
     await Promise.all([
+      queryClient.resetQueries({ queryKey: ['class-roster-search', selectedSchedule?.id] }),
       queryClient.invalidateQueries({ queryKey: ['class-roster', selectedSchedule?.id] }),
       queryClient.invalidateQueries({ queryKey: ['class-workspace', selectedSchedule?.id] }),
     ])
@@ -1057,10 +1105,13 @@ function ClassRoster({
   useEffect(() => {
     const target = rosterLoadMoreRef.current
     if (!target || !hasNextRosterPage || isNextRosterPageError || isRosterSearchUpdating) return
+    const scrollContainer = target.closest<HTMLElement>('.class-roster-scroll')
 
     const observer = new IntersectionObserver((entries) => {
       if (
         entries[0]?.isIntersecting
+        && scrollContainer && scrollContainer.scrollTop > 0
+        && scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 160
         && hasNextRosterPage
         && !isFetchingNextRosterPage
       ) {
@@ -1077,6 +1128,12 @@ function ClassRoster({
     isNextRosterPageError,
     isRosterSearchUpdating,
   ])
+
+  function resetRosterPaging() {
+    setLocalRosterPage({ key: '', limit: ROSTER_PAGE_SIZE })
+    const scrollContainer = rosterLoadMoreRef.current?.closest<HTMLElement>('.class-roster-scroll')
+    if (scrollContainer) scrollContainer.scrollTop = 0
+  }
 
   async function exportFilteredRoster() {
     if (!selectedSchedule || exportingRoster) return
@@ -1215,7 +1272,7 @@ function ClassRoster({
             <button
               aria-pressed={rosterStatus === 'active'}
               className={`class-roster-summary__item class-roster-summary__item--active${rosterStatus === 'active' ? ' is-selected' : ''}`}
-              onClick={() => setRosterStatus('active')}
+              onClick={() => { setRosterStatus('active'); resetRosterPaging() }}
               type="button"
             >
               <Icon name="check" />
@@ -1225,7 +1282,7 @@ function ClassRoster({
             <button
               aria-pressed={rosterStatus === 'inactive'}
               className={`class-roster-summary__item class-roster-summary__item--inactive${rosterStatus === 'inactive' ? ' is-selected' : ''}`}
-              onClick={() => setRosterStatus('inactive')}
+              onClick={() => { setRosterStatus('inactive'); resetRosterPaging() }}
               type="button"
             >
               <Icon name="minus" />
@@ -1238,6 +1295,7 @@ function ClassRoster({
             <input
               onChange={(event) => {
                 setRosterQuery(event.target.value)
+                resetRosterPaging()
                 if (!event.target.value.trim()) setSettledRosterQuery('')
               }}
               placeholder="Search roster by name or student number"
@@ -1250,7 +1308,7 @@ function ClassRoster({
 
       {rosterMessage ? <p aria-live="polite" className="admin-message">{rosterMessage}</p> : null}
       {selectedSchedule && isRosterSearchUpdating ? <p aria-live="polite" className="admin-message">Searching...</p> : null}
-      {rosterPageQuery.isError ? (
+      {!rosterSnapshot && rosterPageQuery.isError ? (
         <div className="class-roster-feedback" role="alert">
           <span>{toErrorMessage(rosterPageQuery.error)}</span>
           <button
@@ -1278,7 +1336,7 @@ function ClassRoster({
           }
         }}
       >
-        <table className="admin-table class-roster-table">
+        <table className="admin-table class-roster-table" data-roster-search-ready={Boolean(rosterSnapshot)}>
           <thead>
             <tr>
               <th>Student</th>
@@ -1310,17 +1368,17 @@ function ClassRoster({
                 <td colSpan={10}>Select a class to view and manage enrolled students.</td>
               </tr>
             ) : null}
-            {selectedSchedule && rosterPageQuery.isPending && !visibleRows.length ? (
+            {selectedSchedule && !rosterSnapshot && rosterPageQuery.isPending && !visibleRows.length ? (
               <tr>
                 <td colSpan={10}>Loading roster...</td>
               </tr>
             ) : null}
-            {selectedSchedule && !rosterPageQuery.isPending && !rosterPageQuery.isError && !isRosterSearchUpdating && !totalCount ? (
+            {selectedSchedule && (rosterSnapshot || (!rosterPageQuery.isPending && !rosterPageQuery.isError)) && !isRosterSearchUpdating && !totalCount ? (
               <tr>
                 <td colSpan={10}>No active students in this class yet. Add students to build the roster.</td>
               </tr>
             ) : null}
-            {selectedSchedule && !rosterPageQuery.isPending && !rosterPageQuery.isError && !isRosterSearchUpdating && totalCount && !visibleRows.length ? (
+            {selectedSchedule && (rosterSnapshot || (!rosterPageQuery.isPending && !rosterPageQuery.isError)) && !isRosterSearchUpdating && totalCount && !visibleRows.length ? (
               <tr>
                 <td colSpan={10}>
                   {rosterQuery.trim()
@@ -3345,6 +3403,47 @@ function buildRosterPath(
   })
   if (query) params.set('search', query)
   return `/subjects/subject-schedules/${scheduleId}/roster/?${params.toString()}`
+}
+
+async function fetchRosterSnapshot(
+  api: AuthedRequest,
+  scheduleId: number,
+  signal: AbortSignal,
+  foregroundBusy: { current: boolean },
+): Promise<RosterApiPage> {
+  const results: RosterApiItem[] = []
+  let offset: number | null = 0
+  let firstPage: RosterApiPage | undefined
+  while (offset !== null) {
+    while (foregroundBusy.current) {
+      await new Promise<void>((resolve, reject) => {
+        signal.throwIfAborted()
+        const abort = () => { window.clearTimeout(timeout); reject(signal.reason) }
+        const timeout = window.setTimeout(() => {
+          signal.removeEventListener('abort', abort)
+          resolve()
+        }, 50)
+        signal.addEventListener('abort', abort, { once: true })
+      })
+    }
+    signal.throwIfAborted()
+    const params = new URLSearchParams({ limit: '100', offset: String(offset), include_search_fields: '1' })
+    const page: RosterApiPage = await api<RosterApiPage>(
+      `/subjects/subject-schedules/${scheduleId}/roster/?${params}`, { signal },
+    )
+    firstPage ??= page
+    if (page.count !== firstPage.count || page.active_count !== firstPage.active_count
+      || page.results.some((row) => !Array.isArray(row.search_fields))) {
+      throw new Error('Roster changed while preparing search.')
+    }
+    results.push(...page.results)
+    if (page.next !== null && page.next <= offset) throw new Error('Invalid roster pagination.')
+    offset = page.next
+  }
+  if (!firstPage || results.length !== firstPage.count || new Set(results.map((row) => row.id)).size !== results.length) {
+    throw new Error('Roster search preparation was incomplete.')
+  }
+  return { ...firstPage, results, next: null, previous: null }
 }
 
 async function fetchCompleteRoster(
