@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -199,8 +199,11 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
         self.check_object_permissions(request, schedule)
         queryset = self.filtered_roster(schedule, request)
-        total_count = schedule.students.count()
-        active_count = schedule.students.filter(is_active=True).count()
+        totals = schedule.students.aggregate(
+            total=Count('id'), active=Count('id', filter=Q(is_active=True)),
+        )
+        total_count = totals['total']
+        active_count = totals['active']
         count = queryset.count()
         limit = bounded_int(request.query_params.get('limit'), default=50, maximum=100)
         offset = bounded_int(request.query_params.get('offset'), default=0)
@@ -225,7 +228,10 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def filtered_roster(schedule, request):
-        queryset = schedule.students.select_related('student__student_profile')
+        queryset = schedule.students.select_related(
+            'student__student_profile', 'schedule__subject',
+            'schedule__school_year_semester__school_year',
+        )
         enrollment_status = request.query_params.get('status', '').strip().lower()
         search = request.query_params.get('search', '').strip()
 

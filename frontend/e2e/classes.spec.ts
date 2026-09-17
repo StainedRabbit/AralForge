@@ -29,6 +29,77 @@ async function selectClass(page: Page, code: string) {
   await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
 }
 
+test('debounces roster search, retains rows, ignores superseded responses, and reuses cache', async ({ page }) => {
+  const searches: string[] = []
+  let initialRows: Array<Record<string, unknown>> = []
+  let slowFinished = false
+  let failSearch = true
+  let releaseSlow: () => void = () => {}
+  let releaseFast: () => void = () => {}
+  const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve })
+  const fastGate = new Promise<void>((resolve) => { releaseFast = resolve })
+  await page.route(/\/subjects\/subject-schedules\/\d+\/roster\/.*/, async (route) => {
+    const search = new URL(route.request().url()).searchParams.get('search') ?? ''
+    searches.push(search)
+    if (search === 'error' && failSearch) {
+      await route.fulfill({ status: 400, json: { detail: 'Search temporarily unavailable.' } })
+      return
+    }
+    const response = await route.fetch()
+    const body = await response.json()
+    if (!search) initialRows = body.results
+    if (search === 'slow') await slowGate
+    if (search === 'fast') await fastGate
+    if (search === 'slow') {
+      body.results = initialRows
+      body.count = initialRows.length
+    }
+    try {
+      await route.fulfill({ response, json: body })
+    } catch {
+      // A superseded search may already have been aborted by the browser.
+    } finally {
+      if (search === 'slow') slowFinished = true
+    }
+  })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  const rows = page.locator('.class-roster-table tbody tr')
+  const search = page.getByPlaceholder('Search roster by name or student number')
+  await expect(rows).toHaveCount(2)
+  await search.pressSequentially('slow', { delay: 15 })
+  await expect.poll(() => searches.includes('slow')).toBe(true)
+  expect(searches).not.toContain('s')
+  expect(searches).not.toContain('sl')
+  expect(searches).not.toContain('slo')
+  await expect(rows).toHaveCount(2)
+  await expect(page.getByText('Searching...', { exact: true })).toBeVisible()
+  await expect(page.getByText('No roster matches found for this search.')).toHaveCount(0)
+  await search.fill('fast')
+  await expect.poll(() => searches.includes('fast')).toBe(true)
+  await expect(rows).toHaveCount(2)
+  releaseFast()
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  releaseSlow()
+  await expect.poll(() => slowFinished).toBe(true)
+  await expect(search).toHaveValue('fast')
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await expect(page.getByText('Searching...', { exact: true })).toHaveCount(0)
+  const requestCount = searches.length
+  await search.clear()
+  await expect(rows).toHaveCount(2)
+  await search.fill('fast')
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  expect(searches).toHaveLength(requestCount)
+  await search.fill('error')
+  await expect(page.getByRole('alert')).toContainText('Search temporarily unavailable.')
+  await expect(page.getByText('No roster matches found for this search.')).toHaveCount(0)
+  failSearch = false
+  await page.getByRole('button', { name: 'Retry roster' }).click()
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('downloads detailed grades from roster More actions and reports failures', async ({ page }) => {
   let fail = false
   let requests = 0

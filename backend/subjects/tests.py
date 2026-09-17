@@ -415,6 +415,42 @@ class SubjectScheduleApiTests(APITestCase):
         second_ids = {item['id'] for item in second_page.data['results']}
         self.assertFalse(first_ids & second_ids)
 
+    def test_roster_query_count_does_not_grow_with_page_size(self):
+        from decimal import Decimal
+        from grades.models import PeriodGrade
+
+        schedule = self.create_schedule()
+        StudentProfile.objects.create(user=self.student, student_number='QUERY-001')
+        self.student.first_name = 'Alex'
+        self.student.last_name = 'Rivera'
+        self.student.save(update_fields=['first_name', 'last_name'])
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        PeriodGrade.objects.create(
+            schedule=schedule, subject=self.subject, student=self.student,
+            grading_period='PRELIM', raw_score=Decimal('87.50'),
+        )
+        for index in range(9):
+            student = get_user_model().objects.create_user(
+                username=f'query-student-{index}', role=get_user_model().Role.STUDENT,
+                first_name='Zoe', last_name=f'Test{index}',
+            )
+            ScheduleStudent.objects.create(schedule=schedule, student=student)
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-roster', args=[schedule.id])
+        with CaptureQueriesContext(connection) as small_queries:
+            small = self.client.get(url, {'limit': 1, 'status': 'active'})
+        with CaptureQueriesContext(connection) as large_queries:
+            large = self.client.get(url, {'limit': 10, 'status': 'active'})
+        self.assertEqual(small.status_code, status.HTTP_200_OK)
+        self.assertEqual(large.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(large.data['results']), 10)
+        self.assertEqual(len(small_queries), len(large_queries))
+        self.assertEqual(small.data['results'][0], large.data['results'][0])
+        row = large.data['results'][0]
+        self.assertEqual(row['student_full_name'], self.student.get_full_name())
+        self.assertEqual(row['student_number'], self.student.student_profile.student_number)
+        self.assertEqual(row['grade_summary'], {'prelim': Decimal('87.50')})
+
     def test_roster_filters_do_not_filter_the_parent_schedule(self):
         schedule = self.create_schedule()
         self.student.first_name = 'Alex'
