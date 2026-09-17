@@ -11,7 +11,7 @@ async function signIn(page: Page, username: string) {
   await page.getByLabel('Student number').fill(username)
   await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden()
+  await expect(page.locator('.app-shell')).toBeVisible()
 }
 
 async function expectNoDocumentOverflow(page: Page) {
@@ -103,6 +103,13 @@ test('teacher mobile shell maps nested routes and exposes every secondary area',
 })
 
 test('student Grades stays within phone viewports without gamification panels', async ({ page }) => {
+  // Keep login pending long enough to catch helpers that mistake the button's
+  // "Please wait..." label for a completed sign-in and navigate away too early.
+  await page.route('**/api/auth/token/', async (route) => {
+    const response = await route.fetch()
+    await new Promise((resolve) => setTimeout(resolve, 750))
+    await route.fulfill({ response })
+  })
   await signIn(page, 'E2E-001')
   await expect(page.getByText('Total points', { exact: true })).toHaveCount(0)
   await page.goto('/grades')
