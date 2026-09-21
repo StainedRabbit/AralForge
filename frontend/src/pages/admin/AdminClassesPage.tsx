@@ -1810,14 +1810,10 @@ function StudentQrCarouselDialog({
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
-  const [imageUrl, setImageUrl] = useState('')
-  const [imageError, setImageError] = useState('')
+  const [qrImage, setQrImage] = useState({ error: '', payload: '', url: '' })
   const panelRef = useRef<HTMLDivElement>(null)
   const card = cards[index]
-
-  useEffect(() => {
-    setIndex(0)
-  }, [cards])
+  const payload = card ? studentQrPayload(card) : ''
 
   useEffect(() => {
     panelRef.current?.focus()
@@ -1843,23 +1839,28 @@ function StudentQrCarouselDialog({
 
   useEffect(() => {
     let cancelled = false
-    setImageUrl('')
-    setImageError('')
     if (!card) return () => { cancelled = true }
 
-    void QRCode.toDataURL(studentQrPayload(card), {
+    void QRCode.toDataURL(payload, {
       color: { dark: '#0f172a', light: '#ffffff' },
       errorCorrectionLevel: 'M',
       margin: 2,
       width: 480,
     }).then((nextImageUrl) => {
-      if (!cancelled) setImageUrl(nextImageUrl)
+      if (!cancelled) setQrImage({ error: '', payload, url: nextImageUrl })
     }).catch(() => {
-      if (!cancelled) setImageError('The QR code could not be generated.')
+      if (!cancelled) setQrImage({
+        error: 'The QR code could not be generated.',
+        payload,
+        url: '',
+      })
     })
 
     return () => { cancelled = true }
-  }, [card])
+  }, [card, payload])
+
+  const imageUrl = qrImage.payload === payload ? qrImage.url : ''
+  const imageError = qrImage.payload === payload ? qrImage.error : ''
 
   return (
     <div aria-labelledby="student-qr-carousel-title" aria-modal="true" className="attendance-modal" role="dialog">
