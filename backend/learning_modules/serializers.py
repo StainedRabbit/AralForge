@@ -447,6 +447,7 @@ class ModuleLessonSerializer(serializers.ModelSerializer):
             'topic',
             'title',
             'order',
+            'grading_period',
             'learning_targets',
             'before_you_start',
             'short_discussion',

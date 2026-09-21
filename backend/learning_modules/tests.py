@@ -82,6 +82,7 @@ class ModuleMarkdownExportApiTests(APITestCase):
             topic=self.topic,
             title='Draft Lesson',
             order=3,
+            grading_period=GradingPeriod.PRELIM,
             learning_targets='Write a backup.',
             answer_key='The teacher-only answer.',
             is_published=False,
@@ -198,6 +199,56 @@ class ModuleMarkdownExportApiTests(APITestCase):
             f'/api/modules/modules/{self.module.id}/download_markdown/',
         )
         self.assertEqual(student.status_code, 403)
+
+    def test_teacher_downloads_only_selected_period_lessons(self):
+        other_lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Midterm Lesson',
+            order=4,
+            grading_period=GradingPeriod.MIDTERM,
+            learning_targets='This belongs to midterm.',
+        )
+        ModuleActivity.objects.create(
+            lesson=other_lesson,
+            title='Midterm Quiz',
+            points_possible=Decimal('5.00'),
+            grading_period=GradingPeriod.MIDTERM,
+        )
+        self.client.force_authenticate(self.teacher)
+
+        response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/download_markdown/?period=PRELIM',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="markdown-backup-prelim.md"',
+        )
+        markdown = response.content.decode('utf-8')
+        self.assertIn('## Topic 1: Draft Foundations', markdown)
+        self.assertIn('### Lesson 1: Draft Lesson', markdown)
+        self.assertIn('Draft Quiz', markdown)
+        self.assertNotIn('Topic overview.', markdown)
+        self.assertNotIn('Midterm Lesson', markdown)
+        self.assertNotIn('Midterm Quiz', markdown)
+
+    def test_period_download_handles_empty_and_invalid_periods(self):
+        self.client.force_authenticate(self.teacher)
+
+        empty_response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/download_markdown/?period=FINAL',
+        )
+        invalid_response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/download_markdown/?period=QUARTER',
+        )
+
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertIn(
+            'No lessons are assigned to this grading period.',
+            empty_response.content.decode('utf-8'),
+        )
+        self.assertEqual(invalid_response.status_code, 400)
 
 
 class ModuleAccessApiTests(APITestCase):

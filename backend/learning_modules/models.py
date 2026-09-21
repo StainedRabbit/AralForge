@@ -175,6 +175,17 @@ class ModuleLesson(models.Model):
     )
     title = models.CharField(max_length=180)
     order = models.PositiveIntegerField(default=0)
+    grading_period = models.CharField(
+        max_length=20,
+        choices=(
+            ('PRELIM', 'Prelim'),
+            ('MIDTERM', 'Midterm'),
+            ('PREFINAL', 'Prefinal'),
+            ('FINAL', 'Final'),
+        ),
+        null=True,
+        blank=True,
+    )
     learning_targets = models.TextField(blank=True)
     before_you_start = models.TextField(blank=True)
     short_discussion = models.TextField(blank=True)

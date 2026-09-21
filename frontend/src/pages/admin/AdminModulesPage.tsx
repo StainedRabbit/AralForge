@@ -1371,12 +1371,14 @@ function ModuleManageMenu({
   const [downloadingMarkdown, setDownloadingMarkdown] = useState(false)
   const [markdownMessage, setMarkdownMessage] = useState('')
 
-  async function downloadModuleMarkdown() {
+  async function downloadModuleMarkdown(period?: 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL') {
     setDownloadingMarkdown(true)
     setMarkdownMessage('')
     try {
-      const blob = await api<Blob>(`/modules/modules/${module.id}/download_markdown/`)
-      downloadBlob(blob, `${slugify(module.slug || module.title) || `module-${module.id}`}.md`)
+      const suffix = period ? `-${period.toLowerCase()}` : ''
+      const query = period ? `?period=${period}` : ''
+      const blob = await api<Blob>(`/modules/modules/${module.id}/download_markdown/${query}`)
+      downloadBlob(blob, `${slugify(module.slug || module.title) || `module-${module.id}`}${suffix}.md`)
     } catch (caughtError) {
       setMarkdownMessage(toErrorMessage(caughtError) || 'The module Markdown could not be downloaded.')
     } finally {
@@ -1399,10 +1401,20 @@ function ModuleManageMenu({
           <Icon name="upload" />
           <span>Import Outline MD</span>
         </button>
-        <button disabled={downloadingMarkdown} onClick={() => void downloadModuleMarkdown()} type="button">
-          <Icon name="arrow-down" />
-          <span>{downloadingMarkdown ? 'Downloading Module MD...' : 'Download Module MD'}</span>
-        </button>
+        <details className="action-menu__submenu">
+          <summary>
+            <Icon name="arrow-down" />
+            <span>{downloadingMarkdown ? 'Downloading Module MD...' : 'Download MD'}</span>
+          </summary>
+          <div className="action-menu__submenu-content">
+            <button disabled={downloadingMarkdown} onClick={() => void downloadModuleMarkdown()} type="button">All</button>
+            {(['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const).map((period) => (
+              <button disabled={downloadingMarkdown} key={period} onClick={() => void downloadModuleMarkdown(period)} type="button">
+                {period.charAt(0) + period.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </details>
         {markdownMessage ? <p className="admin-message">{markdownMessage}</p> : null}
         <Link to={`/admin/modules/${module.id}/topics/new`}>
           <Icon name="plus" />

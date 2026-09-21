@@ -36,6 +36,7 @@ import { subjectName } from '../../utils/modules'
 type LessonDraft = {
   before_you_start: string
   challenge_task: string
+  grading_period: '' | 'PRELIM' | 'MIDTERM' | 'PREFINAL' | 'FINAL'
   is_published: boolean
   learning_targets: string
   lets_practice: string
@@ -599,6 +600,19 @@ function AdminLessonEditorForm({
                     type="number"
                     value={draft.order}
                   />
+                </label>
+                <label className="admin-field">
+                  <span>Grading Period</span>
+                  <select
+                    onChange={(event) => updateDraft('grading_period', event.target.value as LessonDraft['grading_period'])}
+                    value={draft.grading_period}
+                  >
+                    <option value="">Unassigned</option>
+                    <option value="PRELIM">Prelim</option>
+                    <option value="MIDTERM">Midterm</option>
+                    <option value="PREFINAL">Prefinal</option>
+                    <option value="FINAL">Final</option>
+                  </select>
                 </label>
                 <label className="admin-check">
                   <input
@@ -2039,6 +2053,7 @@ function createLessonDraft(topicId: string, lesson?: ModuleLesson): LessonDraft 
   return {
     before_you_start: lesson?.before_you_start ?? '',
     challenge_task: lesson?.challenge_task ?? '',
+    grading_period: lesson?.grading_period ?? '',
     is_published: lesson?.is_published ?? false,
     learning_targets: lesson?.learning_targets ?? '',
     lets_practice: lesson?.lets_practice ?? '',
@@ -2059,6 +2074,7 @@ function buildLessonPayload(draft: LessonDraft) {
     common_misconceptions: '',
     expected_outputs: '',
     guided_examples: '',
+    grading_period: draft.grading_period || null,
     is_published: draft.is_published,
     learning_targets: draft.learning_targets,
     lets_practice: draft.lets_practice,

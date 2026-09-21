@@ -59,8 +59,11 @@ LESSON_TEXT_FIELDS = (
 )
 
 
-def module_markdown(module):
+def module_markdown(module, *, period=None):
     """Return a complete, deterministic Markdown backup for a module."""
+    if period:
+        return _period_module_markdown(module, period)
+
     topics = list(ModuleTopic.objects.filter(module=module).order_by('order', 'id'))
     lessons = list(ModuleLesson.objects.filter(
         topic__module=module,
@@ -102,6 +105,53 @@ def module_markdown(module):
             _append_lesson_examples(lines, examples_by_lesson[lesson.id], level=4)
             _append_lesson_assets(lines, assets_by_lesson[lesson.id], level=4)
             _append_activities(lines, activities_by_location[(topic.id, lesson.id)], level=4)
+
+    return '\n'.join(lines).rstrip() + '\n'
+
+
+def _period_module_markdown(module, period):
+    """Return lessons assigned to one grading period, grouped by topic title."""
+    lessons = list(ModuleLesson.objects.filter(
+        topic__module=module,
+        grading_period=period,
+    ).select_related('topic').order_by('topic__order', 'topic_id', 'order', 'id'))
+    lesson_ids = [lesson.id for lesson in lessons]
+    examples_by_lesson = _group_by_lesson(ModuleLessonExample.objects.filter(
+        lesson_id__in=lesson_ids,
+    ).order_by('lesson_id', 'order', 'id'))
+    assets_by_lesson = _group_by_lesson(ModuleLessonAsset.objects.filter(
+        lesson_id__in=lesson_ids,
+    ).order_by('lesson_id', 'id'))
+    activities_by_lesson = _group_by_lesson(ModuleActivity.objects.filter(
+        lesson_id__in=lesson_ids,
+        grading_period=period,
+    ).prefetch_related(
+        'questions__choices',
+        'questions__matching_pairs',
+    ).order_by('lesson__topic__order', 'lesson__topic_id', 'lesson__order', 'lesson_id', 'order', 'id'))
+
+    lines = [f'# {module.title}', '']
+    _append_status(lines, 'Published', module.is_published)
+    _append_text_fields(lines, MODULE_TEXT_FIELDS, module, level=2)
+
+    if not lessons:
+        lines.extend((f'## {period.title()} Lessons', '', 'No lessons are assigned to this grading period.', ''))
+        return '\n'.join(lines).rstrip() + '\n'
+
+    lessons_by_topic = defaultdict(list)
+    for lesson in lessons:
+        lessons_by_topic[lesson.topic_id].append(lesson)
+
+    for topic_index, topic_id in enumerate(lessons_by_topic, start=1):
+        topic_lessons = lessons_by_topic[topic_id]
+        lines.extend((f'## Topic {topic_index}: {topic_lessons[0].topic.title}', ''))
+        for lesson_index, lesson in enumerate(topic_lessons, start=1):
+            lines.extend((f'### Lesson {lesson_index}: {lesson.title}', ''))
+            _append_status(lines, 'Published', lesson.is_published)
+            _append_text_fields(lines, LESSON_TEXT_FIELDS, lesson, level=4)
+            _append_lesson_examples(lines, examples_by_lesson[lesson.id], level=4)
+            _append_lesson_assets(lines, assets_by_lesson[lesson.id], level=4)
+            _append_activities(lines, activities_by_lesson[lesson.id], level=4)
 
     return '\n'.join(lines).rstrip() + '\n'
 

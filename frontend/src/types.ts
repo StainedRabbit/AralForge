@@ -275,6 +275,7 @@ export type ModuleLesson = {
   topic: number
   title: string
   order: number
+  grading_period: GradingPeriod | null
   learning_targets: string
   before_you_start: string
   short_discussion: string

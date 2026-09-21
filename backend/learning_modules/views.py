@@ -385,8 +385,16 @@ class ModuleViewSet(viewsets.ModelViewSet):
     def download_markdown(self, request, pk=None):
         module = self.get_object()
         filename = slugify(module.slug or module.title) or f'module-{module.id}'
+        period = request.query_params.get('period', '').strip().upper()
+        valid_periods = set(ModuleActivity.GradingPeriod.values)
+        if period and period not in valid_periods:
+            raise serializers.ValidationError({
+                'period': 'Select a valid grading period.',
+            })
+        if period:
+            filename = f'{filename}-{period.lower()}'
         response_ = HttpResponse(
-            module_markdown(module),
+            module_markdown(module, period=period or None),
             content_type='text/markdown; charset=utf-8',
         )
         response_['Content-Disposition'] = f'attachment; filename="{filename}.md"'
