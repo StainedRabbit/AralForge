@@ -568,8 +568,9 @@ test('teacher downloads the selected module as Markdown', async ({ page }) => {
   const manageMenu = page.locator('summary').filter({ hasText: 'Manage' })
   await manageMenu.click()
 
+  await page.getByText('Download MD', { exact: true }).click()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Download Module MD' }).click()
+  await page.getByRole('button', { name: 'All', exact: true }).click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toMatch(/\.md$/)
   const downloadPath = await download.path()

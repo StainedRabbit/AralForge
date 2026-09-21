@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import QRCode from 'qrcode'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { ApiError } from '../../api'
 import { Icon } from '../../components/Icon'
@@ -159,6 +160,11 @@ type RosterRowData = {
   grades: PrimaryGradeSummary
   studentName: string
   studentFullName?: string
+  studentNumber: string
+}
+
+type StudentQrCard = {
+  name: string
   studentNumber: string
 }
 
@@ -956,8 +962,15 @@ function ClassRoster({
   const [rosterStatus, setRosterStatus] = useState<'active' | 'inactive'>('active')
   const [rosterMessage, setRosterMessage] = useState('')
   const [exportingRoster, setExportingRoster] = useState(false)
+  const [isQrCarouselOpen, setIsQrCarouselOpen] = useState(false)
+  const [isQrCarouselLoading, setIsQrCarouselLoading] = useState(false)
+  const [qrCarouselError, setQrCarouselError] = useState('')
+  const [qrCards, setQrCards] = useState<StudentQrCard[]>([])
+  const [qrSkippedCount, setQrSkippedCount] = useState(0)
   const [gradeRow, setGradeRow] = useState<RosterRowData | null>(null)
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
+  const qrTriggerRef = useRef<HTMLButtonElement>(null)
+  const qrRequestIdRef = useRef(0)
   const attendanceWorkspaceQuery = useQuery({
     queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
     queryFn: ({ signal }) => api<ClassWorkspace>(
@@ -1177,6 +1190,49 @@ function ClassRoster({
     }
   }
 
+  function showStudentQrCodes() {
+    if (!selectedSchedule || isQrCarouselLoading) return
+    const requestId = qrRequestIdRef.current + 1
+    qrRequestIdRef.current = requestId
+
+    setIsQrCarouselOpen(true)
+    setIsQrCarouselLoading(true)
+    setQrCarouselError('')
+    setQrCards([])
+    setQrSkippedCount(0)
+
+    void fetchCompleteRoster(api, selectedSchedule.id, 'active', '')
+      .then((rows) => {
+        if (qrRequestIdRef.current !== requestId) return
+        const cards = rows.flatMap((row) => {
+          const studentNumber = row.enrollment.student_number.trim()
+          if (!studentNumber) return []
+          return [{
+            name: row.studentFullName || row.studentName,
+            studentNumber,
+          }]
+        })
+        setQrCards(cards)
+        setQrSkippedCount(rows.length - cards.length)
+      })
+      .catch((caughtError) => {
+        if (qrRequestIdRef.current === requestId) setQrCarouselError(toErrorMessage(caughtError))
+      })
+      .finally(() => {
+        if (qrRequestIdRef.current === requestId) setIsQrCarouselLoading(false)
+      })
+  }
+
+  function closeStudentQrCodes() {
+    qrRequestIdRef.current += 1
+    setIsQrCarouselOpen(false)
+    setIsQrCarouselLoading(false)
+    setQrCarouselError('')
+    setQrCards([])
+    setQrSkippedCount(0)
+    window.requestAnimationFrame(() => qrTriggerRef.current?.focus())
+  }
+
   const classModules = selectedSchedule
     ? modulesForSubject(data.modules, selectedSchedule.subject)
     : []
@@ -1259,6 +1315,9 @@ function ClassRoster({
               moduleProgressTo={moduleProgressUrl}
               onExport={() => void exportFilteredRoster()}
               onExportDetailed={() => void exportDetailedGrades()}
+              onShowStudentQrs={showStudentQrCodes}
+              qrDisabled={!selectedSchedule?.is_active || !activeCount || isQrCarouselLoading}
+              qrTriggerRef={qrTriggerRef}
             />
           </div>
         }
@@ -1467,6 +1526,16 @@ function ClassRoster({
         />
       ) : null}
 
+      {isQrCarouselOpen ? (
+        <StudentQrCarouselDialog
+          cards={qrCards}
+          error={qrCarouselError}
+          loading={isQrCarouselLoading}
+          skippedCount={qrSkippedCount}
+          onClose={closeStudentQrCodes}
+        />
+      ) : null}
+
       {selectedSchedule && gradeRow && gradeWorkspaceQuery.isPending ? (
         <p aria-live="polite" className="admin-message">Loading grade details...</p>
       ) : null}
@@ -1581,6 +1650,9 @@ function RosterActionsMenu({
   moduleProgressTo,
   onExport,
   onExportDetailed,
+  onShowStudentQrs,
+  qrDisabled,
+  qrTriggerRef,
 }: {
   attendanceReportsTo: string | null
   exportDisabled: boolean
@@ -1588,6 +1660,9 @@ function RosterActionsMenu({
   moduleProgressTo: string | null
   onExport: () => void
   onExportDetailed: () => void
+  onShowStudentQrs: () => void
+  qrDisabled: boolean
+  qrTriggerRef: RefObject<HTMLButtonElement | null>
 }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1679,6 +1754,19 @@ function RosterActionsMenu({
             <Icon name="file" />
             <span>Export detailed grades CSV</span>
           </button>
+          <button
+            disabled={qrDisabled}
+            onClick={() => {
+              onShowStudentQrs()
+              closeMenu()
+            }}
+            ref={qrTriggerRef}
+            role="menuitem"
+            type="button"
+          >
+            <Icon name="code" />
+            <span>Show student QR codes</span>
+          </button>
           {gradebookTo ? (
             <Link onClick={closeMenu} role="menuitem" to={gradebookTo}>
               <Icon name="grade" />
@@ -1706,6 +1794,125 @@ function RosterActionsMenu({
       ) : null}
     </div>
   )
+}
+
+function StudentQrCarouselDialog({
+  cards,
+  error,
+  loading,
+  skippedCount,
+  onClose,
+}: {
+  cards: StudentQrCard[]
+  error: string
+  loading: boolean
+  skippedCount: number
+  onClose: () => void
+}) {
+  const [index, setIndex] = useState(0)
+  const [imageUrl, setImageUrl] = useState('')
+  const [imageError, setImageError] = useState('')
+  const panelRef = useRef<HTMLDivElement>(null)
+  const card = cards[index]
+
+  useEffect(() => {
+    setIndex(0)
+  }, [cards])
+
+  useEffect(() => {
+    panelRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      } else if (card && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        setIndex((current) => Math.max(0, current - 1))
+      } else if (card && event.key === 'ArrowRight') {
+        event.preventDefault()
+        setIndex((current) => Math.min(cards.length - 1, current + 1))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [card, cards.length, onClose])
+
+  useEffect(() => {
+    let cancelled = false
+    setImageUrl('')
+    setImageError('')
+    if (!card) return () => { cancelled = true }
+
+    void QRCode.toDataURL(studentQrPayload(card), {
+      color: { dark: '#0f172a', light: '#ffffff' },
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 480,
+    }).then((nextImageUrl) => {
+      if (!cancelled) setImageUrl(nextImageUrl)
+    }).catch(() => {
+      if (!cancelled) setImageError('The QR code could not be generated.')
+    })
+
+    return () => { cancelled = true }
+  }, [card])
+
+  return (
+    <div aria-labelledby="student-qr-carousel-title" aria-modal="true" className="attendance-modal" role="dialog">
+      <button aria-label="Close student QR codes" className="attendance-modal__backdrop" onClick={onClose} type="button" />
+      <div className="attendance-modal__panel student-qr-carousel" ref={panelRef} tabIndex={-1}>
+        <div className="attendance-modal__header">
+          <div>
+            <strong id="student-qr-carousel-title">Student QR codes</strong>
+            <span>Active roster only</span>
+          </div>
+          <button aria-label="Close student QR codes" className="button button--secondary button--compact" onClick={onClose} type="button">
+            <Icon name="close" />
+          </button>
+        </div>
+
+        {loading ? <p aria-live="polite" className="admin-message">Loading active roster QR codes...</p> : null}
+        {error ? <p className="admin-message" role="alert">Could not load student QR codes: {error}</p> : null}
+        {!loading && !error && !cards.length ? (
+          <div className="student-qr-carousel__empty">
+            <strong>No student QR codes available</strong>
+            <span>Every active student in this class is missing a student number.</span>
+          </div>
+        ) : null}
+        {!loading && !error && card ? (
+          <>
+            {skippedCount ? <p className="student-qr-carousel__notice">{skippedCount} active student{skippedCount === 1 ? '' : 's'} without a student number {skippedCount === 1 ? 'was' : 'were'} skipped.</p> : null}
+            <section aria-live="polite" className="student-qr-carousel__card">
+              <span className="student-qr-carousel__position">{index + 1} of {cards.length}</span>
+              <div className="student-qr-carousel__image">
+                {imageUrl ? <img alt={`QR code for ${card.name}`} src={imageUrl} /> : <span>{imageError || 'Generating QR code...'}</span>}
+              </div>
+              <strong>{card.name}</strong>
+              <span>{card.studentNumber}</span>
+            </section>
+            <div className="student-qr-carousel__actions">
+              <button className="button button--secondary" disabled={index === 0} onClick={() => setIndex((current) => current - 1)} type="button">
+                <Icon name="arrow-left" />
+                <span>Previous</span>
+              </button>
+              <button className="button button--primary" disabled={index === cards.length - 1} onClick={() => setIndex((current) => current + 1)} type="button">
+                <span>Next</span>
+                <Icon name="arrow-right" />
+              </button>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function studentQrPayload(card: StudentQrCard) {
+  return `AralForge Student\nName: ${card.name}\nStudent Number: ${card.studentNumber}`
 }
 
 function RosterRow({
