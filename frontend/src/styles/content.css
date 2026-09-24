@@ -1920,9 +1920,6 @@ button.module-row {
   }
 
   .activity-question-navigator {
-    position: sticky;
-    z-index: 4;
-    top: 82px;
     display: flex;
     gap: 8px;
     overflow-x: auto;
