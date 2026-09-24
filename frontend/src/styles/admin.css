@@ -2915,6 +2915,70 @@ a.teacher-recent-item:focus-visible {
   margin-bottom: 0;
 }
 
+.logout-confirmation {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.logout-confirmation__backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.logout-confirmation__panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 20px;
+  width: min(440px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.logout-confirmation__panel .eyebrow,
+.logout-confirmation__panel h2 {
+  margin: 0;
+}
+
+.logout-confirmation__panel h2 {
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.logout-confirmation__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .logout-confirmation__panel {
+    padding: 20px;
+  }
+
+  .logout-confirmation__actions {
+    flex-direction: column-reverse;
+  }
+
+  .logout-confirmation__actions .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .student-qr-carousel {
   width: min(520px, 100%);
   text-align: center;

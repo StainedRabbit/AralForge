@@ -18,7 +18,11 @@ function App() {
   const [sessionRestoreError, setSessionRestoreError] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [logoutError, setLogoutError] = useState(false)
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false)
   const operationVersion = useRef(0)
+  const logoutCancelRef = useRef<HTMLButtonElement>(null)
+  const logoutTriggerRef = useRef<HTMLElement | null>(null)
+  const logoutDialogRef = useRef<HTMLDivElement>(null)
 
   const restoreSession = useCallback(() => {
     const version = ++operationVersion.current
@@ -84,7 +88,7 @@ function App() {
 
   useEffect(() => subscribeToSignOut(handleSessionExpired), [handleSessionExpired])
 
-  const handleLogout = useCallback(() => {
+  const performLogout = useCallback(() => {
     handleSessionExpired()
     const version = operationVersion.current
     setRestoring(true)
@@ -95,6 +99,52 @@ function App() {
       })
       .finally(() => { if (version === operationVersion.current) setRestoring(false) })
   }, [handleSessionExpired])
+
+  const handleLogout = useCallback(() => {
+    logoutTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setLogoutConfirmationOpen(true)
+  }, [])
+
+  const cancelLogout = useCallback(() => {
+    setLogoutConfirmationOpen(false)
+    window.requestAnimationFrame(() => logoutTriggerRef.current?.focus())
+  }, [])
+
+  const confirmLogout = useCallback(() => {
+    setLogoutConfirmationOpen(false)
+    performLogout()
+  }, [performLogout])
+
+  useEffect(() => {
+    if (!logoutConfirmationOpen) return
+    const previousOverflow = document.body.style.overflow
+    logoutCancelRef.current?.focus()
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        cancelLogout()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const controls = logoutDialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])')
+      if (!controls?.length) return
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleDialogKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleDialogKeyDown)
+    }
+  }, [cancelLogout, logoutConfirmationOpen])
 
   return (
     <BrowserRouter>
@@ -111,11 +161,24 @@ function App() {
                 onSessionExpired={handleSessionExpired}
               />
             ) : sessionRestoreError || logoutError ? (
-              <SessionRestoreStatus busy={restoring} logoutError={logoutError} onRetry={logoutError ? handleLogout : restoreSession} onSignIn={handleSessionExpired} />
+              <SessionRestoreStatus busy={restoring} logoutError={logoutError} onRetry={logoutError ? performLogout : restoreSession} onSignIn={handleSessionExpired} />
             ) : <LoginPage onLogin={handleLogin} />}
           />
         </Routes>
       </Suspense>
+      {logoutConfirmationOpen ? <div aria-labelledby="logout-confirmation-title" aria-modal="true" className="logout-confirmation" role="dialog">
+        <button aria-label="Cancel sign out" className="logout-confirmation__backdrop" onClick={cancelLogout} type="button" />
+        <div className="logout-confirmation__panel" ref={logoutDialogRef}>
+          <div>
+            <p className="eyebrow">Sign out</p>
+            <h2 id="logout-confirmation-title">Are you sure you want to sign out?</h2>
+          </div>
+          <div className="logout-confirmation__actions">
+            <button className="button button--secondary" onClick={cancelLogout} ref={logoutCancelRef} type="button">Cancel</button>
+            <button className="button button--primary" onClick={confirmLogout} type="button">Sign out</button>
+          </div>
+        </div>
+      </div> : null}
     </BrowserRouter>
   )
 }
