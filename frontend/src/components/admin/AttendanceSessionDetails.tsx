@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, User } from '../../types'
 import { numeric, percent, toErrorMessage } from '../../utils/format'
@@ -24,7 +24,7 @@ export function AttendanceSessionDetails({ api, data, refresh, session }: {
   const records = data.attendanceRecords.filter((record) => record.session === session.id)
   const recordsByStudent = new Map(records.map((record) => [record.student, record]))
   const students = historyStudents(data, session, records)
-  const filteredStudents = useMemo(() => {
+  const filteredStudents = (() => {
     const normalized = studentQuery.trim().toLocaleLowerCase()
     if (!normalized) return students
     return students.filter((student) => {
@@ -32,15 +32,15 @@ export function AttendanceSessionDetails({ api, data, refresh, session }: {
       return `${student.first_name} ${student.middle_name ?? ''} ${student.last_name} ${student.display_name ?? ''} ${student.full_name ?? ''} ${profile?.student_number ?? ''}`
         .toLocaleLowerCase().includes(normalized)
     })
-  }, [data.profiles, students, studentQuery])
-  const alphabetGroups = useMemo(() => {
+  })()
+  const alphabetGroups = (() => {
     const groups = new Map<string, User[]>()
     filteredStudents.forEach((student) => {
       const letter = studentLetter(student)
       groups.set(letter, [...(groups.get(letter) ?? []), student])
     })
     return groups
-  }, [filteredStudents])
+  })()
   const alphabet = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
   const summary = summarizeAttendance(records)
 
