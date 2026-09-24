@@ -811,23 +811,6 @@ function StudentLessonReader({
     lessonIndex >= 0 && lessonIndex < publishedLessons.length - 1
       ? publishedLessons[lessonIndex + 1]
       : null
-  const lessonPositionLabel = `Lesson ${lessonIndex + 1} of ${publishedLessons.length}`
-  const completionStatusLabel = completed
-    ? 'Completed'
-    : completionBlocked
-      ? 'Quiz needed'
-      : startedLessonIds.has(lesson.id)
-        ? 'In progress'
-        : 'Ready to start'
-  const nextActionLabel = completed
-    ? nextLesson
-      ? 'Next Lesson'
-      : 'Review Module Contents'
-    : completionBlocked
-      ? 'Go to Quiz'
-      : mainActivityReviewUnlocked && challengeSection
-        ? 'Go to Challenge'
-        : 'Mark Complete'
   useEffect(() => {
     window.requestAnimationFrame(() => {
       lessonHeadingRef.current?.scrollIntoView({
@@ -838,29 +821,6 @@ function StudentLessonReader({
       })
     })
   }, [lesson.id])
-
-  function runNextAction() {
-    if (completed) {
-      if (nextLesson) {
-        onSelectLesson(nextLesson)
-      } else {
-        onOpenContents()
-      }
-      return
-    }
-
-    if (completionBlocked) {
-      scrollToStudentSection('main-activity')
-      return
-    }
-
-    if (mainActivityReviewUnlocked && challengeSection) {
-      scrollToStudentSection(lessonSectionId(challengeSection.title))
-      return
-    }
-
-    void onToggleComplete()
-  }
 
   const mainActivityLessonBlock = mainActivity ? (
     <>
@@ -897,22 +857,6 @@ function StudentLessonReader({
 
   return (
     <div className="student-lesson-reader">
-      <section className="student-reading-position" aria-label="Reading position">
-        <div>
-          <span>{topic.title}</span>
-          <strong>{lessonPositionLabel}</strong>
-          <small>{completionStatusLabel}</small>
-        </div>
-        <button
-          className="button button--secondary button--compact"
-          disabled={savingProgress}
-          onClick={runNextAction}
-          type="button"
-        >
-          <Icon name={completed && nextLesson ? 'arrow-right' : completed ? 'module' : completionBlocked ? 'activity' : 'check'} />
-          <span>{nextActionLabel}</span>
-        </button>
-      </section>
       <nav className="floating-lesson-nav floating-lesson-nav--top" aria-label="Module lesson navigation">
         <button
           aria-label={previousLesson ? `Previous lesson: ${previousLesson.title}` : 'No previous lesson'}

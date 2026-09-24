@@ -1650,48 +1650,6 @@ button.module-row {
   min-width: 0;
 }
 
-.student-reading-position {
-  position: sticky;
-  z-index: 20;
-  top: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--shadow-soft);
-}
-
-.student-reading-position > div,
-.student-reading-position span,
-.student-reading-position strong,
-.student-reading-position small {
-  min-width: 0;
-}
-
-.student-reading-position > div {
-  display: grid;
-  gap: 2px;
-}
-
-.student-reading-position span,
-.student-reading-position small {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.student-reading-position strong {
-  color: var(--text);
-  font-size: 15px;
-}
-
 .student-lesson-context {
   align-items: center;
   scroll-margin-top: 24px;
@@ -2275,13 +2233,6 @@ button.module-row {
     grid-template-columns: 1fr;
   }
 
-  .student-reading-position {
-    position: static;
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .student-reading-position .button,
   .student-lesson-context__actions .button,
   .lesson-progress-status__actions .button,
   .student-lesson-completion .button {
