@@ -17,6 +17,10 @@
     padding-left: 0;
   }
 
+  .app-shell:has(> .sidebar.sidebar--collapsed) {
+    padding-left: 0;
+  }
+
   .sidebar {
     display: none;
   }

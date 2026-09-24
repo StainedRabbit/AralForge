@@ -33,6 +33,16 @@ const studentMoreItems: NavItem[] = [
   { to: '/profile', label: 'Profile', icon: 'profile' },
 ]
 
+const SIDEBAR_COLLAPSED_KEY = 'aralforge.sidebar.collapsed.v1'
+
+function getInitialSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 export function Sidebar({
   currentUser,
   items = studentNavItems,
@@ -48,10 +58,45 @@ export function Sidebar({
   onLogout: () => void
   workspaceLabel?: string
 }) {
+  const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed)
+  const [previewExpanded, setPreviewExpanded] = useState(false)
+
+  function toggleCollapsed() {
+    setCollapsed((current) => {
+      const next = !current
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      } catch {
+        // Keep the in-memory preference if storage is unavailable.
+      }
+      return next
+    })
+  }
+
+  const expanded = !collapsed || previewExpanded
   return (
-    <aside className="sidebar">
+    <aside
+      className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}${previewExpanded && collapsed ? ' sidebar--preview' : ''}`}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPreviewExpanded(false)
+      }}
+      onFocusCapture={() => setPreviewExpanded(true)}
+      onPointerEnter={() => setPreviewExpanded(true)}
+      onPointerLeave={() => setPreviewExpanded(false)}
+    >
       <div className="sidebar__top">
         <BrandMark homePath={items[0]?.to ?? '/'} inverted sidebar />
+        <button
+          aria-expanded={expanded}
+          aria-label={collapsed ? 'Keep navigation expanded' : 'Collapse navigation'}
+          className="sidebar__toggle"
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Keep navigation expanded' : 'Collapse navigation'}
+          type="button"
+        >
+          <Icon name={collapsed ? 'expand' : 'shrink'} />
+          <span>{collapsed ? 'Expand navigation' : 'Collapse navigation'}</span>
+        </button>
         <nav className="nav-list" aria-label="Primary">
           {items.map((item) => (
             <NavEntry
@@ -67,7 +112,7 @@ export function Sidebar({
       <div className="sidebar__bottom">
         <div className="user-chip">
           <div className="avatar">{initials(currentUser)}</div>
-          <div>
+          <div className="sidebar__user-info">
             <strong>{fullName(currentUser)}</strong>
             <span>
               {workspaceLabel ||
@@ -77,6 +122,7 @@ export function Sidebar({
           </div>
         </div>
         <button
+          aria-label="Sign out"
           className="icon-button icon-button--wide"
           onClick={onLogout}
           title="Sign out"
@@ -293,8 +339,10 @@ function NavEntry({
 }) {
   return (
     <NavLink
+      aria-label={item.label}
       className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
       end={isExactNavItem(item.to)}
+      title={item.label}
       to={item.to}
     >
       <Icon name={item.icon} />
