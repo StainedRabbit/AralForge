@@ -703,7 +703,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await moduleCard.getByRole('link').click()
   await progressPromise
   await expect(page.getByRole('heading', { name: 'Resume Basics' })).toBeVisible()
-  await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Current', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download Topic PDF' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download Module PDF' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Download Printable PDF' })).toHaveCount(0)
@@ -736,7 +736,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   )
   await page.getByRole('button', { name: 'Mark Complete', exact: true }).first().click()
   await completionPromise
-  await expect(page.getByText('Completed', { exact: true }).first()).toBeVisible()
+  await expect(page.locator('#selected-lesson').getByRole('button', { name: 'Mark Incomplete', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Module Contents', exact: true }).first().click()
   const continuePractice = page.getByRole('button', { name: /Continue Lesson.*Resume Practice/ })
@@ -747,7 +747,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   await continuePractice.click()
   await progressPromise
   await expect(page.getByRole('heading', { name: 'Resume Practice' })).toBeVisible()
-  await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Current', { exact: true }).first()).toBeVisible()
 
   await page.getByRole('button', { name: 'Resume Topic', exact: true }).click()
   await expect(page.getByRole('button', { name: /Resume Lesson.*Resume Practice/ })).toBeVisible()
@@ -767,7 +767,7 @@ test('starts, resumes, continues, and reviews lessons from module pages', async 
   )
   await continueReview.click()
   await progressPromise
-  await expect(page.getByText('In progress', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Current', { exact: true }).first()).toBeVisible()
 
   completionPromise = page.waitForResponse(
     (response) => response.url().includes('/api/modules/lesson-progress/') && response.request().method() === 'PATCH',

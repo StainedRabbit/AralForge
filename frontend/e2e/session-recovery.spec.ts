@@ -212,6 +212,7 @@ test('sign out during renewal revokes the rotated cookie and notifies other tabs
   await entered.promise
   const logout = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
   await page.locator('button[title="Sign out"]:visible').click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
   release.release()
   expect((await logout).status()).toBe(204)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
@@ -262,6 +263,7 @@ test('manual sign out revokes the cookie session and reload stays signed out', a
   const logoutResponse = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
 
   await page.locator('button[title="Sign out"]:visible').click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
 
   expect((await logoutResponse).status()).toBe(204)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()

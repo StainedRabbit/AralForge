@@ -314,6 +314,7 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
   try {
     const signedOut = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
     await page.locator('button[title="Sign out"]:visible').click()
+    await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
     expect((await signedOut).status()).toBe(204)
     await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
     await page.getByLabel('Student number').fill('E2E-001')

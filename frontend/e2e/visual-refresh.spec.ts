@@ -129,7 +129,8 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
 
   await page.getByRole('button', { name: 'More navigation', exact: true }).click()
   await page.screenshot({ path: `${screenshotRoot}/student-more-sheet-mobile-390x844.png` })
-  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
+  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   await page.setViewportSize({ width: 1440, height: 900 })
   await signIn(page, 'e2e-teacher')

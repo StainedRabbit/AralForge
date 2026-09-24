@@ -127,6 +127,7 @@ test('cookie login, refresh, authenticated requests, and logout use the frontend
   apiRequests.length = 0
   const signedOut = page.waitForResponse(response => response.url().endsWith('/api/auth/logout/'))
   await page.locator('button[title="Sign out"]:visible').click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
   expect((await signedOut).status()).toBe(204)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   const storedSession = await page.evaluate(() => localStorage.getItem('aralforge.session'))

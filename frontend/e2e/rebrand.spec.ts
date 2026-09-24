@@ -77,6 +77,7 @@ test('shows the AralForge identity and migrates legacy browser storage', async (
     localStorage.setItem('ezoryx.session', '{"legacy":true}')
   })
   await page.locator('button[title="Sign out"]:visible').click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
   const sessionKeys = await page.evaluate(() => ({
     current: localStorage.getItem('aralforge.session'),

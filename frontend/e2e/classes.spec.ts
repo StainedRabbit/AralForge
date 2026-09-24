@@ -1490,7 +1490,8 @@ test('searches, selects, and reactivates students with the streamlined picker', 
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'More navigation', exact: true }).click()
-  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out' }).click()
+  await page.locator('.mobile-more[role="dialog"]').getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.locator('.logout-confirmation').getByRole('button', { name: 'Sign out', exact: true }).click()
   await page.getByLabel('Student number').fill(importedStudentNumber)
   await page.getByLabel('Password', { exact: true }).fill(temporaryPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
