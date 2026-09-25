@@ -4285,7 +4285,15 @@ a.teacher-recent-item:focus-visible {
 .attendance-letter-rail button.is-active {
   background: var(--primary);
   color: white;
-  transform: scale(1.35);
+}
+
+.attendance-letter-rail button:not(:disabled):hover {
+  transform: scale(1.2);
+}
+
+.attendance-letter-rail button.is-active {
+  font-size: 13px;
+  transform: scale(1.65);
 }
 
 .attendance-letter-rail button:focus-visible {
@@ -4297,7 +4305,11 @@ a.teacher-recent-item:focus-visible {
   position: absolute;
   right: calc(100% + 8px);
   top: 50%;
-  padding: 7px 10px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
   border-radius: 999px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);

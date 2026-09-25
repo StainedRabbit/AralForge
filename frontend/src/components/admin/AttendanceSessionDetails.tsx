@@ -164,7 +164,7 @@ export function AttendanceSessionDetails({ api, data, refresh, session }: {
         onPointerUp={() => { if (railHideTimer.current) clearTimeout(railHideTimer.current); railHideTimer.current = setTimeout(() => setActiveLetter(null), 900) }}
         type="button"
       >{letter}</button>)}
-      {activeLetter ? <span aria-live="polite" className="attendance-letter-rail__label">Last names: {activeLetter === '#' ? 'Other' : activeLetter}</span> : null}
+      {activeLetter ? <span aria-live="polite" className="attendance-letter-rail__label">{activeLetter === '#' ? 'Other' : activeLetter}</span> : null}
     </nav>
     <div className="table-wrap attendance-student-browser__table">
       <table className="admin-table attendance-breakdown__table mobile-card-table">
