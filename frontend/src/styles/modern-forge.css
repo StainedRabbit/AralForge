@@ -193,7 +193,9 @@ summary {
 .nav-link {
   display: grid;
   grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr) auto;
-  min-height: 34px;
+  width: calc(100% - 12px);
+  min-height: 30px;
+  margin-inline: 6px;
   gap: 0;
   padding: 0;
   overflow: hidden;
