@@ -72,7 +72,7 @@ test('system tracks device changes and a failed save restores the prior theme', 
 
   await page.route('**/api/accounts/users/me/theme/', (route) => route.fulfill({ status: 503, json: { detail: 'Try again later.' } }))
   await page.locator('.sidebar').getByRole('group', { name: 'Appearance' }).getByRole('button', { name: 'Dark', exact: true }).click()
-  await expect(page.locator('.sidebar').getByRole('group', { name: 'Appearance' }).getByRole('alert')).toContainText('could not be saved')
+  await expect(page.locator('.sidebar .appearance-control').getByRole('alert')).toContainText('could not be saved')
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'light')
   await expect(page.locator('.sidebar').getByRole('button', { name: 'System', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })

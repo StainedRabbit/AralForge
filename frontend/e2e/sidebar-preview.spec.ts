@@ -58,8 +58,9 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await page.mouse.move(700, 500)
   }
 
-  await page.setViewportSize({ width: 1440, height: 560 })
-  await page.mouse.move(700, 500)
+  await page.setViewportSize({ width: 1440, height: 480 })
+  await page.mouse.move(50, 10)
+  await expect(sidebar).toHaveClass(/sidebar--preview/)
   await sidebar.getByRole('button', { name: 'Expand navigation' }).click()
   await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
   const signOut = sidebar.getByRole('button', { name: 'Sign out' })
