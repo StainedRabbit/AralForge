@@ -31,14 +31,6 @@
 .sidebar__appearance .appearance-control__divider { background: rgba(255, 255, 255, 0.28); }
 .sidebar--collapsed:not(.sidebar--preview) .appearance-control { justify-items: center; }
 .sidebar--collapsed:not(.sidebar--preview) .appearance-control > strong { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-.sidebar--collapsed:not(.sidebar--preview) .appearance-control__toolbar { display: grid; grid-template-columns: repeat(2, 28px); gap: 2px; justify-content: center; }
-.sidebar--collapsed:not(.sidebar--preview) .appearance-control__options { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, 28px); gap: 2px; }
-.sidebar--collapsed:not(.sidebar--preview) .appearance-control__divider { display: none; }
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance .appearance-control__option,
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance .appearance-control__collapse { flex-basis: 28px; width: 28px; min-height: 28px; border-radius: 7px; }
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance .appearance-control__collapse { grid-column: 1 / -1; justify-self: center; }
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance .appearance-control__option .icon,
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance .appearance-control__collapse .icon { width: 15px; height: 15px; }
 .mobile-more .appearance-control { flex: 0 0 auto; }
 
 :root[data-effective-theme='dark'] {
