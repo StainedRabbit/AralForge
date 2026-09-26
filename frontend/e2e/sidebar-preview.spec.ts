@@ -60,6 +60,18 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await page.mouse.move(700, 500)
   }
 
+  await page.setViewportSize({ width: 1440, height: 560 })
+  await page.mouse.move(700, 500)
+  await sidebar.getByRole('button', { name: 'Keep navigation expanded' }).click()
+  await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
+  const signOut = sidebar.getByRole('button', { name: 'Sign out' })
+  await expect(signOut).toBeVisible()
+  await expect.poll(() => signOut.evaluate((button) => {
+    const bounds = button.getBoundingClientRect()
+    return bounds.bottom <= window.innerHeight && bounds.top >= 0
+  })).toBe(true)
+  await expect.poll(() => sidebar.locator('.sidebar__top .nav-list').evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true)
+
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(sidebar).toBeHidden()
   await expect(page.locator('.mobile-tabbar')).toBeVisible()
