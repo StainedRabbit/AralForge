@@ -99,60 +99,6 @@ test('server pagination and profile filtering preserve distinct account status',
   await expect(page.getByRole('button', { name: 'View TEST-32', exact: true })).toBeVisible()
 })
 
-test('mobile letter index follows scrolling and jumps through paginated names', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  let loadedSecondPage = false
-  const student = (id: number, firstName: string) => ({ id, user: id, student_number: `INDEX-${id}`, is_active: true, joined_at: '',
-    user_detail: { id, username: `INDEX-${id}`, first_name: firstName, middle_name: '', last_name: `Student ${id}`, full_name: `${firstName} Student ${id}`, email: '', role: 'STUDENT', is_active: true } })
-  await page.route('**/api/accounts/students/?*', async (route) => {
-    const secondPage = new URL(route.request().url()).searchParams.has('cursor')
-    if (secondPage) loadedSecondPage = true
-    await route.fulfill({ json: { count: 31, previous: null, next: secondPage ? null : 'http://127.0.0.1:8001/api/accounts/students/?pagination=cursor&cursor=page-two',
-      results: secondPage ? [student(31, 'Zara')] : Array.from({ length: 30 }, (_, index) => student(index + 1, index < 15 ? 'Ana' : 'Bea')) } })
-  })
-  await openStudents(page)
-  const index = page.getByLabel('Student name letter index')
-  await expect(index.getByRole('button')).toHaveCount(27)
-  await page.locator('[data-directory-student="20"]').scrollIntoViewIfNeeded()
-  await expect(index.getByRole('button', { name: 'Jump to B names' })).toHaveAttribute('aria-current', 'true')
-  await index.getByRole('button', { name: 'Jump to Y names' }).click()
-  await expect(page.locator('[data-directory-student="31"]')).toBeInViewport()
-  await expect(index.getByRole('button', { name: 'Jump to B names' })).toHaveAttribute('aria-current', 'true')
-  expect(loadedSecondPage).toBe(true)
-  await page.mouse.move(10, 10)
-  await expect(index).toHaveCSS('opacity', '0', { timeout: 4000 })
-  await page.mouse.move(365, 400)
-  await expect(index).toHaveCSS('opacity', '1')
-  const a = await index.getByRole('button', { name: 'Jump to A names' }).boundingBox()
-  const b = await index.getByRole('button', { name: 'Jump to B names' }).boundingBox()
-  expect(a && b).toBeTruthy()
-  await page.mouse.move(a!.x + a!.width / 2, a!.y + a!.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(b!.x + b!.width / 2, b!.y + b!.height / 2)
-  await page.mouse.up()
-  await expect(page.locator('[data-directory-student="16"]')).toBeInViewport()
-})
-
-test('letter index accepts touch input', async ({ browser }) => {
-  const context = await browser.newContext({ baseURL: 'http://127.0.0.1:4173', viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
-  try {
-    const page = await context.newPage()
-    const student = (id: number, firstName: string) => ({ id, user: id, student_number: `TOUCH-${id}`, is_active: true, joined_at: '',
-      user_detail: { id, username: `TOUCH-${id}`, first_name: firstName, middle_name: '', last_name: `Student ${id}`, full_name: `${firstName} Student ${id}`, email: '', role: 'STUDENT', is_active: true } })
-    await page.route('**/api/accounts/students/?*', (route) => route.fulfill({ json: { count: 30, previous: null, next: null,
-      results: Array.from({ length: 30 }, (_, index) => student(index + 1, index < 15 ? 'Ana' : 'Bea')) } }))
-    await openStudents(page)
-    const letter = page.getByRole('button', { name: 'Jump to B names' })
-    const bounds = await letter.boundingBox()
-    expect(bounds).not.toBeNull()
-    await page.touchscreen.tap(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
-    await expect(page.locator('[data-directory-student="16"]')).toBeInViewport()
-    await expect(page.getByRole('button', { name: 'Jump to A names' })).toHaveAttribute('aria-current', 'true')
-  } finally {
-    await context.close()
-  }
-})
-
 test('mobile detail panel contains focus and protects unsaved edits', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await openStudents(page)

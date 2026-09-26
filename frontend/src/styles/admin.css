@@ -4229,71 +4229,51 @@ a.teacher-recent-item:focus-visible {
   scroll-padding-top: 24px;
 }
 
-.attendance-student-group {
-  scroll-margin-top: 24px;
-}
-
-.attendance-student-group th {
-  padding: 9px 12px;
-  background: var(--surface-muted);
-  color: var(--text);
-  font-size: 13px;
-  text-align: left;
-}
-
 .attendance-letter-rail {
   position: fixed;
   z-index: 20;
-  top: 50%;
-  right: max(6px, env(safe-area-inset-right));
   display: flex;
-  max-height: 76vh;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 4px 3px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  box-shadow: var(--shadow-soft);
-  transform: translateY(-50%);
+  width: 28px;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 12px 0 0 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   touch-action: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
 }
+
+.attendance-letter-rail--visible,
+.attendance-letter-rail:hover,
+.attendance-letter-rail:focus-within { opacity: 1; }
 
 .attendance-letter-rail button {
   display: grid;
-  width: 20px;
+  width: 100%;
   min-height: 0;
   flex: 1 1 0;
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 50%;
   background: transparent;
-  color: var(--primary);
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.attendance-letter-rail button:disabled {
   color: var(--text-muted);
-  opacity: 0.28;
+  font-size: clamp(8px, 1.3vh, 11px);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.attendance-letter-rail button:not(:disabled):hover,
+.attendance-letter-rail button:hover,
+.attendance-letter-rail button:focus-visible,
 .attendance-letter-rail button.is-active {
-  background: var(--primary);
-  color: white;
-}
-
-.attendance-letter-rail button:not(:disabled):hover {
-  transform: scale(1.2);
-}
-
-.attendance-letter-rail button.is-active {
-  font-size: 13px;
-  transform: scale(1.65);
+  border-radius: 9px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: clamp(11px, 1.7vh, 15px);
+  font-weight: 800;
 }
 
 .attendance-letter-rail button:focus-visible {
@@ -4301,38 +4281,8 @@ a.teacher-recent-item:focus-visible {
   outline-offset: 1px;
 }
 
-.attendance-letter-rail__label {
-  position: absolute;
-  right: calc(100% + 8px);
-  top: 50%;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  padding: 0;
-  border-radius: 999px;
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-  transform: translateY(-50%);
-  animation: attendance-letter-label-in 150ms ease-out both;
-}
-
-@keyframes attendance-letter-label-in {
-  from { opacity: 0; transform: translate(4px, -50%); }
-  to { opacity: 1; transform: translate(0, -50%); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .attendance-letter-rail button,
-  .attendance-letter-rail__label {
-    animation: none;
-    scroll-behavior: auto;
-    transition: none;
-  }
+  .attendance-letter-rail { transition: none; }
 }
 
 .attendance-status {

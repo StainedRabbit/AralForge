@@ -575,21 +575,6 @@
     box-shadow: var(--shadow-card);
   }
 
-  .mobile-card-table tr.attendance-student-group {
-    grid-column: 1 / -1;
-    min-height: 0;
-    padding: 0;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .attendance-student-group th {
-    padding: 6px 2px;
-  }
-
   .mobile-card-table td {
     min-height: 48px;
     display: grid;
