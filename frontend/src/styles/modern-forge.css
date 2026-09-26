@@ -336,6 +336,19 @@ summary {
   justify-self: center;
 }
 
+.sidebar .user-chip--text-only {
+  grid-template-columns: minmax(0, 1fr);
+  padding-inline: 14px;
+}
+
+.sidebar .user-chip--text-only .sidebar__user-info {
+  grid-column: 1;
+}
+
+.sidebar--collapsed:not(.sidebar--preview) .user-chip--text-only {
+  display: none;
+}
+
 .sidebar .user-chip span {
   color: rgba(255, 255, 255, 0.62);
 }

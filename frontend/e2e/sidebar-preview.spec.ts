@@ -11,6 +11,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
 
   const sidebar = page.locator('.sidebar')
+  await expect(sidebar.locator('.user-chip .avatar')).toHaveCount(0)
   const iconGeometry = () => sidebar.evaluate((element) => {
     const bounds = (selector: string) => [...element.querySelectorAll<HTMLElement>(selector)].map((item) => {
       const rect = item.getBoundingClientRect()
@@ -30,6 +31,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await page.mouse.move(700, 500)
     await expect(sidebar).toHaveClass(/sidebar--collapsed/)
     await expect(sidebar).not.toHaveClass(/sidebar--preview/)
+    await expect(sidebar.locator('.user-chip')).toBeHidden()
     await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(76)
     const collapsedGeometry = await iconGeometry()
 
@@ -37,6 +39,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await expect(sidebar).toHaveClass(/sidebar--preview/)
     await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(expandedWidth)
     await expect(sidebar.locator('.nav-link').first().locator('span')).toBeVisible()
+    await expect(sidebar.locator('.sidebar__user-info strong')).toBeVisible()
     expect(await iconGeometry()).toEqual(collapsedGeometry)
 
     await sidebar.getByRole('button', { name: 'Keep navigation expanded' }).click()
@@ -54,4 +57,8 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(sidebar).toBeHidden()
   await expect(page.locator('.mobile-tabbar')).toBeVisible()
+  await page.getByRole('button', { name: 'More navigation', exact: true }).click()
+  const more = page.locator('.mobile-more')
+  await expect(more.locator('.user-chip .avatar')).toHaveCount(0)
+  await expect(more.locator('.user-chip strong')).toBeVisible()
 })

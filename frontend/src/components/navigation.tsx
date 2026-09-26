@@ -110,8 +110,8 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__bottom">
-        <div className="user-chip">
-          <div className="avatar">{initials(currentUser)}</div>
+        <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`}>
+          {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
           <div className="sidebar__user-info">
             <strong>{fullName(currentUser)}</strong>
             <span>
@@ -314,7 +314,7 @@ export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, w
         <div className="mobile-more__handle" />
         <div className="mobile-more__header">
           <div className="user-chip">
-            <div className="avatar">{initials(currentUser)}</div>
+            {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
             <div><strong id="mobile-more-title">{fullName(currentUser)}</strong><span>{workspaceLabel || currentUser?.role?.toLowerCase() || 'Account'}</span></div>
           </div>
           <button aria-label="Close" className="icon-button" onClick={onClose} ref={closeRef} type="button"><Icon name="close" /></button>
