@@ -13,12 +13,14 @@ export type IconName =
   | 'check'
   | 'close'
   | 'code'
+  | 'computer'
   | 'dashboard'
   | 'file'
   | 'grade'
   | 'logout'
   | 'menu'
   | 'more'
+  | 'moon'
   | 'module'
   | 'profile'
   | 'edit'
@@ -33,6 +35,7 @@ export type IconName =
   | 'shield'
   | 'shrink'
   | 'spark'
+  | 'sun'
   | 'trash'
   | 'upload'
   | 'users'
@@ -105,6 +108,13 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="m14 4-4 16" />
     </>
   ),
+  computer: (
+    <>
+      <rect x="3" y="3" width="18" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </>
+  ),
   dashboard: (
     <>
       <rect x="3" y="3" width="7" height="9" rx="1.5" />
@@ -157,6 +167,11 @@ const iconPaths: Record<IconName, ReactNode> = {
       <circle cx="5" cy="12" r="1" />
       <circle cx="12" cy="12" r="1" />
       <circle cx="19" cy="12" r="1" />
+    </>
+  ),
+  moon: (
+    <>
+      <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
     </>
   ),
   module: (
@@ -253,6 +268,19 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M17 12h5" />
       <path d="m4.22 19.78 3.54-3.54" />
       <path d="m16.24 7.76 3.54-3.54" />
+    </>
+  ),
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.93 4.93 1.42 1.42" />
+      <path d="m17.65 17.65 1.42 1.42" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m4.93 19.07 1.42-1.42" />
+      <path d="m17.65 6.35 1.42-1.42" />
     </>
   ),
   trash: (

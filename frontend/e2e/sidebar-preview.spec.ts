@@ -32,6 +32,11 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await expect(sidebar).toHaveClass(/sidebar--collapsed/)
     await expect(sidebar).not.toHaveClass(/sidebar--preview/)
     await expect(sidebar.locator('.user-chip')).toBeHidden()
+    const appearance = sidebar.getByRole('group', { name: 'Appearance' })
+    await expect(appearance.getByRole('button')).toHaveCount(3)
+    await expect(appearance.getByRole('button', { name: 'System' })).toBeVisible()
+    await expect(appearance.getByRole('button', { name: 'Light' })).toBeVisible()
+    await expect(appearance.getByRole('button', { name: 'Dark' })).toBeVisible()
     await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(76)
     const collapsedGeometry = await iconGeometry()
 

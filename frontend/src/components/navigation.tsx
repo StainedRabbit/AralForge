@@ -19,18 +19,18 @@ export type ThemeControls = {
   themeError: string
 }
 
-const themeOptions: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
+const themeOptions: { value: ThemePreference; label: string; icon: IconName }[] = [
+  { value: 'system', label: 'System', icon: 'computer' },
+  { value: 'light', label: 'Light', icon: 'sun' },
+  { value: 'dark', label: 'Dark', icon: 'moon' },
 ]
 
 function AppearanceChoices({ themePreference, onThemeChange, themeSaving, themeError }: ThemeControls) {
   return <div className="appearance-control" role="group" aria-label="Appearance">
     <strong>Appearance</strong>
     <div className="appearance-control__options">
-      {themeOptions.map(({ value, label }) => <button key={value} type="button" aria-pressed={themePreference === value}
-        disabled={themeSaving} onClick={() => onThemeChange(value)}>{label}</button>)}
+      {themeOptions.map(({ value, label, icon }) => <button aria-label={label} aria-pressed={themePreference === value} disabled={themeSaving}
+        key={value} onClick={() => onThemeChange(value)} title={label} type="button"><Icon name={icon} /><span>{label}</span></button>)}
     </div>
     {themeError ? <small role="alert">{themeError}</small> : null}
   </div>
