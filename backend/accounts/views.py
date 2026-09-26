@@ -15,6 +15,7 @@ from .serializers import (
     AvailableStudentSerializer,
     ChangePasswordSerializer,
     StudentProfileSerializer,
+    ThemePreferenceSerializer,
     UserSerializer,
 )
 
@@ -31,7 +32,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return User.objects.filter(id=self.request.user.id)
 
     def get_permissions(self):
-        if self.action == 'change_password':
+        if self.action in ('change_password', 'set_theme'):
             return [IsAuthenticated()]
 
         if self.action in ('create', 'destroy'):
@@ -77,6 +78,14 @@ class UserViewSet(viewsets.ModelViewSet):
         request.user.must_change_password = False
         request.user.save(update_fields=('password', 'must_change_password'))
         return Response({'detail': 'Password changed successfully.'})
+
+    @action(detail=False, methods=['patch'], url_path='me/theme')
+    def set_theme(self, request):
+        serializer = ThemePreferenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        request.user.theme_preference = serializer.validated_data['theme_preference']
+        request.user.save(update_fields=['theme_preference'])
+        return Response({'theme_preference': request.user.theme_preference})
 
     @action(detail=False, methods=['get'], permission_classes=[IsAdminTeacher])
     def available_students(self, request):

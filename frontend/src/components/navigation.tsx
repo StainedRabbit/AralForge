@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import type { User } from '../types'
+import type { ThemePreference, User } from '../types'
 import { fullName, initials } from '../utils/student'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
@@ -10,6 +10,30 @@ export type NavItem = {
   label: string
   icon: IconName
   matchPrefixes?: string[]
+}
+
+export type ThemeControls = {
+  themePreference: ThemePreference
+  onThemeChange: (preference: ThemePreference) => void
+  themeSaving: boolean
+  themeError: string
+}
+
+const themeOptions: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+]
+
+function AppearanceChoices({ themePreference, onThemeChange, themeSaving, themeError }: ThemeControls) {
+  return <div className="appearance-control" role="group" aria-label="Appearance">
+    <strong>Appearance</strong>
+    <div className="appearance-control__options">
+      {themeOptions.map(({ value, label }) => <button key={value} type="button" aria-pressed={themePreference === value}
+        disabled={themeSaving} onClick={() => onThemeChange(value)}>{label}</button>)}
+    </div>
+    {themeError ? <small role="alert">{themeError}</small> : null}
+  </div>
 }
 
 const studentNavItems: NavItem[] = [
@@ -50,6 +74,10 @@ export function Sidebar({
   pendingCount,
   onLogout,
   workspaceLabel,
+  themePreference,
+  onThemeChange,
+  themeSaving,
+  themeError,
 }: {
   currentUser: User | null
   items?: NavItem[]
@@ -57,7 +85,7 @@ export function Sidebar({
   pendingCount: number
   onLogout: () => void
   workspaceLabel?: string
-}) {
+} & ThemeControls) {
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed)
   const [previewExpanded, setPreviewExpanded] = useState(false)
 
@@ -110,6 +138,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__bottom">
+        <div className="sidebar__appearance"><AppearanceChoices themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} /></div>
         <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`}>
           {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
           <div className="sidebar__user-info">
@@ -232,6 +261,10 @@ export function MobileNavigation({
   stickyHeader = true,
   showAccountAvatar = true,
   workspaceLabel,
+  themePreference,
+  onThemeChange,
+  themeSaving,
+  themeError,
 }: {
   badgePath?: string
   currentUser: User | null
@@ -242,7 +275,7 @@ export function MobileNavigation({
   stickyHeader?: boolean
   showAccountAvatar?: boolean
   workspaceLabel?: string
-}) {
+} & ThemeControls) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
   const primaryActive = items.some((item) => matchesNavItem(location.pathname, item))
@@ -256,19 +289,19 @@ export function MobileNavigation({
     <>
       <MobileHeader badgePath={badgePath} currentUser={currentUser} homePath={items[0]?.to ?? '/'} pendingCount={pendingCount} onOpenMore={() => setOpen(true)} showAccountAvatar={showAccountAvatar} sticky={stickyHeader} />
       <MobileTabbar badgePath={badgePath} items={items} moreActive={moreActive} moreOpen={open} onOpenMore={() => setOpen(true)} pendingCount={pendingCount} />
-      <MobileMoreSheet currentUser={currentUser} items={moreItems} onClose={() => setOpen(false)} onLogout={onLogout} open={open} workspaceLabel={workspaceLabel} />
+      <MobileMoreSheet currentUser={currentUser} items={moreItems} onClose={() => setOpen(false)} onLogout={onLogout} open={open} workspaceLabel={workspaceLabel} themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
     </>
   )
 }
 
-export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, workspaceLabel }: {
+export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, workspaceLabel, themePreference, onThemeChange, themeSaving, themeError }: {
   currentUser: User | null
   items: NavItem[]
   onClose: () => void
   onLogout: () => void
   open: boolean
   workspaceLabel?: string
-}) {
+} & ThemeControls) {
   const location = useLocation()
   const panelRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -322,6 +355,7 @@ export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, w
         <nav aria-label="More destinations" className="mobile-more__links">
           {items.map((item) => <Link aria-current={matchesNavItem(location.pathname, item) ? 'page' : undefined} className={matchesNavItem(location.pathname, item) ? 'active' : ''} key={item.to} onClick={onClose} to={item.to}><Icon name={item.icon} /><span><strong>{item.label}</strong><small>Open {item.label.toLowerCase()}</small></span><Icon name="arrow-right" /></Link>)}
         </nav>
+        <AppearanceChoices themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
         <button className="button button--secondary mobile-more__logout" onClick={onLogout} type="button"><Icon name="logout" /><span>Sign out</span></button>
       </div>
     </div>
@@ -406,13 +440,21 @@ export function BrandMark({
         <>
           <img
             alt="AralForge"
-            className={iconOnly ? 'brand__icon' : 'brand__logo'}
+            className={`${iconOnly ? 'brand__icon' : 'brand__logo'} brand__image--light${inverted ? ' brand__image--inverted' : ''}`}
             height={iconOnly ? '512' : '274'}
             src={iconOnly
               ? (inverted ? '/brand/aralforge-icon-dark.png' : '/brand/aralforge-icon.png')
               : (inverted ? '/brand/aralforge-logo-horizontal-dark.png' : '/brand/aralforge-logo-horizontal.png')}
             width={iconOnly ? '512' : '1184'}
           />
+          {!inverted ? <img
+            alt=""
+            aria-hidden="true"
+            className={`${iconOnly ? 'brand__icon' : 'brand__logo'} brand__image--dark`}
+            height={iconOnly ? '512' : '274'}
+            src={iconOnly ? '/brand/aralforge-icon-dark.png' : '/brand/aralforge-logo-horizontal-dark.png'}
+            width={iconOnly ? '512' : '1184'}
+          /> : null}
           {!compact && !iconOnly ? <small>Forge Knowledge, Build Future.</small> : null}
         </>
       )}

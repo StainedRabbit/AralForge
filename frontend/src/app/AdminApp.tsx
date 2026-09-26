@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import type { AuthedRequest, PresentationWorkspace } from './types'
 import type { StudentProfile, User } from '../types'
-import { MobileNavigation, Sidebar, type NavItem } from '../components/navigation'
+import { MobileNavigation, Sidebar, type NavItem, type ThemeControls } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
 import type { WorkspaceResource } from '../queries/useScopedWorkspace'
 import { Page, SkeletonList, StatusBanner } from '../components/ui'
@@ -46,13 +46,13 @@ const TOPIC_EDITOR: WorkspaceResource[] = [...MODULES,'moduleTopics']
 const LESSON_EDITOR: WorkspaceResource[] = []
 const ATTENDANCE: WorkspaceResource[] = ['users','subjects','terms','schedules','enrollments','attendanceSessions','attendanceRecords']
 
-export function AdminApp({ api, currentUser, profile, pendingCount, onLogout }: { api: AuthedRequest; currentUser: User; profile: StudentProfile | null; pendingCount: number; onLogout: () => void }) {
+export function AdminApp({ api, currentUser, profile, pendingCount, onLogout, themePreference, onThemeChange, themeSaving, themeError }: { api: AuthedRequest; currentUser: User; profile: StudentProfile | null; pendingCount: number; onLogout: () => void } & ThemeControls) {
   const desktopItems: NavItem[] = nav
   const moreItems: NavItem[] = mobileMore
   const scoped = (resources: readonly WorkspaceResource[], render: Parameters<typeof RouteWorkspace>[0]['children']) => <RouteWorkspace api={api} currentUser={currentUser} profile={profile} resources={resources}>{render}</RouteWorkspace>
   return <div className="app-shell">
-    <Sidebar badgePath="/admin/grades" currentUser={currentUser} items={desktopItems} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} />
-    <main className="app-main"><MobileNavigation badgePath="/admin/grades" currentUser={currentUser} items={mobile} moreItems={moreItems} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} />
+    <Sidebar badgePath="/admin/grades" currentUser={currentUser} items={desktopItems} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
+    <main className="app-main"><MobileNavigation badgePath="/admin/grades" currentUser={currentUser} items={mobile} moreItems={moreItems} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
       <Suspense fallback={<SkeletonList count={4} />}><Routes>
         <Route path="/admin" element={<AdminDashboardPage api={api} currentUser={currentUser} />} />
         <Route path="/admin/students" element={scoped(STUDENTS, data => <AdminStudentsPage api={api} data={data} refresh={data.refresh} />)} />

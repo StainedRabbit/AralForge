@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { lazy, Suspense, useLayoutEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
 import type { Session } from '../api'
-import type { StudentProfile, User } from '../types'
+import type { StudentProfile, ThemePreference, User } from '../types'
+import { applyTheme } from '../theme'
+import { toErrorMessage } from '../utils/format'
 import type { LearningContextMetadata } from './types'
 import { MobileNavigation, Sidebar } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
@@ -30,6 +32,32 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
 }) {
   const api = useAuthenticatedRequest(session, setSession, onSessionExpired)
   const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: 600_000 })
+  const queryClient = useQueryClient()
+  const [selectedTheme, setSelectedTheme] = useState<ThemePreference | null>(null)
+  const [savingTheme, setSavingTheme] = useState(false)
+  const [themeError, setThemeError] = useState('')
+  const themePreference = selectedTheme ?? identity.data?.user.theme_preference ?? 'system'
+  useLayoutEffect(() => applyTheme(themePreference), [themePreference])
+  useLayoutEffect(() => () => applyTheme('system'), [])
+  async function changeTheme(next: ThemePreference) {
+    if (savingTheme || next === themePreference) return
+    setSelectedTheme(next)
+    setSavingTheme(true)
+    setThemeError('')
+    try {
+      await api<{ theme_preference: ThemePreference }>('/accounts/users/me/theme/', {
+        method: 'PATCH',
+        body: JSON.stringify({ theme_preference: next }),
+      })
+      queryClient.setQueryData<Identity>(queryKeys.me, (current) => current
+        ? { ...current, user: { ...current.user, theme_preference: next } } : current)
+    } catch (error) {
+      setThemeError(`Appearance could not be saved. ${toErrorMessage(error)}`)
+    } finally {
+      setSelectedTheme(null)
+      setSavingTheme(false)
+    }
+  }
   const isAdminTeacher = Boolean(
     identity.data?.user.is_admin_teacher || identity.data?.user.role === 'ADMIN',
   )
@@ -39,15 +67,15 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
   if (!identity.data || identity.error) return <main className="app-main"><Page><StatusBanner tone="warning" title="Account could not load" message="Please try loading your account again." /><button className="button button--secondary" type="button" disabled={identity.isFetching} onClick={() => void identity.refetch()}>{identity.isFetching ? 'Retrying…' : 'Retry'}</button></Page></main>
   const { user, student_profile: profile } = identity.data
   const pendingCount = navigation.data?.pending_count ?? 0
-  if (isAdminTeacher) return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} /></Suspense>
+  if (isAdminTeacher) return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} /></Suspense>
 
   const scoped = (resources: Parameters<typeof RouteWorkspace>[0]['resources'], render: Parameters<typeof RouteWorkspace>[0]['children']) =>
     <RouteWorkspace api={api} currentUser={user} profile={profile} resources={resources}>{render}</RouteWorkspace>
 
   return <div className="app-shell">
-    <Sidebar currentUser={user} pendingCount={0} onLogout={onLogout} />
+    <Sidebar currentUser={user} pendingCount={0} onLogout={onLogout} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} />
     <main className="app-main">
-      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} showAccountAvatar={false} stickyHeader={false} />
+      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} showAccountAvatar={false} stickyHeader={false} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} />
       <Suspense fallback={<Page><SkeletonList count={4} /></Page>}>
         <Routes>
           <Route path="/" element={<DashboardPage api={api} currentUser={user} />} />

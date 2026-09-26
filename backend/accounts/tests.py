@@ -464,6 +464,37 @@ class ChangePasswordTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
+class ThemePreferenceTests(APITestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.first = user_model.objects.create_user(username='theme-one', password='testpass123')
+        self.second = user_model.objects.create_user(username='theme-two', password='testpass123')
+        self.url = reverse('accounts:user-set-theme')
+
+    def test_theme_is_private_to_each_account_and_in_me(self):
+        self.client.force_authenticate(self.first)
+        response = self.client.patch(self.url, {'theme_preference': 'dark'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['theme_preference'], 'dark')
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
+        self.assertEqual(self.first.theme_preference, 'dark')
+        self.assertEqual(self.second.theme_preference, 'system')
+        self.assertEqual(self.client.get(reverse('accounts:user-me')).data['user']['theme_preference'], 'dark')
+
+        self.client.force_authenticate(self.second)
+        self.assertEqual(self.client.get(reverse('accounts:user-me')).data['user']['theme_preference'], 'system')
+
+    def test_theme_validation_and_authentication(self):
+        self.client.force_authenticate(self.first)
+        response = self.client.patch(self.url, {'theme_preference': 'invalid'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.theme_preference, 'system')
+        self.client.force_authenticate(user=None)
+        self.assertEqual(self.client.patch(self.url, {'theme_preference': 'light'}, format='json').status_code, status.HTTP_401_UNAUTHORIZED)
+
+
 class CookieSessionSecurityTests(APITestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

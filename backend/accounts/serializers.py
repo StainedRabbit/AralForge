@@ -30,8 +30,9 @@ class UserSerializer(serializers.ModelSerializer):
             'full_name',
             'is_active',
             'must_change_password',
+            'theme_preference',
         )
-        read_only_fields = ('id', 'is_admin_teacher', 'is_privacy_officer', 'must_change_password')
+        read_only_fields = ('id', 'is_admin_teacher', 'is_privacy_officer', 'must_change_password', 'theme_preference')
 
     def validate_password(self, value):
         validate_password(value, self.instance)
@@ -125,6 +126,10 @@ class ChangePasswordSerializer(serializers.Serializer):
             }) from error
 
         return attrs
+
+
+class ThemePreferenceSerializer(serializers.Serializer):
+    theme_preference = serializers.ChoiceField(choices=User.ThemePreference.choices)
 
 
 class AvailableStudentSerializer(serializers.ModelSerializer):

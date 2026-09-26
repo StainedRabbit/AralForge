@@ -6,6 +6,7 @@ import type { Session } from './api'
 import { Page, SkeletonList, StatusBanner } from './components/ui'
 import { EssentialStorageNotice } from './legal/EssentialStorageNotice'
 import { clearSession, loadSession, saveSession } from './services/session'
+import { updateBrowserThemeColor } from './theme'
 import './App.css'
 
 const AuthenticatedApp = lazy(() => import('./app/AuthenticatedApp').then(module => ({ default: module.AuthenticatedApp })))
@@ -23,6 +24,13 @@ function App() {
   const logoutCancelRef = useRef<HTMLButtonElement>(null)
   const logoutTriggerRef = useRef<HTMLElement | null>(null)
   const logoutDialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    media.addEventListener('change', updateBrowserThemeColor)
+    updateBrowserThemeColor()
+    return () => media.removeEventListener('change', updateBrowserThemeColor)
+  }, [])
 
   const restoreSession = useCallback(() => {
     const version = ++operationVersion.current

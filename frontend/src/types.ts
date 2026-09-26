@@ -1,4 +1,5 @@
 export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PRIVACY_OFFICER'
+export type ThemePreference = 'system' | 'light' | 'dark'
 
 export type ApiPage<T> = {
   count: number
@@ -36,6 +37,7 @@ export type User = {
   is_privacy_officer: boolean
   is_active: boolean
   must_change_password: boolean
+  theme_preference: ThemePreference
 }
 
 export type LegalDocumentStatus = {

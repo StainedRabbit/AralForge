@@ -3,6 +3,11 @@ from django.db import models
 
 
 class User(AbstractUser):
+    class ThemePreference(models.TextChoices):
+        SYSTEM = 'system', 'System'
+        LIGHT = 'light', 'Light'
+        DARK = 'dark', 'Dark'
+
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', 'Admin'
         TEACHER = 'TEACHER', 'Teacher'
@@ -12,6 +17,7 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
     must_change_password = models.BooleanField(default=False)
     middle_name = models.CharField(max_length=150, blank=True, default='')
+    theme_preference = models.CharField(max_length=6, choices=ThemePreference.choices, default=ThemePreference.SYSTEM)
 
     def get_full_name(self):
         middle = self.middle_name if self.role == self.Role.STUDENT else ''
