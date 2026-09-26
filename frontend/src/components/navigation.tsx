@@ -25,12 +25,34 @@ const themeOptions: { value: ThemePreference; label: string; icon: IconName }[] 
   { value: 'dark', label: 'Dark', icon: 'moon' },
 ]
 
-function AppearanceChoices({ themePreference, onThemeChange, themeSaving, themeError }: ThemeControls) {
-  return <div className="appearance-control" role="group" aria-label="Appearance">
+function AppearanceChoices({
+  themePreference,
+  onThemeChange,
+  themeSaving,
+  themeError,
+  collapsed,
+  expanded,
+  onToggleCollapsed,
+}: ThemeControls & {
+  collapsed?: boolean
+  expanded?: boolean
+  onToggleCollapsed?: () => void
+}) {
+  return <div className="appearance-control">
     <strong>Appearance</strong>
-    <div className="appearance-control__options">
-      {themeOptions.map(({ value, label, icon }) => <button aria-label={label} aria-pressed={themePreference === value} disabled={themeSaving}
-        key={value} onClick={() => onThemeChange(value)} title={label} type="button"><Icon name={icon} /><span>{label}</span></button>)}
+    <div className="appearance-control__toolbar">
+      <div aria-label="Appearance" className="appearance-control__options" role="group">
+        {themeOptions.map(({ value, label, icon }) => <button aria-label={label} aria-pressed={themePreference === value} className="appearance-control__option" disabled={themeSaving}
+          key={value} onClick={() => onThemeChange(value)} title={label} type="button"><Icon name={icon} /><span>{label}</span></button>)}
+      </div>
+      {onToggleCollapsed ? <>
+        <span aria-hidden="true" className="appearance-control__divider" />
+        <button aria-expanded={expanded} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          className="appearance-control__collapse" onClick={onToggleCollapsed}
+          title={collapsed ? 'Expand navigation' : 'Collapse navigation'} type="button">
+          <Icon name={collapsed ? 'expand' : 'shrink'} />
+        </button>
+      </> : null}
     </div>
     {themeError ? <small role="alert">{themeError}</small> : null}
   </div>
@@ -114,17 +136,6 @@ export function Sidebar({
     >
       <div className="sidebar__top">
         <BrandMark homePath={items[0]?.to ?? '/'} inverted sidebar />
-        <button
-          aria-expanded={expanded}
-          aria-label={collapsed ? 'Keep navigation expanded' : 'Collapse navigation'}
-          className="sidebar__toggle"
-          onClick={toggleCollapsed}
-          title={collapsed ? 'Keep navigation expanded' : 'Collapse navigation'}
-          type="button"
-        >
-          <Icon name={collapsed ? 'expand' : 'shrink'} />
-          <span>{collapsed ? 'Expand navigation' : 'Collapse navigation'}</span>
-        </button>
         <nav className="nav-list" aria-label="Primary">
           {items.map((item) => (
             <NavEntry
@@ -138,11 +149,24 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__bottom">
-        <div className="sidebar__appearance"><AppearanceChoices themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} /></div>
+        <div className="sidebar__appearance"><AppearanceChoices
+          themePreference={themePreference}
+          onThemeChange={onThemeChange}
+          themeSaving={themeSaving}
+          themeError={themeError}
+          collapsed={collapsed}
+          expanded={expanded}
+          onToggleCollapsed={toggleCollapsed}
+        /></div>
         <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`}>
           {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
           <div className="sidebar__user-info">
-            <strong>{fullName(currentUser)}</strong>
+            <div className="sidebar__user-identity">
+              <strong>{fullName(currentUser)}</strong>
+              <button aria-label="Sign out" className="user-chip__logout" onClick={onLogout} title="Sign out" type="button">
+                <Icon name="logout" />
+              </button>
+            </div>
             <span>
               {workspaceLabel ||
                 currentUser?.role?.toLowerCase() ||
@@ -150,16 +174,6 @@ export function Sidebar({
             </span>
           </div>
         </div>
-        <button
-          aria-label="Sign out"
-          className="icon-button icon-button--wide"
-          onClick={onLogout}
-          title="Sign out"
-          type="button"
-        >
-          <Icon name="logout" />
-          <span>Sign out</span>
-        </button>
       </div>
     </aside>
   )

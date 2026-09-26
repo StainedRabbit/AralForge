@@ -12,17 +12,14 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
 
   const sidebar = page.locator('.sidebar')
   await expect(sidebar.locator('.user-chip .avatar')).toHaveCount(0)
-  const iconGeometry = () => sidebar.evaluate((element) => {
+  const navigationGeometry = () => sidebar.evaluate((element) => {
     const bounds = (selector: string) => [...element.querySelectorAll<HTMLElement>(selector)].map((item) => {
       const rect = item.getBoundingClientRect()
       return [rect.x, rect.y, rect.width, rect.height].map((value) => Math.round(value * 100) / 100)
     })
     return {
       brand: bounds('.brand__icon'),
-      toggle: bounds('.sidebar__toggle .icon'),
       navigation: bounds('.nav-link .icon'),
-      account: bounds('.sidebar__bottom .avatar'),
-      signOut: bounds('.sidebar__bottom .icon-button--wide .icon'),
     }
   })
 
@@ -31,14 +28,14 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await page.mouse.move(700, 500)
     await expect(sidebar).toHaveClass(/sidebar--collapsed/)
     await expect(sidebar).not.toHaveClass(/sidebar--preview/)
-    await expect(sidebar.locator('.user-chip')).toBeHidden()
+    await expect(sidebar.locator('.user-chip__logout')).toBeVisible()
     const appearance = sidebar.getByRole('group', { name: 'Appearance' })
-    await expect(appearance.getByRole('button')).toHaveCount(3)
+    await expect(appearance.locator('.appearance-control__option')).toHaveCount(3)
     await expect(appearance.getByRole('button', { name: 'System' })).toBeVisible()
     await expect(appearance.getByRole('button', { name: 'Light' })).toBeVisible()
     await expect(appearance.getByRole('button', { name: 'Dark' })).toBeVisible()
     await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(76)
-    const collapsedGeometry = await iconGeometry()
+    const collapsedGeometry = await navigationGeometry()
 
     await page.mouse.move(70, 10)
     await expect(sidebar).toHaveClass(/sidebar--preview/)
@@ -46,11 +43,11 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await expect(sidebar.locator('.nav-link').first().locator('span')).toBeVisible()
     await expect(sidebar.locator('.sidebar__user-info strong')).toBeVisible()
     await expect(sidebar.getByRole('group', { name: 'Appearance' })).toBeVisible()
-    expect(await iconGeometry()).toEqual(collapsedGeometry)
+    expect(await navigationGeometry()).toEqual(collapsedGeometry)
 
-    await sidebar.getByRole('button', { name: 'Keep navigation expanded' }).click()
+    await sidebar.getByRole('button', { name: 'Expand navigation' }).click()
     await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
-    const expandedGeometry = await iconGeometry()
+    const expandedGeometry = await navigationGeometry()
     expect(expandedGeometry).toEqual(collapsedGeometry)
 
     await sidebar.getByRole('link', { name: 'Modules', exact: true }).click()
@@ -62,7 +59,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
 
   await page.setViewportSize({ width: 1440, height: 560 })
   await page.mouse.move(700, 500)
-  await sidebar.getByRole('button', { name: 'Keep navigation expanded' }).click()
+  await sidebar.getByRole('button', { name: 'Expand navigation' }).click()
   await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
   const signOut = sidebar.getByRole('button', { name: 'Sign out' })
   await expect(signOut).toBeVisible()

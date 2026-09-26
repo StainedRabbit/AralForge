@@ -186,55 +186,6 @@ summary {
   letter-spacing: 0.015em;
 }
 
-.sidebar__toggle {
-  display: grid;
-  grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr);
-  min-height: 40px;
-  align-items: center;
-  width: 100%;
-  gap: 0;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.055);
-  color: rgba(255, 255, 255, 0.78);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.sidebar__toggle:hover,
-.sidebar__toggle:focus-visible {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.11);
-  color: #ffffff;
-}
-
-.sidebar__toggle:focus-visible {
-  outline: 2px solid var(--forge-gold);
-  outline-offset: 2px;
-}
-
-.sidebar__toggle .icon {
-  grid-column: 1;
-  justify-self: center;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-}
-
-.sidebar__toggle > span {
-  grid-column: 2;
-  min-width: 0;
-  max-width: 220px;
-  overflow: hidden;
-  opacity: 1;
-  visibility: visible;
-  white-space: nowrap;
-  transition: max-width 220ms ease, opacity 140ms ease, visibility 0s;
-}
-
 .nav-list {
   gap: 5px;
 }
@@ -322,6 +273,7 @@ summary {
 }
 
 .sidebar .user-chip {
+  position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr);
   gap: 0;
@@ -345,8 +297,49 @@ summary {
   grid-column: 1;
 }
 
-.sidebar--collapsed:not(.sidebar--preview) .user-chip--text-only {
-  display: none;
+.sidebar__user-identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+
+.sidebar__user-identity strong {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-chip__logout {
+  display: grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.user-chip__logout .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.user-chip__logout:hover,
+.user-chip__logout:focus-visible {
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.user-chip__logout:focus-visible {
+  outline: 2px solid var(--forge-gold);
+  outline-offset: 2px;
 }
 
 .sidebar .user-chip span {
@@ -391,6 +384,44 @@ summary {
   background: transparent;
 }
 
+.sidebar--collapsed:not(.sidebar--preview) .user-chip {
+  min-height: 46px;
+  padding: 0;
+}
+
+.sidebar--collapsed:not(.sidebar--preview) .user-chip .avatar {
+  visibility: hidden;
+}
+
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-info {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  max-width: none;
+  overflow: visible;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+}
+
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-identity > strong,
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-info > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.sidebar--collapsed:not(.sidebar--preview) .user-chip__logout {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+
 .sidebar--collapsed.sidebar--preview {
   z-index: 40;
   width: var(--sidebar-width);
@@ -411,10 +442,9 @@ summary {
 }
 
 .sidebar--collapsed:not(.sidebar--preview) .brand__wordmark,
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__toggle > span,
 .sidebar--collapsed:not(.sidebar--preview) .nav-link > span,
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-info,
-.sidebar--collapsed:not(.sidebar--preview) .sidebar__bottom .icon-button > span {
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-identity > strong,
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__user-info > span {
   max-width: 0;
   opacity: 0;
   visibility: hidden;
@@ -423,38 +453,15 @@ summary {
 }
 
 .sidebar--collapsed.sidebar--preview .brand__wordmark,
-.sidebar--collapsed.sidebar--preview .sidebar__toggle > span,
 .sidebar--collapsed.sidebar--preview .nav-link > span,
 .sidebar--collapsed.sidebar--preview .sidebar__user-info,
-.sidebar--collapsed.sidebar--preview .sidebar__bottom .icon-button > span {
+.sidebar--collapsed.sidebar--preview .sidebar__user-identity > strong,
+.sidebar--collapsed.sidebar--preview .sidebar__user-info > span {
   max-width: 240px;
   opacity: 1;
   visibility: visible;
   transition-delay: 0s;
   pointer-events: auto;
-}
-
-.sidebar__bottom .icon-button--wide {
-  display: grid;
-  grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr);
-  gap: 0;
-  padding: 0;
-  text-align: left;
-}
-
-.sidebar__bottom .icon-button--wide .icon {
-  grid-column: 1;
-  justify-self: center;
-}
-
-.sidebar__bottom .icon-button--wide > span {
-  grid-column: 2;
-  max-width: 220px;
-  overflow: hidden;
-  opacity: 1;
-  visibility: visible;
-  white-space: nowrap;
-  transition: max-width 220ms ease, opacity 140ms ease, visibility 0s;
 }
 
 .sidebar .icon-button {
