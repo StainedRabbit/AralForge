@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
 
-export function Page({ children }: { children: ReactNode }) {
-  return <div className="page">{children}</div>
+export function Page({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`page${className ? ` ${className}` : ''}`}>{children}</div>
 }
 
 export function PageHeader({

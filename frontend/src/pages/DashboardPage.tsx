@@ -33,8 +33,12 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
   if (dashboard.isPending) return <Page><SkeletonList count={4} /></Page>
   if (dashboard.error || !dashboard.data) return <Page><StatusBanner tone="warning" title="Dashboard could not load" message="Retry the dashboard request." /></Page>
   const { metrics, recent_modules: modules, upcoming_activities: activities } = dashboard.data
+  const continueModule = modules.find((module) => module.is_accessible && module.learning_contexts.length > 0)
+  const continueTarget = continueModule?.learning_contexts.length === 1
+    ? moduleTarget(continueModule, continueModule.learning_contexts[0])
+    : null
 
-  return <Page>
+  return <Page className="student-dashboard">
     <section className="dashboard-hero">
       <img
         src={dashboardJourney}
@@ -46,23 +50,25 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
       />
       <div className="dashboard-hero__content">
         <p className="eyebrow">Today in AralForge</p><h1>{greeting(currentUser)}</h1>
-        <p>Keep your modules, Main Activities, and grades moving from one focused academic workspace.</p>
+        <p>Pick up your modules and activities where you left off.</p>
         <div className="hero-actions">
-          <Link className="button button--primary" to="/modules"><Icon name="book" /><span>Continue learning</span></Link>
-          <button className="button button--ghost" onClick={() => dashboard.refetch()} type="button"><Icon name="spark" /><span>Refresh</span></button>
+          {continueTarget ? <Link className="button button--primary" to={continueTarget}><Icon name="book" /><span>Continue learning</span></Link>
+            : continueModule ? <button className="button button--primary" onClick={() => setContextModule(continueModule)} type="button"><Icon name="book" /><span>Continue learning</span></button>
+              : <Link className="button button--primary" to="/modules"><Icon name="book" /><span>Continue learning</span></Link>}
+          <span className="dashboard-hero__destination">{continueModule ? `Opens ${continueModule.title}` : 'Browse your modules'}</span>
         </div>
       </div>
     </section>
     <section className="stat-grid" aria-label="Learning summary">
-      <StatCard icon="module" label="Published modules" value={metrics.module_count} detail={`${metrics.completed_modules} completed`} />
-      <StatCard icon="activity" label="Pending activities" value={metrics.pending_activities} detail={`${metrics.submitted_activities} submitted`} />
+      <StatCard icon="module" label={metrics.module_count === 1 ? 'Module available' : 'Modules available'} value={metrics.module_count} detail={`${metrics.completed_modules} completed`} />
+      <StatCard icon="activity" label={metrics.pending_activities === 1 ? 'Activity to submit' : 'Activities to submit'} value={metrics.pending_activities} detail={`${metrics.submitted_activities} ${metrics.submitted_activities === 1 ? 'activity' : 'activities'} submitted`} />
     </section>
     <section className="content-grid content-grid--dashboard">
       <div className="section-block"><SectionHeading action={<Link to="/modules">View all</Link>} subtitle="Your recently updated course material." title="Continue Modules" />
         <div className="card-list">{modules.length ? modules.map((module) => <DashboardModuleRow key={module.id} module={module} onChooseContext={() => setContextModule(module)} />) : <EmptyState icon="book" title="No modules yet" message="Published modules will appear here." />}</div>
       </div>
       <div className="section-block"><SectionHeading action={<Link to="/modules">Open modules</Link>} subtitle="Unsubmitted work from your active modules." title="Upcoming Work" />
-        <div className="timeline-list">{activities.length ? activities.map((activity) => <article aria-label={`Open ${activity.title}`} className="timeline-item" key={activity.id} onClick={(event) => navigateDashboardActivity(event, navigate, `/activities/${activity.id}`)} onKeyDown={(event) => navigateDashboardActivityByKey(event, navigate, `/activities/${activity.id}`)} role="link" tabIndex={0}><span className="timeline-dot"><Icon name="activity" /></span><span><span className="timeline-item__title">{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</span><small>{activityTypeLabel(activity.activity_type)}</small></span></article>) : <EmptyState icon="check" title="Nothing pending" message="All visible activities have a submission." />}</div>
+        <div className="timeline-list">{activities.length ? activities.map((activity) => <article aria-label={`Open ${activity.title}`} className="timeline-item" key={activity.id} onClick={(event) => navigateDashboardActivity(event, navigate, `/activities/${activity.id}`)} onKeyDown={(event) => navigateDashboardActivityByKey(event, navigate, `/activities/${activity.id}`)} role="link" tabIndex={0}><span className="timeline-dot"><Icon name="activity" /></span><span className="timeline-item__body"><span className="timeline-item__title">{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</span><small>{activityTypeLabel(activity.activity_type)} · Not submitted</small></span><span className="timeline-item__action">Open <Icon name="arrow-right" /></span></article>) : <EmptyState icon="check" title="Nothing pending" message="All visible activities have a submission." />}</div>
       </div>
     </section>
     {contextModule ? <DashboardContextDialog module={contextModule} onClose={() => setContextModule(null)} onChoose={(context) => navigate(moduleTarget(contextModule, context))} /> : null}

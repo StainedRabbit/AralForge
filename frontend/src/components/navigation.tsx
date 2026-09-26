@@ -38,22 +38,22 @@ function AppearanceChoices({
   expanded?: boolean
   onToggleCollapsed?: () => void
 }) {
+  const options = <div aria-label="Appearance" className="appearance-control__options" role="group">
+    {themeOptions.map(({ value, label, icon }) => <button aria-label={label} aria-pressed={themePreference === value} className="appearance-control__option" disabled={themeSaving}
+      key={value} onClick={() => onThemeChange(value)} title={label} type="button"><Icon name={icon} /><span>{label}</span></button>)}
+  </div>
   return <div className="appearance-control">
-    <strong>Appearance</strong>
-    <div className="appearance-control__toolbar">
-      <div aria-label="Appearance" className="appearance-control__options" role="group">
-        {themeOptions.map(({ value, label, icon }) => <button aria-label={label} aria-pressed={themePreference === value} className="appearance-control__option" disabled={themeSaving}
-          key={value} onClick={() => onThemeChange(value)} title={label} type="button"><Icon name={icon} /><span>{label}</span></button>)}
-      </div>
-      {onToggleCollapsed ? <>
-        <span aria-hidden="true" className="appearance-control__divider" />
-        <button aria-expanded={expanded} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="appearance-control__collapse" onClick={onToggleCollapsed}
-          title={collapsed ? 'Expand navigation' : 'Collapse navigation'} type="button">
-          <Icon name={collapsed ? 'expand' : 'shrink'} />
-        </button>
-      </> : null}
-    </div>
+    {onToggleCollapsed ? <div className="appearance-control__toolbar">
+      <details className="appearance-control__details">
+        <summary><Icon name="sun" /><span>Appearance</span></summary>
+        {options}
+      </details>
+      <button aria-expanded={expanded} aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        className="appearance-control__collapse" onClick={onToggleCollapsed}
+        title={collapsed ? 'Expand navigation' : 'Collapse navigation'} type="button">
+        <Icon name={collapsed ? 'expand' : 'shrink'} />
+      </button>
+    </div> : <><strong>Appearance</strong>{options}</>}
     {themeError ? <small role="alert">{themeError}</small> : null}
   </div>
 }

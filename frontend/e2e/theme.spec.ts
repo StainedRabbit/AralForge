@@ -11,7 +11,10 @@ async function signIn(page: Page, username: string) {
 }
 
 async function chooseTheme(page: Page, name: 'System' | 'Light' | 'Dark') {
-  const appearance = page.locator('.sidebar').getByRole('group', { name: 'Appearance' })
+  const sidebar = page.locator('.sidebar')
+  const details = sidebar.locator('.appearance-control__details')
+  if (await details.getAttribute('open') === null) await details.locator('summary').click()
+  const appearance = sidebar.getByRole('group', { name: 'Appearance' })
   await appearance.getByRole('button', { name, exact: true }).click()
   await expect(appearance.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
 }
@@ -24,6 +27,7 @@ test('theme follows each account across reloads and browsers', async ({ page, br
   await page.goto('/classes')
   await expect(page.getByRole('heading', { name: 'Classes' })).toBeVisible()
   await page.reload()
+  await page.locator('.sidebar .appearance-control__details summary').click()
   await expect(page.locator('.sidebar').getByRole('button', { name: 'Dark', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
   const anotherBrowser = await browser.newContext({ baseURL: 'http://127.0.0.1:4173' })
@@ -31,6 +35,7 @@ test('theme follows each account across reloads and browsers', async ({ page, br
     const sameUser = await anotherBrowser.newPage()
     await signIn(sameUser, 'E2E-001')
     await expect(sameUser.locator('html')).toHaveAttribute('data-effective-theme', 'dark')
+    await sameUser.locator('.sidebar .appearance-control__details summary').click()
     await expect(sameUser.locator('.sidebar').getByRole('button', { name: 'Dark', exact: true })).toHaveAttribute('aria-pressed', 'true')
   } finally {
     await anotherBrowser.close()
@@ -40,6 +45,7 @@ test('theme follows each account across reloads and browsers', async ({ page, br
   try {
     const teacher = await teacherBrowser.newPage()
     await signIn(teacher, 'e2e-teacher')
+    await teacher.locator('.sidebar .appearance-control__details summary').click()
     await expect(teacher.locator('.sidebar').getByRole('button', { name: 'System', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await chooseTheme(teacher, 'Dark')
     await expect(teacher.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
@@ -71,6 +77,8 @@ test('system tracks device changes and a failed save restores the prior theme', 
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'light')
 
   await page.route('**/api/accounts/users/me/theme/', (route) => route.fulfill({ status: 503, json: { detail: 'Try again later.' } }))
+  const details = page.locator('.sidebar .appearance-control__details')
+  if (await details.getAttribute('open') === null) await details.locator('summary').click()
   await page.locator('.sidebar').getByRole('group', { name: 'Appearance' }).getByRole('button', { name: 'Dark', exact: true }).click()
   await expect(page.locator('.sidebar .appearance-control').getByRole('alert')).toContainText('could not be saved')
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'light')
