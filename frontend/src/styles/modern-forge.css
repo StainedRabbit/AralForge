@@ -193,14 +193,14 @@ summary {
 .nav-link {
   display: grid;
   grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr) auto;
-  min-height: 42px;
+  min-height: 38px;
   gap: 0;
   padding: 0;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.72);
   border: 1px solid transparent;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   transition:
     color 150ms ease,
@@ -312,22 +312,34 @@ summary {
 }
 
 .user-chip__logout {
-  display: grid;
-  flex: 0 0 30px;
-  place-items: center;
-  width: 30px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   min-height: 30px;
-  padding: 0;
+  padding: 0 7px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.72);
   background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .user-chip__logout .icon {
   width: 16px;
   height: 16px;
+}
+
+.user-chip__logout span {
+  display: inline;
+  overflow: visible;
+  color: inherit;
+  font-size: inherit;
 }
 
 .user-chip__logout:hover,
@@ -389,6 +401,10 @@ summary {
   padding: 0;
 }
 
+.sidebar--collapsed:not(.sidebar--preview) .user-chip--text-only {
+  display: none;
+}
+
 .sidebar--collapsed:not(.sidebar--preview) .user-chip .avatar {
   visibility: hidden;
 }
@@ -414,12 +430,9 @@ summary {
   white-space: nowrap;
 }
 
+.sidebar--collapsed:not(.sidebar--preview) .sidebar__appearance,
 .sidebar--collapsed:not(.sidebar--preview) .user-chip__logout {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
+  display: none;
 }
 
 .sidebar--collapsed.sidebar--preview {

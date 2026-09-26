@@ -165,6 +165,7 @@ export function Sidebar({
               <strong>{fullName(currentUser)}</strong>
               <button aria-label="Sign out" className="user-chip__logout" onClick={onLogout} title="Sign out" type="button">
                 <Icon name="logout" />
+                <span>Sign out</span>
               </button>
             </div>
             <span>
