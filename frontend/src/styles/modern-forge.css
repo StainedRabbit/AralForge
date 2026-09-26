@@ -194,7 +194,7 @@ summary {
   display: grid;
   grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr) auto;
   width: calc(100% - 6px);
-  min-height: 34px;
+  min-height: 38px;
   margin-inline: 3px;
   gap: 0;
   padding: 0;
@@ -202,7 +202,7 @@ summary {
   color: rgba(255, 255, 255, 0.72);
   border: 1px solid transparent;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 650;
   transition:
     color 150ms ease,
@@ -247,9 +247,9 @@ summary {
 .nav-link .icon {
   grid-column: 1;
   justify-self: center;
-  width: 19px;
-  height: 19px;
-  flex-basis: 19px;
+  width: 21px;
+  height: 21px;
+  flex-basis: 21px;
 }
 
 .nav-link > span {
