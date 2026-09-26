@@ -45,7 +45,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
 
     await sidebar.getByRole('button', { name: 'Expand navigation' }).click()
     await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
-    await expect.poll(() => sidebar.locator('.nav-link').first().evaluate((link) => link.getBoundingClientRect().height)).toBe(30)
+    await expect.poll(() => sidebar.locator('.nav-link').first().evaluate((link) => link.getBoundingClientRect().height)).toBe(32)
     await expect.poll(() => sidebar.locator('.nav-link').first().evaluate((link) => getComputedStyle(link).fontSize)).toBe('14px')
     await expect.poll(() => sidebar.getByRole('button', { name: 'System' }).evaluate((button) => button.getBoundingClientRect().height)).toBe(32)
     const expandedGeometry = await navigationGeometry()
