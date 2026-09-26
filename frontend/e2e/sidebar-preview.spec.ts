@@ -34,6 +34,7 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
     await expect(appearance.getByRole('button', { name: 'System' })).toBeVisible()
     await expect(appearance.getByRole('button', { name: 'Light' })).toBeVisible()
     await expect(appearance.getByRole('button', { name: 'Dark' })).toBeVisible()
+    await expect.poll(() => appearance.getByRole('button', { name: 'System' }).evaluate((button) => button.getBoundingClientRect().height)).toBe(28)
     await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(76)
     const collapsedGeometry = await navigationGeometry()
 
@@ -47,6 +48,8 @@ test('sidebar preview keeps icon geometry stable across desktop widths', async (
 
     await sidebar.getByRole('button', { name: 'Expand navigation' }).click()
     await expect(sidebar).not.toHaveClass(/sidebar--collapsed/)
+    await expect.poll(() => sidebar.locator('.nav-link').first().evaluate((link) => link.getBoundingClientRect().height)).toBe(42)
+    await expect.poll(() => sidebar.getByRole('button', { name: 'System' }).evaluate((button) => button.getBoundingClientRect().height)).toBe(32)
     const expandedGeometry = await navigationGeometry()
     expect(expandedGeometry).toEqual(collapsedGeometry)
 
