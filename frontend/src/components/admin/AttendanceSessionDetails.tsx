@@ -154,12 +154,16 @@ const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
 function AttendanceLetterIndex({ students }: { students: User[] }) {
   const railRef = useRef<HTMLElement>(null)
   const hideTimer = useRef<number | undefined>(undefined)
+  const boundsTimer = useRef<number | undefined>(undefined)
+  const boundsLocked = useRef(false)
   const dragging = useRef(false)
   const lastPointerLetter = useRef<string | null>(null)
   const [active, setActive] = useState<string | null>(null)
   const [visible, setVisible] = useState(true)
   const [bounds, setBounds] = useState({ top: 0, right: 0, height: 0 })
   const studentIds = students.map((student) => student.id).join(',')
+
+  useEffect(() => () => window.clearTimeout(boundsTimer.current), [])
 
   const showBriefly = useCallback(() => {
     setVisible(true)
@@ -183,7 +187,7 @@ function AttendanceLetterIndex({ students }: { students: User[] }) {
       bottom = Math.min(bottom, clip.bottom)
       right = Math.min(right, clip.right)
     }
-    if (!dragging.current) setBounds({ top, right: Math.max(0, window.innerWidth - right), height: Math.max(0, bottom - top) })
+    if (!boundsLocked.current) setBounds({ top, right: Math.max(0, window.innerWidth - right), height: Math.max(0, bottom - top) })
     const first = [...table.querySelectorAll<HTMLElement>('tr[data-attendance-letter]')]
       .find((row) => row.getBoundingClientRect().bottom > top && row.getBoundingClientRect().top < bottom)
     if (first && !dragging.current) setActive(first.dataset.attendanceLetter ?? null)
@@ -229,18 +233,40 @@ function AttendanceLetterIndex({ students }: { students: User[] }) {
     jump(letter)
   }
 
+  function finishPointer() {
+    dragging.current = false
+    lastPointerLetter.current = null
+    if (railRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
+    showBriefly()
+    window.clearTimeout(boundsTimer.current)
+    boundsTimer.current = window.setTimeout(() => {
+      boundsLocked.current = false
+      measure()
+    }, 1400)
+  }
+
   return <nav ref={railRef} aria-label="Jump to students by last name"
     className={`attendance-letter-rail${visible ? ' attendance-letter-rail--visible' : ''}`}
     style={{ top: bounds.top, right: bounds.right, height: bounds.height }}
     onPointerEnter={showBriefly}
-    onPointerDown={(event) => { dragging.current = true; lastPointerLetter.current = null; event.currentTarget.setPointerCapture(event.pointerId); selectAtPointer(event) }}
+    onPointerDown={(event) => {
+      const letter = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-letter]')?.dataset.letter
+      if (!letter) return
+      window.clearTimeout(boundsTimer.current)
+      boundsLocked.current = true
+      dragging.current = true
+      lastPointerLetter.current = letter
+      event.currentTarget.setPointerCapture(event.pointerId)
+      jump(letter)
+    }}
     onPointerMove={(event) => { if (dragging.current) selectAtPointer(event) }}
-    onPointerUp={() => { dragging.current = false; lastPointerLetter.current = null; measure(); if (railRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); showBriefly() }}
-    onPointerCancel={() => { dragging.current = false; lastPointerLetter.current = null; measure(); showBriefly() }}>
+    onPointerUp={finishPointer}
+    onPointerCancel={finishPointer}>
     {LETTERS.map((letter) => <button key={letter} type="button"
       aria-label={`Jump to ${letter === '#' ? 'other' : letter} last names`}
       aria-current={active === letter ? 'true' : undefined}
       className={active === letter ? 'is-active' : ''}
+      data-letter={letter}
       onClick={(event) => { if (event.detail === 0) jump(letter) }}>{letter}</button>)}
   </nav>
 }

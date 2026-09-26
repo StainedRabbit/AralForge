@@ -334,7 +334,7 @@ async function fillSchedule(page: Page, options: {
   await form.getByLabel('End time').fill(options.end)
 }
 
-test('persists class selection and keeps class links scoped', async ({ page }, testInfo) => {
+test('persists class selection and keeps class links scoped', async ({ page, browser }, testInfo) => {
   await openClasses(page)
   await selectClass(page, 'E2E101')
   const selectedUrl = page.url()
@@ -504,8 +504,79 @@ test('persists class selection and keeps class links scoped', async ({ page }, t
   await expect(attendanceDialog.locator('.attendance-student-group')).toHaveCount(0)
   await attendanceDialog.locator('.attendance-student-browser__table').evaluate((element) => element.scrollIntoView({ block: 'start' }))
   await expect.poll(async () => (await letterRail.boundingBox())?.height ?? 0).toBeGreaterThan(350)
+  await expect(letterRail).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await page.evaluate(() => {
+    const original = Element.prototype.scrollIntoView
+    const jumps = window as Window & { __attendanceLetterJumps?: string[] }
+    jumps.__attendanceLetterJumps = []
+    Element.prototype.scrollIntoView = function (...args) {
+      const letter = (this as HTMLElement).dataset.attendanceLetter
+      if (letter) jumps.__attendanceLetterJumps?.push(letter)
+      return original.apply(this, args)
+    }
+  })
+  const rLetter = letterRail.getByRole('button', { name: 'Jump to R last names' })
+  const sLetter = letterRail.getByRole('button', { name: 'Jump to S last names' })
+  await rLetter.click()
+  await sLetter.click()
+  await rLetter.click()
   await letterRail.getByRole('button', { name: 'Jump to C last names' }).click()
+  await expect.poll(() => page.evaluate(() => (window as Window & { __attendanceLetterJumps?: string[] }).__attendanceLetterJumps)).toEqual(['R', 'S', 'R', 'R'])
+  const rBox = await rLetter.boundingBox()
+  const sBox = await sLetter.boundingBox()
+  expect(rBox && sBox).toBeTruthy()
+  await page.mouse.move(rBox!.x + rBox!.width / 2, rBox!.y + rBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(sBox!.x + sBox!.width / 2, sBox!.y + sBox!.height / 2)
+  await page.mouse.up()
+  await expect.poll(() => page.evaluate(() => (window as Window & { __attendanceLetterJumps?: string[] }).__attendanceLetterJumps?.slice(-2))).toEqual(['R', 'S'])
+  const sizes = await letterRail.evaluate((rail) => {
+    const active = rail.querySelector('button.is-active')!
+    const inactive = rail.querySelector('button:not(.is-active)')!
+    return [parseFloat(getComputedStyle(active).fontSize), parseFloat(getComputedStyle(inactive).fontSize)]
+  })
+  expect(sizes[0] - sizes[1]).toBeGreaterThanOrEqual(1.5)
+  expect(sizes[0] - sizes[1]).toBeLessThanOrEqual(2.1)
+  await page.mouse.move(10, 10)
+  await expect(letterRail).toHaveCSS('opacity', '0', { timeout: 4000 })
+  const railBox = await letterRail.boundingBox()
+  await page.mouse.move(railBox!.x + railBox!.width / 2, railBox!.y + railBox!.height / 2)
+  await expect(letterRail).toHaveCSS('opacity', '1')
   await expect(attendanceDialog.getByRole('row').filter({ hasText: 'Alex Rivera' })).toBeInViewport()
+  const touchContext = await browser.newContext({ baseURL: 'http://127.0.0.1:4173', viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  try {
+    const touchPage = await touchContext.newPage()
+    await openClasses(touchPage)
+    await selectClass(touchPage, 'E2E101')
+    await touchPage.getByRole('button', { name: 'Attendance' }).click()
+    const touchDialog = touchPage.getByRole('dialog', { name: 'Class attendance' })
+    await touchDialog.getByRole('tab', { name: 'History' }).click()
+    await touchDialog.getByRole('row').filter({ hasText: selectedAttendanceDateLabel }).getByRole('button', { name: 'View' }).click()
+    const touchRail = touchDialog.getByRole('navigation', { name: 'Jump to students by last name' })
+    await touchDialog.locator('.attendance-student-browser__table').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+    await touchPage.evaluate(() => {
+      const original = Element.prototype.scrollIntoView
+      const jumps = window as Window & { __attendanceLetterJumps?: string[] }
+      jumps.__attendanceLetterJumps = []
+      Element.prototype.scrollIntoView = function (...args) {
+        const letter = (this as HTMLElement).dataset.attendanceLetter
+        if (letter) jumps.__attendanceLetterJumps?.push(letter)
+        return original.apply(this, args)
+      }
+    })
+    for (const letter of ['R', 'S']) {
+      const box = await touchRail.getByRole('button', { name: `Jump to ${letter} last names` }).boundingBox()
+      expect(box).not.toBeNull()
+      await touchPage.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2)
+    }
+    await expect.poll(() => touchPage.evaluate(() => (window as Window & { __attendanceLetterJumps?: string[] }).__attendanceLetterJumps)).toEqual(['R', 'S'])
+  } finally {
+    await touchContext.close()
+  }
+  await page.setViewportSize({ width: 390, height: 200 })
+  await attendanceDialog.locator('.attendance-modal__panel').evaluate((panel) => { panel.scrollTop = panel.scrollHeight })
+  await expect(sLetter).toHaveAttribute('aria-current', 'true')
+  await page.setViewportSize({ width: 390, height: 844 })
   const riveraHistoryRow = attendanceDialog.getByRole('row').filter({ hasText: 'Alex Rivera' })
   await riveraHistoryRow.locator('select').selectOption('EXCUSED')
   await attendanceDialog.getByRole('button', { name: 'Confirm Excused' }).click()

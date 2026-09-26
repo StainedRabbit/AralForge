@@ -4239,7 +4239,7 @@ a.teacher-recent-item:focus-visible {
   min-height: 0;
   overflow: hidden;
   border-radius: 12px 0 0 12px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: transparent;
   touch-action: none;
   user-select: none;
   opacity: 0;
@@ -4272,7 +4272,7 @@ a.teacher-recent-item:focus-visible {
   border-radius: 9px;
   background: var(--primary-soft);
   color: var(--primary);
-  font-size: clamp(11px, 1.7vh, 15px);
+  font-size: clamp(10px, calc(1.3vh + 2px), 13px);
   font-weight: 800;
 }
 
