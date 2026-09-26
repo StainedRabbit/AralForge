@@ -11,6 +11,11 @@
 .students-directory__caption { display: flex; justify-content: space-between; gap: 12px; padding: 4px 24px 18px; }
 .students-directory__caption span { color: var(--text-muted); font-size: 13px; }
 .students-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.students-table-region { position: relative; }
+.students-letter-index { position: fixed; z-index: 4; display: flex; flex-direction: column; width: 30px; min-height: 0; overflow: hidden; border-radius: 14px 0 0 14px; background: color-mix(in srgb, var(--surface, #fff) 88%, transparent); touch-action: none; user-select: none; opacity: 0; transition: opacity 300ms ease; }
+.students-letter-index--visible, .students-letter-index:hover, .students-letter-index:focus-within { opacity: 1; }
+.students-letter-index button { flex: 1 1 0; min-height: 0; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: clamp(8px, 1.3vh, 11px); line-height: 1; cursor: pointer; }
+.students-letter-index button:hover, .students-letter-index button:focus-visible, .students-letter-index button.students-letter-index__active { border-radius: 9px; background: var(--primary-soft); color: var(--primary); font-size: clamp(11px, 1.7vh, 15px); font-weight: 700; }
 .students-table th { background: var(--surface-muted); color: var(--text-muted); padding: 13px 16px; font-weight: 600; white-space: nowrap; }
 .students-table td { padding: 18px 16px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .students-table td:first-child, .students-table th:first-child { padding-left: 24px; }

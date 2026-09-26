@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, PointerEvent, ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, asArray } from '../../api'
 import type { AuthedRequest, RouteData } from '../../app/types'
@@ -18,6 +18,12 @@ import './students.css'
 type Props = { api: AuthedRequest; data: RouteData; refresh: () => Promise<void> }
 type FormState = { dirty: boolean; busy: boolean }
 const GuardContext = createContext<(id: string, state: FormState | null) => void>(() => {})
+const DIRECTORY_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
+
+function studentLetter(profile: StudentProfile) {
+  const first = (profile.user_detail ? fullRecordName(profile.user_detail) : profile.student_number).trim().charAt(0).toUpperCase()
+  return /^[A-Z]$/.test(first) ? first : '#'
+}
 
 function useFormGuard(dirty: boolean, busy: boolean) {
   const report = useContext(GuardContext)
@@ -117,15 +123,15 @@ export function AdminStudentsPage({ api, data }: Props) {
       <div className="students-directory__caption"><strong>Student directory</strong><span aria-live="polite">{profiles.length} students shown{directory.isFetching ? ' · Updating...' : ''}</span></div>
       {directory.isPending ? <p className="students-feedback" role="status">Loading students...</p> : null}
       {directory.isError ? <Feedback error={directory.error} retry={() => { void (directory.isFetchNextPageError ? directory.fetchNextPage() : directory.refetch()) }} /> : null}
-      {profiles.length ? <table className="students-table"><thead><tr><th>Student</th><th>Student number</th><th>Email</th><th>Profile</th><th>Account</th><th><span className="students-sr-only">Actions</span></th></tr></thead>
-        <tbody>{profiles.map((profile) => <tr key={profile.id}>
+      {profiles.length ? <div className="students-table-region"><table className="students-table"><thead><tr><th>Student</th><th>Student number</th><th>Email</th><th>Profile</th><th>Account</th><th><span className="students-sr-only">Actions</span></th></tr></thead>
+        <tbody>{profiles.map((profile) => <tr key={profile.id} data-directory-student={profile.id} data-directory-letter={studentLetter(profile)}>
           <td data-label="Student"><StudentName profile={profile} /></td>
           <td data-label="Student number">{profile.student_number}</td>
           <td data-label="Email">{profile.user_detail?.email || 'Not provided'}</td>
           <td data-label="Profile"><ActivityBadge active={profile.is_active} /></td>
           <td data-label="Account">{profile.user_detail ? <ActivityBadge active={profile.user_detail.is_active} /> : 'Unavailable'}</td>
           <td data-label="Actions"><button className="button button--secondary button--compact" type="button" data-student-trigger={profile.id} aria-label={`View ${profile.student_number}`} onClick={() => setSelected(profile)}>View student</button></td>
-        </tr>)}</tbody></table> : !directory.isPending && !directory.isError ? <div className="students-feedback">
+        </tr>)}</tbody></table><StudentLetterIndex profiles={profiles} hasNextPage={Boolean(directory.hasNextPage)} fetchNextPage={directory.fetchNextPage} /></div> : !directory.isPending && !directory.isError ? <div className="students-feedback">
           <Icon name="users" /><h2>{search || status !== 'all' ? 'No matching students' : 'Your student directory starts here'}</h2>
           <p>{search || status !== 'all' ? 'Try another name, student number, or profile filter.' : 'Add your first student to manage their details and access.'}</p>
           {search || status !== 'all' ? <button type="button" className="button button--secondary" onClick={() => { setQuery(''); setStatus('all') }}>Clear filters</button>
@@ -152,6 +158,136 @@ function StudentName({ profile }: { profile: StudentProfile }) {
   const count = countReplacementCharacters(`${user?.first_name ?? ''}${user?.middle_name ?? ''}${user?.last_name ?? ''}`)
   return <div className="students-name"><strong>{user ? fullRecordName(user) : profile.student_number}</strong>
     {count ? <small className="name-correction-warning">Name needs correction.</small> : null}</div>
+}
+
+function StudentLetterIndex({ profiles, hasNextPage, fetchNextPage }: {
+  profiles: StudentProfile[]
+  hasNextPage: boolean
+  fetchNextPage: () => Promise<{ data?: { pages: CursorPage<StudentProfile>[] }; hasNextPage?: boolean; isError?: boolean }>
+}) {
+  const indexRef = useRef<HTMLDivElement>(null)
+  const hideTimer = useRef<number | undefined>(undefined)
+  const dragging = useRef(false)
+  const lastPointerLetter = useRef<string | null>(null)
+  const jumping = useRef(false)
+  const desiredLetter = useRef<string | null>(null)
+  const profilesRef = useRef(profiles)
+  const hasNextPageRef = useRef(hasNextPage)
+  const [active, setActive] = useState<string | null>(null)
+  const [visible, setVisible] = useState(true)
+  const [bounds, setBounds] = useState({ top: 0, height: 0, right: 0 })
+  useEffect(() => {
+    profilesRef.current = profiles
+    hasNextPageRef.current = hasNextPage
+  }, [profiles, hasNextPage])
+
+  const measureBounds = useCallback(() => {
+    const rect = indexRef.current?.parentElement?.getBoundingClientRect()
+    if (!rect) return
+    const top = Math.max(0, rect.top)
+    const bottom = Math.min(window.innerHeight, rect.bottom)
+    setBounds({ top, height: Math.max(0, bottom - top), right: Math.max(0, window.innerWidth - rect.right) })
+  }, [])
+
+  const showBriefly = useCallback(() => {
+    setVisible(true)
+    window.clearTimeout(hideTimer.current)
+    hideTimer.current = window.setTimeout(() => {
+      if (!dragging.current && !indexRef.current?.matches(':hover, :focus-within')) setVisible(false)
+    }, 1400)
+  }, [])
+
+  useEffect(() => {
+    const region = indexRef.current?.parentElement
+    if (!region) return
+    const update = () => {
+      const rect = region.getBoundingClientRect()
+      if (!dragging.current) measureBounds()
+      const row = [...region.querySelectorAll<HTMLElement>('tbody tr[data-directory-letter]')]
+        .find((item) => item.getBoundingClientRect().bottom > Math.max(0, rect.top) && item.getBoundingClientRect().top < window.innerHeight)
+      if (row && !dragging.current) setActive(row.dataset.directoryLetter ?? null)
+    }
+    const onScroll = () => { update(); showBriefly() }
+    update()
+    showBriefly()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', update)
+    const observer = new ResizeObserver(update)
+    observer.observe(region)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', update)
+      observer.disconnect()
+      window.clearTimeout(hideTimer.current)
+    }
+  }, [measureBounds, showBriefly])
+
+  const jump = useCallback((letter: string) => {
+    desiredLetter.current = letter
+    setActive(letter)
+    showBriefly()
+    if (jumping.current) return
+    jumping.current = true
+    void (async () => {
+      try {
+        let available = profilesRef.current
+        let more = hasNextPageRef.current
+        while (desiredLetter.current) {
+          const requested = desiredLetter.current
+          let target = available.find((profile) => studentLetter(profile) === requested)
+          if (!target && more) {
+            const previousCount = available.length
+            const next = await fetchNextPage()
+            available = next.data?.pages.flatMap((page) => page.results) ?? available
+            more = !next.isError && available.length > previousCount && Boolean(next.hasNextPage)
+            if (desiredLetter.current !== requested) continue
+            target = available.find((profile) => studentLetter(profile) === requested)
+            if (!target && more) continue
+          }
+          if (!target) {
+            const start = DIRECTORY_LETTERS.indexOf(requested)
+            const subsequent = [...DIRECTORY_LETTERS.slice(start + 1), ...DIRECTORY_LETTERS.slice(0, start)]
+            const nextLetter = subsequent.find((candidate) => available.some((profile) => studentLetter(profile) === candidate))
+            target = available.find((profile) => studentLetter(profile) === nextLetter)
+          }
+          if (desiredLetter.current !== requested) continue
+          desiredLetter.current = null
+          if (target) {
+            setActive(studentLetter(target))
+            const id = target.id
+            window.setTimeout(() => {
+              indexRef.current?.parentElement?.querySelector<HTMLElement>(`[data-directory-student="${id}"]`)?.scrollIntoView({ block: 'start' })
+            }, 0)
+          }
+        }
+      } finally {
+        jumping.current = false
+      }
+    })()
+  }, [fetchNextPage, showBriefly])
+
+  const selectAtPointer = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = indexRef.current?.getBoundingClientRect()
+    if (!rect || rect.height === 0) return
+    const index = Math.min(DIRECTORY_LETTERS.length - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * DIRECTORY_LETTERS.length)))
+    const letter = DIRECTORY_LETTERS[index]
+    if (lastPointerLetter.current !== letter) {
+      lastPointerLetter.current = letter
+      jump(letter)
+    }
+  }
+
+  return <div ref={indexRef} className={`students-letter-index${visible ? ' students-letter-index--visible' : ''}`}
+    aria-label="Student name letter index" style={{ top: bounds.top, height: bounds.height, right: bounds.right }}
+    onPointerEnter={showBriefly} onPointerLeave={() => { if (!dragging.current) showBriefly() }}
+    onPointerDown={(event) => { dragging.current = true; lastPointerLetter.current = null; event.currentTarget.setPointerCapture(event.pointerId); selectAtPointer(event) }}
+    onPointerMove={(event) => { if (dragging.current) selectAtPointer(event) }}
+    onPointerUp={() => { dragging.current = false; lastPointerLetter.current = null; measureBounds(); if (indexRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); showBriefly() }}
+    onPointerCancel={() => { dragging.current = false; lastPointerLetter.current = null; measureBounds(); showBriefly() }}>
+    {DIRECTORY_LETTERS.map((letter) => <button type="button" key={letter} aria-label={`Jump to ${letter === '#' ? 'other names' : `${letter} names`}`}
+      aria-current={active === letter ? 'true' : undefined} className={active === letter ? 'students-letter-index__active' : ''}
+      onClick={(event) => { if (event.detail === 0) jump(letter) }}>{letter}</button>)}
+  </div>
 }
 
 function ActivityBadge({ active }: { active: boolean }) {
