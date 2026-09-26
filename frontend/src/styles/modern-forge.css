@@ -139,7 +139,7 @@ summary {
 
 .sidebar .brand {
   display: grid;
-  grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr);
+  grid-template-columns: calc(var(--sidebar-icon-column-width) - 8px) minmax(0, 1fr);
   width: 100%;
   height: 64px;
   min-height: 64px;
@@ -277,7 +277,7 @@ summary {
   display: grid;
   grid-template-columns: var(--sidebar-icon-column-width) minmax(0, 1fr);
   gap: 0;
-  padding: 12px 0;
+  padding: 8px 0;
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.13);
   background: rgba(255, 255, 255, 0.075);
@@ -301,7 +301,7 @@ summary {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .sidebar__user-identity strong {
@@ -317,8 +317,8 @@ summary {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 30px;
-  padding: 0 7px;
+  min-height: 26px;
+  padding: 0 6px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.72);
@@ -331,8 +331,8 @@ summary {
 }
 
 .user-chip__logout .icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .user-chip__logout span {
