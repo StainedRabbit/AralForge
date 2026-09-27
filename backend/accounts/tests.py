@@ -218,6 +218,58 @@ class StudentAccountCreationTests(APITestCase):
         self.assertTrue(profile.user.check_password('ChosenSecurePass!482'))
 
 
+class StudentDirectorySearchTests(APITestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        teacher = user_model.objects.create_user(
+            username='directory-teacher', password='testpass123', role=user_model.Role.TEACHER,
+        )
+        self.client.force_authenticate(teacher)
+        self.create_student('ST-100', 'Avery', 'Morgan', 'Cruz', True)
+        self.create_student('ST-200', 'Avery', '', 'Santos', False)
+        self.create_student('ST-300', 'Jordan', 'Morgan', 'Cruz', True)
+
+    def create_student(self, number, first, middle, last, active):
+        user = get_user_model().objects.create_user(
+            username=number, password='testpass123', first_name=first,
+            middle_name=middle, last_name=last, role=get_user_model().Role.STUDENT,
+        )
+        return StudentProfile.objects.create(user=user, student_number=number, is_active=active)
+
+    def search(self, value, **params):
+        response = self.client.get(reverse('accounts:student-list'), {'search': value, **params})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data
+
+    def test_partial_full_middle_name_and_number_search(self):
+        for term, expected in (
+            ('Aver', {'ST-100', 'ST-200'}),
+            ('Avery Cruz', {'ST-100'}),
+            ('Cruz Avery', {'ST-100'}),
+            ('Avery Morgan Cruz', {'ST-100'}),
+            ('Morgan', {'ST-100', 'ST-300'}),
+            ('ST-20', {'ST-200'}),
+            ('ST-100 Avery', {'ST-100'}),
+            ('Avery missing', set()),
+        ):
+            with self.subTest(term=term):
+                results = self.search(term)['results']
+                self.assertEqual({row['student_number'] for row in results}, expected)
+
+    def test_full_name_search_with_profile_status_and_cursor(self):
+        self.create_student('ST-400', 'Avery', 'Lee', 'Cruz', True)
+        params = {'search': 'Avery Cruz', 'status': 'active', 'pagination': 'cursor', 'limit': 1}
+        first = self.client.get(reverse('accounts:student-list'), params)
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data['count'], 2)
+        self.assertIsNotNone(first.data['next'])
+        second = self.client.get(first.data['next'])
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual({row['student_number'] for row in first.data['results'] + second.data['results']}, {'ST-100', 'ST-400'})
+        self.assertIsNone(second.data['next'])
+        self.assertEqual(self.search('Avery', status='inactive')['count'], 1)
+
+
 class AvailableStudentPickerTests(APITestCase):
     def setUp(self):
         user_model = get_user_model()

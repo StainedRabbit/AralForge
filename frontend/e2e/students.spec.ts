@@ -45,7 +45,10 @@ test('student list keeps its row action without the Advanced tools view', async 
 
 test('add student preserves validation inputs and shows credentials', async ({ page }) => {
   await openStudents(page)
-  await page.getByRole('button', { name: 'Add student', exact: true }).click()
+  const studentNumber = `E2E-NEW-${randomUUID().slice(0, 8)}`
+  await page.getByLabel('Search students', { exact: true }).fill(studentNumber)
+  await expect(page.getByRole('heading', { name: 'No matching students' })).toBeVisible()
+  await page.getByRole('button', { name: 'Add student', exact: true }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Add student' })
   await dialog.getByLabel('Student number', { exact: true }).fill('E2E-001')
   await dialog.getByLabel('First name', { exact: true }).fill('New')
@@ -55,16 +58,73 @@ test('add student preserves validation inputs and shows credentials', async ({ p
   await expect(dialog.getByLabel('Student number', { exact: true })).toHaveAttribute('aria-invalid', 'true')
   await expect(dialog.getByLabel('First name', { exact: true })).toHaveValue('New')
 
-  const studentNumber = `E2E-NEW-${randomUUID().slice(0, 8)}`
   await dialog.getByLabel('Student number', { exact: true }).fill(studentNumber)
   await dialog.getByRole('button', { name: 'Create student' }).click()
   await expect(dialog.getByRole('heading', { name: 'Student account created' })).toBeVisible()
   await expect(dialog.locator('dd')).toHaveText(studentNumber)
   await dialog.getByRole('button', { name: 'Close student panel' }).click()
-  await page.getByLabel('Search students', { exact: true }).fill(studentNumber)
   await expect(page.locator('.students-table tbody tr')).toHaveCount(1)
   await expect(page.locator('.students-table')).toContainText(studentNumber)
   await expect(page.getByRole('button', { name: `View ${studentNumber}`, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: `View ${studentNumber}`, exact: true }).click()
+  const details = page.getByRole('dialog', { name: 'Student details' })
+  const email = `updated-${randomUUID().slice(0, 8)}@example.test`
+  await details.getByRole('form', { name: 'Account details' }).getByLabel('Email').fill(email)
+  await details.getByRole('form', { name: 'Account details' }).getByRole('button', { name: 'Save changes' }).click()
+  await expect(details.getByRole('status')).toContainText('Account details saved.')
+  await details.getByRole('button', { name: 'Close student panel' }).click()
+  await expect(page.locator('.students-table')).toContainText(email)
+})
+
+test('repeat searches reuse fresh results and profile filters get separate cache entries', async ({ page }) => {
+  const requests: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/accounts/students/?')) requests.push(request.url())
+  })
+  await openStudents(page)
+  const search = page.getByLabel('Search students', { exact: true })
+  const count = (term: string, status = 'all') => requests.filter((request) => {
+    const params = new URL(request).searchParams
+    return params.get('search') === term && params.get('status') === status
+  }).length
+  await search.fill('E2E-001')
+  await expect.poll(() => count('E2E-001')).toBe(1)
+  await expect(page.getByRole('button', { name: 'View E2E-001' })).toBeVisible()
+  expect(count('E2E-001')).toBe(1)
+  await search.fill('E2E-002')
+  await expect.poll(() => count('E2E-002')).toBe(1)
+  await expect(page.getByRole('button', { name: 'View E2E-002' })).toBeVisible()
+  await search.fill('E2E-001')
+  await expect(page.getByRole('button', { name: 'View E2E-001' })).toBeVisible()
+  expect(count('E2E-001')).toBe(1)
+  await page.getByLabel('Profile status').selectOption('inactive')
+  await expect.poll(() => count('E2E-001', 'inactive')).toBe(1)
+  await expect(page.getByRole('heading', { name: 'No matching students' })).toBeVisible()
+  expect(count('E2E-001', 'inactive')).toBe(1)
+  await page.getByLabel('Profile status').selectOption('all')
+  await expect(page.getByRole('button', { name: 'View E2E-001' })).toBeVisible()
+  expect(count('E2E-001')).toBe(1)
+})
+
+test('a search older than two minutes refreshes when revisited', async ({ page }) => {
+  await openStudents(page)
+  await page.clock.install()
+  const requests: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/accounts/students/?')) requests.push(request.url())
+  })
+  const count = (term: string) => requests.filter((request) => new URL(request).searchParams.get('search') === term).length
+  const search = page.getByLabel('Search students', { exact: true })
+  await search.fill('E2E-001')
+  await expect.poll(() => count('E2E-001')).toBe(1)
+  await expect(page.getByRole('button', { name: 'View E2E-001' })).toBeVisible()
+  expect(count('E2E-001')).toBe(1)
+  await search.fill('E2E-002')
+  await expect.poll(() => count('E2E-002')).toBe(1)
+  await expect(page.getByRole('button', { name: 'View E2E-002' })).toBeVisible()
+  await page.clock.fastForward(120_001)
+  await search.fill('E2E-001')
+  await expect.poll(() => count('E2E-001')).toBe(2)
 })
 
 test('server pagination and profile filtering preserve distinct account status', async ({ page }) => {

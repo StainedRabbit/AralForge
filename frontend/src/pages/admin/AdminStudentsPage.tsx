@@ -61,6 +61,8 @@ export function AdminStudentsPage({ api, data }: Props) {
   const queryClient = useQueryClient()
   const directory = useInfiniteQuery({
     queryKey: ['student-directory', search, status],
+    staleTime: 120_000,
+    refetchOnWindowFocus: true,
     initialPageParam: '',
     queryFn: ({ pageParam, signal }) => {
       const params = new URLSearchParams({ pagination: 'cursor', limit: '30', search, status })

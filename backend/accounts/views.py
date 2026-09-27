@@ -143,6 +143,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAdminTeacherOrReadOnly]
     search_fields = ('student_number', 'user__username', 'user__first_name', 'user__middle_name', 'user__last_name')
+    search_all_terms = True
     cursor_ordering = ('sort_last_name', 'sort_first_name', 'id')
 
     def get_queryset(self):

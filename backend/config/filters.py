@@ -40,5 +40,15 @@ class AralForgeQueryFilterBackend(BaseFilterBackend):
             query = Q()
             for field in searchable:
                 query |= Q(**{f'{field}__icontains': search})
+            if getattr(view, 'search_all_terms', False):
+                terms = search.split()
+                if len(terms) > 1:
+                    all_terms = Q()
+                    for term in terms:
+                        any_field = Q()
+                        for field in searchable:
+                            any_field |= Q(**{f'{field}__icontains': term})
+                        all_terms &= any_field
+                    query |= all_terms
             queryset = queryset.filter(query)
         return queryset
