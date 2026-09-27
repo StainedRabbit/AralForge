@@ -41,6 +41,14 @@
 .students-identity p { margin: 5px 0 0; color: var(--text-muted); font-size: 13px; }
 .students-avatar { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border: 1px solid var(--border); border-radius: 16px; background: var(--primary-soft); color: var(--primary); }
 .students-details { display: grid; gap: 20px; }
+.students-password-reset { display: grid; justify-items: start; gap: 14px; padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; min-width: 0; }
+.students-password-reset h3, .students-password-reset p { margin: 0; }
+.students-password-reset h3 { font-size: 17px; }
+.students-password-reset p { font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+.students-password-reset__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.students-password-reset__success { display: grid; gap: 10px; padding: 16px; border-radius: 10px; background: var(--success-soft); }
+.students-password-reset__success strong { overflow-wrap: anywhere; font-size: 18px; color: var(--text); }
+.students-password-reset .students-password-reset__error { color: var(--danger, #b42318); }
 .students-form, .students-enrollments { display: grid; gap: 20px; padding: 24px; background: #fff; border: 1px solid var(--border); border-radius: 14px; min-width: 0; }
 .students-form h3, .students-enrollments h3 { margin: 0; font-size: 17px; }
 .students-form p, .students-enrollments p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
@@ -82,7 +90,7 @@
   .students-drawer__header { padding: 18px; }
   .students-drawer__body { padding: 20px 16px 32px; }
   .students-identity .students-name { font-size: 20px; }
-  .students-form, .students-enrollments { padding: 18px; }
+  .students-form, .students-enrollments, .students-password-reset { padding: 18px; }
   .students-form__fields { grid-template-columns: minmax(0, 1fr); }
   .students-tabs [role="tab"] { flex: 1; padding: 12px 9px; font-size: 13px; }
   .students-enrollments article { align-items: start; flex-direction: column; }

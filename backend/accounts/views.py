@@ -10,7 +10,8 @@ from rest_framework.response import Response
 from subjects.models import ScheduleStudent
 
 from .models import StudentProfile, User
-from .permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from .permissions import IsAdmin, IsAdminTeacher, IsAdminTeacherOrReadOnly
+from .services import reset_student_password
 from .serializers import (
     AvailableStudentSerializer,
     ChangePasswordSerializer,
@@ -145,6 +146,16 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     search_fields = ('student_number', 'user__username', 'user__first_name', 'user__middle_name', 'user__last_name')
     search_all_terms = True
     cursor_ordering = ('sort_last_name', 'sort_first_name', 'id')
+
+    @action(detail=True, methods=['post'], url_path='reset-password', permission_classes=[IsAdmin])
+    def reset_password(self, request, pk=None):
+        profile = self.get_object()
+        student_number = reset_student_password(profile.pk)
+        return Response({
+            'detail': 'Password reset. Existing sessions ended.',
+            'student_number': student_number,
+            'must_change_password': True,
+        })
 
     def get_queryset(self):
         queryset = StudentProfile.objects.select_related('user').annotate(

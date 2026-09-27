@@ -1,6 +1,8 @@
 from django.conf import settings
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from .token_version import CREDENTIAL_VERSION_CLAIM
 
 
 PRIVACY_OFFICER_ALLOWED_PREFIXES = (
@@ -19,6 +21,8 @@ class AralForgeJWTAuthentication(JWTAuthentication):
             return None
 
         user, token = result
+        if token.get(CREDENTIAL_VERSION_CLAIM, 0) != user.credential_version:
+            raise AuthenticationFailed('This session has ended. Sign in again.', code='session_revoked')
         if (
             settings.ADVANCED_PRIVACY_FEATURES
             and user.is_privacy_officer

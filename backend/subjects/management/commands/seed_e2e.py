@@ -43,6 +43,14 @@ class Command(BaseCommand):
         )
         teacher.is_staff = True
         teacher.save(update_fields=['is_staff'])
+        admin = User.objects.create_user(
+            username='e2e-admin',
+            password='e2e-password',
+            first_name='E2E',
+            last_name='Admin',
+            role=User.Role.ADMIN,
+            is_staff=True,
+        )
 
         students = []
         for index, name in enumerate(('Alex Rivera', 'Jamie Santos', 'Morgan Lee'), start=1):
@@ -60,7 +68,7 @@ class Command(BaseCommand):
             )
             students.append(student)
 
-        for user in [teacher, *students]:
+        for user in [teacher, admin, *students]:
             for document, metadata in LEGAL_DOCUMENTS.items():
                 LegalAcknowledgment.objects.create(
                     user=user,

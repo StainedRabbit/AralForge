@@ -206,9 +206,51 @@ function StudentDetail({ api, data, initial, onSaved }: { api: AuthedRequest; da
       <StudentForm key={`profile-${profile.id}`} title="Student profile" fields={profileFields} initial={{ student_number: profile.student_number, is_active: profile.is_active }} api={api} endpoint={path} method="PATCH"
         description={`Changing the student number also changes the login username.${user.must_change_password ? ' This student still needs to change their password, so their temporary password will also become the new student number.' : ' Their existing password stays the same.'}`}
         onSaved={(value) => saved(undefined, value as StudentProfile)} success="Student profile saved." />
+      {data.currentUser?.role === 'ADMIN' ? <StudentPasswordReset key={profile.student_number} api={api} profile={profile} onSaved={async () => { await onSaved(); await detail.refetch() }} /> : null}
     </div> : tab === 'Enrollments' ? <StudentEnrollments api={api} studentId={profile.user} onSaved={onSaved} />
       : <StudentResources api={api} data={data}>{(resources) => <StudentModules api={api} data={resources} profile={profile} onSaved={onSaved} />}</StudentResources>}
   </>
+}
+
+function StudentPasswordReset({ api, profile, onSaved }: { api: AuthedRequest; profile: StudentProfile; onSaved: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [studentNumber, setStudentNumber] = useState('')
+  useFormGuard(false, busy)
+  const name = fullRecordName(profile.user_detail ?? null) || profile.student_number
+  async function resetPassword() {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api<{ student_number: string }>(`/accounts/students/${profile.id}/reset-password/`, { method: 'POST' })
+      setStudentNumber(result.student_number)
+      setConfirming(false)
+      await onSaved()
+    } catch (cause) {
+      setError(toErrorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <section className="students-password-reset" aria-label="Reset student password">
+    <h3>Reset password</h3>
+    {studentNumber ? <div role="status" className="students-password-reset__success">
+      <p>Password reset. Current sessions have ended. The temporary password is the student’s current student number:</p>
+      <strong>{studentNumber}</strong>
+      <p>Give it to the student privately. They must create a new password at their next sign-in.</p>
+    </div> : confirming ? <>
+      <p>Reset {name}’s password to their current student number ({profile.student_number})? Their current sessions will end, and they must create a new password at their next sign-in.</p>
+      <div className="students-password-reset__actions">
+        <button type="button" className="button button--secondary" disabled={busy} onClick={() => { setConfirming(false); setError('') }}>Cancel</button>
+        <button type="button" className="button button--primary" disabled={busy} onClick={() => void resetPassword()}>{busy ? 'Resetting...' : 'Confirm reset'}</button>
+      </div>
+    </> : <>
+      <p>Set a temporary password using the student’s current student number. They will create a new password at sign-in.</p>
+      <button type="button" className="button button--secondary" onClick={() => setConfirming(true)}>Reset password</button>
+    </>}
+    {error ? <p role="alert" className="students-password-reset__error">{error}</p> : null}
+  </section>
 }
 
 function StudentModules({ api, data, profile, onSaved }: { api: AuthedRequest; data: RouteData; profile: StudentProfile; onSaved: () => Promise<void> }) {

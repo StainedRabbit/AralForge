@@ -16,6 +16,7 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role, default=Role.STUDENT)
     must_change_password = models.BooleanField(default=False)
+    credential_version = models.PositiveIntegerField(default=0)
     middle_name = models.CharField(max_length=150, blank=True, default='')
     theme_preference = models.CharField(max_length=6, choices=ThemePreference.choices, default=ThemePreference.SYSTEM)
 

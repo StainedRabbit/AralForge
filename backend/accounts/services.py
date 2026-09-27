@@ -1,6 +1,7 @@
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
 from .models import StudentProfile, User
 
@@ -116,3 +117,16 @@ def update_student_profile(instance, validated_data):
     if update_fields:
         profile.save(update_fields=update_fields)
     return profile
+
+
+@transaction.atomic
+def reset_student_password(profile_id):
+    profile = StudentProfile.objects.select_for_update().select_related('user').get(pk=profile_id)
+    user = profile.user
+    user.set_password(profile.student_number)
+    user.must_change_password = True
+    user.credential_version += 1
+    user.save(update_fields=('password', 'must_change_password', 'credential_version'))
+    for token in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=token)
+    return profile.student_number

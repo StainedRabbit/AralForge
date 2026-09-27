@@ -14,8 +14,122 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
-from .auth import PasswordSetupToken
+from .auth import PasswordSetupToken, issue_refresh_token
 from .models import StudentProfile
+
+
+class StudentPasswordResetTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        model = get_user_model()
+        self.admin = model.objects.create_user(username='reset-admin', password='AdminPass!482', role=model.Role.ADMIN)
+        self.teacher = model.objects.create_user(username='reset-teacher', password='TeacherPass!482', role=model.Role.TEACHER)
+        self.student = model.objects.create_user(username='reset-student', password='OldPass!482', role=model.Role.STUDENT)
+        self.profile = StudentProfile.objects.create(user=self.student, student_number='ST-RESET-1')
+        self.url = reverse('accounts:student-reset-password', args=[self.profile.pk])
+
+    def reset_as_admin(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(self.url)
+        self.client.force_authenticate(user=None)
+        return response
+
+    def test_only_admin_can_reset_password(self):
+        for user in (self.teacher, self.student):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.post(self.url).status_code, 403)
+        self.client.force_authenticate(user=None)
+        self.assertEqual(self.client.post(self.url).status_code, 401)
+        response = self.reset_as_admin()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['student_number'], 'ST-RESET-1')
+        self.assertNotIn('password', response.data)
+
+    def test_reset_revokes_tokens_and_requires_setup(self):
+        old_refresh = issue_refresh_token(self.student)
+        old_access = str(old_refresh.access_token)
+        self.student.must_change_password = True
+        self.student.save(update_fields=['must_change_password'])
+        old_setup = self.client.post(reverse('token_obtain_pair'), {
+            'username': 'ST-RESET-1', 'password': 'OldPass!482',
+        }).data['password_setup_token']
+        self.student.must_change_password = False
+        self.student.save(update_fields=['must_change_password'])
+
+        self.assertEqual(self.reset_as_admin().status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.credential_version, 1)
+        self.assertTrue(self.student.must_change_password)
+        self.assertTrue(self.student.check_password('ST-RESET-1'))
+
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {old_access}')
+        self.assertEqual(client.get(reverse('accounts:user-me')).status_code, 401)
+        client.credentials()
+        client.cookies[settings.AUTH_REFRESH_COOKIE_NAME] = str(old_refresh)
+        self.assertEqual(client.post(reverse('token_refresh')).status_code, 204)
+        self.assertEqual(client.post(reverse('complete_password_setup'), {
+            'password_setup_token': old_setup,
+            'new_password': 'NewSecurePass!482',
+            'confirm_password': 'NewSecurePass!482',
+        }).status_code, 400)
+
+        self.assertEqual(client.post(reverse('token_obtain_pair'), {
+            'username': 'ST-RESET-1', 'password': 'OldPass!482',
+        }).status_code, 401)
+        login = client.post(reverse('token_obtain_pair'), {
+            'username': 'ST-RESET-1', 'password': 'ST-RESET-1',
+        })
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.data['must_change_password'])
+        completed = client.post(reverse('complete_password_setup'), {
+            'password_setup_token': login.data['password_setup_token'],
+            'new_password': 'NewSecurePass!482',
+            'confirm_password': 'NewSecurePass!482',
+        })
+        self.assertEqual(completed.status_code, 200)
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {old_access}')
+        self.assertEqual(client.get(reverse('accounts:user-me')).status_code, 401)
+        client.credentials()
+        client.cookies[settings.AUTH_REFRESH_COOKIE_NAME] = str(old_refresh)
+        self.assertEqual(client.post(reverse('token_refresh')).status_code, 204)
+        self.assertEqual(client.post(reverse('complete_password_setup'), {
+            'password_setup_token': old_setup,
+            'new_password': 'AnotherSecurePass!482',
+            'confirm_password': 'AnotherSecurePass!482',
+        }).status_code, 400)
+
+    def test_tokens_without_version_remain_valid_until_reset(self):
+        old_refresh = RefreshToken.for_user(self.student)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {old_refresh.access_token}')
+        self.assertEqual(client.get(reverse('accounts:user-me')).status_code, 200)
+        self.assertEqual(self.reset_as_admin().status_code, 200)
+        self.assertEqual(client.get(reverse('accounts:user-me')).status_code, 401)
+
+    def test_repeated_reset_revokes_intermediate_setup_token(self):
+        self.assertEqual(self.reset_as_admin().status_code, 200)
+        login = self.client.post(reverse('token_obtain_pair'), {
+            'username': 'ST-RESET-1', 'password': 'ST-RESET-1',
+        })
+        self.assertEqual(self.reset_as_admin().status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.credential_version, 2)
+        response = self.client.post(reverse('complete_password_setup'), {
+            'password_setup_token': login.data['password_setup_token'],
+            'new_password': 'NewSecurePass!482',
+            'confirm_password': 'NewSecurePass!482',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_inactive_account_can_be_reset_but_cannot_sign_in(self):
+        self.student.is_active = False
+        self.student.save(update_fields=['is_active'])
+        self.assertEqual(self.reset_as_admin().status_code, 200)
+        self.assertEqual(self.client.post(reverse('token_obtain_pair'), {
+            'username': 'ST-RESET-1', 'password': 'ST-RESET-1',
+        }).status_code, 401)
 
 
 class StudentAccountCreationTests(APITestCase):

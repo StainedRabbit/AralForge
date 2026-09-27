@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
+from django.db import transaction
 from django.middleware.csrf import get_token
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
@@ -22,10 +23,13 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.utils import datetime_from_epoch
 
 from .models import StudentProfile
+from .token_version import CREDENTIAL_VERSION_CLAIM
 
 
 logger = logging.getLogger('aralforge.auth')
 LEGACY_STUDENT_USERNAME_PATTERN = re.compile(r'^student-(\d+)$')
+
+
 class PasswordSetupToken(Token):
     token_type = 'password_setup'
     lifetime = timedelta(minutes=15)
@@ -64,6 +68,7 @@ class AralForgeTokenObtainPairSerializer(TokenObtainPairSerializer):
         self.user = user
         if user.must_change_password:
             token = PasswordSetupToken.for_user(user)
+            token[CREDENTIAL_VERSION_CLAIM] = user.credential_version
             return {
                 'must_change_password': True,
                 'password_setup_token': str(token),
@@ -96,13 +101,15 @@ class CompletePasswordSetupSerializer(serializers.Serializer):
             raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
         try:
             token = PasswordSetupToken(attrs['password_setup_token'])
-            user = get_user_model().objects.get(
+            user = get_user_model().objects.select_for_update().get(
                 id=token['user_id'],
                 is_active=True,
                 must_change_password=True,
             )
         except (TokenError, get_user_model().DoesNotExist, KeyError) as error:
             raise serializers.ValidationError({'password_setup_token': 'This password setup link is invalid or expired.'}) from error
+        if token.get(CREDENTIAL_VERSION_CLAIM, 0) != user.credential_version:
+            raise serializers.ValidationError({'password_setup_token': 'This password setup link is invalid or expired.'})
         validate_password(attrs['new_password'], user)
         attrs['user'] = user
         return attrs
@@ -114,6 +121,7 @@ class CompletePasswordSetupView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'password_setup'
 
+    @transaction.atomic
     def post(self, request):
         serializer = CompletePasswordSetupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -215,6 +223,7 @@ def set_refresh_cookie(response, value):
 
 def issue_refresh_token(user):
     refresh = RefreshToken.for_user(user)
+    refresh[CREDENTIAL_VERSION_CLAIM] = user.credential_version
     refresh.set_exp(lifetime=refresh_lifetime())
     OutstandingToken.objects.filter(jti=refresh[api_settings.JTI_CLAIM]).update(
         expires_at=datetime_from_epoch(refresh['exp']),
@@ -238,6 +247,8 @@ def refresh_token_user(refresh):
             AralForgeTokenRefreshSerializer.default_error_messages['no_active_account'],
             'no_active_account',
         )
+    if refresh.get(CREDENTIAL_VERSION_CLAIM, 0) != user.credential_version:
+        raise TokenError('This session has ended. Sign in again.')
     return user
 
 

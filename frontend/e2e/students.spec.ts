@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 
-async function openStudents(page: Page) {
+async function openStudents(page: Page, username = 'e2e-teacher') {
   await page.goto('/admin/students')
-  await page.getByLabel('Student number').fill('e2e-teacher')
+  await page.getByLabel('Student number').fill(username)
   await page.getByLabel('Password', { exact: true }).fill('e2e-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.waitForURL(/\/admin(?:\/)?$/)
@@ -32,6 +32,7 @@ test('student list keeps its row action without the Advanced tools view', async 
   await expect(dialog.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(dialog.getByRole('form', { name: 'Account details' })).toBeVisible()
   await expect(dialog.getByRole('form', { name: 'Student profile' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Reset password' })).toHaveCount(0)
   await expect(dialog.getByRole('tab', { name: 'Enrollments', exact: true })).toBeVisible()
   await expect(dialog.getByRole('tab', { name: 'Modules', exact: true })).toBeVisible()
   await dialog.getByRole('tab', { name: 'Enrollments', exact: true }).click()
@@ -41,6 +42,40 @@ test('student list keeps its row action without the Advanced tools view', async 
   await dialog.getByRole('button', { name: 'Close student panel' }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeFocused()
+})
+
+test('admin can confirm a password reset in Student details', async ({ page, browser }) => {
+  await openStudents(page, 'e2e-admin')
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByRole('button', { name: 'Reset password' }).click()
+  await expect(dialog).toContainText('current sessions will end')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog.getByRole('button', { name: 'Confirm reset' })).toHaveCount(0)
+
+  let fail = true
+  await page.route('**/api/accounts/students/*/reset-password/', async (route) => {
+    if (fail) {
+      fail = false
+      await route.fulfill({ status: 500, json: { detail: 'Reset failed. Try again.' } })
+    } else await route.continue()
+  })
+  await dialog.getByRole('button', { name: 'Reset password' }).click()
+  await dialog.getByRole('button', { name: 'Confirm reset' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Reset failed. Try again.')
+  await dialog.getByRole('button', { name: 'Confirm reset' }).click()
+  await expect(dialog.getByRole('status')).toContainText('E2E-001')
+  await expect(dialog.getByRole('status')).toContainText('must create a new password')
+  await expect(dialog.getByRole('form', { name: 'Student profile' })).toContainText('temporary password')
+  await dialog.getByRole('button', { name: 'Close student panel' }).click()
+
+  const studentPage = await browser.newPage()
+  await studentPage.goto('/admin/students')
+  await studentPage.getByLabel('Student number').fill('E2E-001')
+  await studentPage.getByLabel('Password', { exact: true }).fill('E2E-001')
+  await studentPage.getByRole('button', { name: 'Sign in' }).click()
+  await expect(studentPage.getByText('Create your password')).toBeVisible()
+  await studentPage.close()
 })
 
 test('add student preserves validation inputs and shows credentials', async ({ page }) => {
