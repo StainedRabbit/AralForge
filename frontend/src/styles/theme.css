@@ -95,3 +95,34 @@
 :root[data-effective-theme='dark'] .presentation-section-drawer { background: var(--surface); }
 :root[data-effective-theme='dark'] .attendance-confirm-panel { background: var(--warning-soft); }
 :root[data-effective-theme='dark'] .attendance-completion { background: var(--success-soft); }
+
+/* Keep the lesson reader's selected, completed, and locked states clear on navy. */
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip { background: var(--surface); border-color: var(--border); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip:hover { background: var(--surface-strong); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip.complete:not(.active) { background: var(--success-soft); border-color: var(--success); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip.active { background: #382b29; border-color: var(--primary); box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), .3); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip.active :is(span, strong, small) { color: var(--text); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip.active > span { color: var(--primary-dark); }
+:root[data-effective-theme='dark'] .student-lesson-reader .module-lesson-chip.complete:not(.active) > span { color: var(--success); }
+:root[data-effective-theme='dark'] .student-lesson-reader .lesson-content-section--locked { background: var(--surface-muted); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+
+:root[data-effective-theme='dark'] .student-lesson-material { color: var(--text); font-size: 16px; line-height: 1.7; }
+:root[data-effective-theme='dark'] .student-lesson-material .lesson-content-section { padding-block: 28px; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text { max-width: 72ch; line-height: 1.7; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text :is(h1, h2, h3, h4) { color: var(--text); line-height: 1.3; margin-block: 1.3em .55em; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text :is(p, ul, ol) { margin-bottom: 1em; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text :is(ul, ol) { padding-left: 1.5em; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text li { padding-left: .2em; line-height: 1.65; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text :not(pre) > code { color: var(--primary-dark); background: var(--surface-muted); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text pre { color: var(--code-text); background: var(--code-bg); border-color: var(--border-strong); border-top-color: var(--primary); white-space: pre; overflow-wrap: normal; overflow-x: auto; font-size: 14px; line-height: 1.6; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text a { color: var(--primary-dark); text-decoration: underline; text-underline-offset: .18em; }
+:root[data-effective-theme='dark'] .student-lesson-material .rich-text a:hover { color: var(--text); }
+:root[data-effective-theme='dark'] .student-lesson-reader .floating-lesson-nav { background: var(--surface); border-color: var(--border); }
+:root[data-effective-theme='dark'] .student-lesson-reader :is(.module-lesson-chip, .lesson-section-nav button, .floating-lesson-nav button, .student-lesson-breadcrumbs button):focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  :root[data-effective-theme='dark'] .student-lesson-material { font-size: 15px; line-height: 1.65; padding: 12px; }
+  :root[data-effective-theme='dark'] .student-lesson-material .lesson-content-section { padding: 20px 12px; }
+  :root[data-effective-theme='dark'] .student-lesson-material .rich-text { line-height: 1.65; }
+  :root[data-effective-theme='dark'] .student-lesson-material .rich-text pre { font-size: 13px; }
+}

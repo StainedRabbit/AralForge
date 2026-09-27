@@ -126,7 +126,7 @@ export function Sidebar({
   const expanded = !collapsed || previewExpanded
   return (
     <aside
-      className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}${previewExpanded && collapsed ? ' sidebar--preview' : ''}`}
+      className={`sidebar${currentUser?.role === 'STUDENT' ? ' sidebar--student' : ''}${collapsed ? ' sidebar--collapsed' : ''}${previewExpanded && collapsed ? ' sidebar--preview' : ''}`}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPreviewExpanded(false)
       }}
@@ -158,8 +158,9 @@ export function Sidebar({
           expanded={expanded}
           onToggleCollapsed={toggleCollapsed}
         /></div>
-        <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`}>
+        <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`} title={currentUser?.role === 'STUDENT' ? fullName(currentUser) : undefined}>
           {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
+          {currentUser?.role === 'STUDENT' ? <span aria-hidden="true" className="sidebar__student-icon"><Icon name="profile" /></span> : null}
           <div className="sidebar__user-info">
             <div className="sidebar__user-identity">
               <strong>{fullName(currentUser)}</strong>
