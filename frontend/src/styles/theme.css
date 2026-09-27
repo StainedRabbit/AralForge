@@ -126,3 +126,39 @@
   :root[data-effective-theme='dark'] .student-lesson-material .rich-text { line-height: 1.65; }
   :root[data-effective-theme='dark'] .student-lesson-material .rich-text pre { font-size: 13px; }
 }
+
+/* Teacher lesson review and authoring keep their own dark surfaces. */
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-header { padding-block: 14px 18px; border-bottom: 1px solid var(--border); }
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-header h2 { color: var(--text); line-height: 1.2; overflow-wrap: anywhere; }
+:root[data-effective-theme='dark'] .module-lesson-preview .module-topic-pills span { color: var(--text); border-color: var(--border-strong); background: var(--surface-muted); }
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-content-section { background: var(--surface); border-color: var(--border); }
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-outline { background: var(--surface-muted); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-outline button { color: var(--text-muted); font-size: 12px; }
+:root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-outline button:is(:hover, .active) { color: var(--primary-dark); background: var(--primary-soft); }
+:root[data-effective-theme='dark'] .module-lesson-preview .floating-lesson-nav { background: var(--surface); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .module-lesson-preview .floating-lesson-nav button:disabled { opacity: .65; }
+:root[data-effective-theme='dark'] .module-lesson-preview .rich-text { color: var(--text); line-height: 1.7; }
+:root[data-effective-theme='dark'] .module-lesson-preview .rich-text :is(h1, h2, h3, h4) { color: var(--text); }
+:root[data-effective-theme='dark'] .module-lesson-preview .rich-text :not(pre) > code { color: var(--primary-dark); background: var(--surface-muted); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .module-lesson-preview .rich-text pre { color: var(--code-text); background: var(--code-bg); border-color: var(--border-strong); border-top-color: var(--primary); }
+:root[data-effective-theme='dark'] .module-lesson-preview .rich-text a { color: var(--primary-dark); text-decoration: underline; text-underline-offset: .18em; }
+
+:root[data-effective-theme='dark'] .lesson-editor--lesson { background: var(--surface); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-section { padding: 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-soft); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor__meta { background: var(--surface-muted); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-outline { background: var(--surface-muted); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-outline__status--filled,
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-mobile-outline button.is-filled { color: var(--success); background: var(--success-soft); border-color: var(--success); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-outline__status--empty { color: var(--warning); background: var(--warning-soft); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-recovery-banner :is(.icon, span) { color: var(--warning); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .markdown-editor__toolbar { background: var(--surface-muted); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .markdown-editor__preview { background: var(--surface); color: var(--text); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-save-bar { background: color-mix(in srgb, var(--surface) 96%, transparent); border-color: var(--border-strong); }
+:root[data-effective-theme='dark'] .lesson-editor--lesson :is(button, a, input, select, textarea):focus-visible,
+:root[data-effective-theme='dark'] .module-lesson-preview :is(button, a):focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+:root[data-effective-theme='dark'] .lesson-editor--lesson :is(button, .button):disabled { opacity: .6; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  :root[data-effective-theme='dark'] .lesson-editor--lesson .lesson-editor-section { padding: 14px; }
+  :root[data-effective-theme='dark'] .module-lesson-preview .lesson-workspace-header { gap: 14px; }
+}

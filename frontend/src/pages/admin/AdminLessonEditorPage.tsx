@@ -552,7 +552,7 @@ function AdminLessonEditorForm({
         }
       />
 
-      <form className="lesson-editor section-block" onSubmit={submitForm}>
+      <form className="lesson-editor lesson-editor--lesson section-block" onSubmit={submitForm}>
         {recoveryDraft ? (
           <div className="lesson-recovery-banner" role="status">
             <Icon name="warning" />
