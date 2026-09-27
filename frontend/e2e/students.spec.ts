@@ -11,17 +11,36 @@ async function openStudents(page: Page) {
   await expect(page.getByRole('heading', { name: 'Students' })).toBeVisible()
 }
 
-test('student list is the only view and loads without advanced resources', async ({ page }) => {
+test('student list keeps its row action without the Advanced tools view', async ({ page }) => {
   const requests: string[] = []
   page.on('request', (request) => requests.push(request.url()))
+  await page.setViewportSize({ width: 1440, height: 900 })
   await openStudents(page)
+  await expect(page.locator('.students-page .page-header')).not.toContainText('People and access')
+  await expect(page.locator('.students-page .page-header')).not.toContainText('Find students by name')
+  expect((await page.locator('.students-page .page-header').boundingBox())!.height).toBeLessThanOrEqual(80)
   await expect(page.getByRole('region', { name: 'Student list' })).toBeVisible()
   await expect(page.locator('.students-table tbody tr').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add student', exact: true })).toBeVisible()
   await expect(page.getByRole('tab')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /View student|View E2E-/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeVisible()
   await expect(page.getByText('Advanced tools', { exact: true })).toHaveCount(0)
   expect(requests.some((url) => /\/api\/accounts\/users\/\?/.test(url))).toBe(false)
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await expect(dialog).toContainText('E2E-001')
+  await expect(dialog.getByRole('tab', { name: 'Details', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog.getByRole('form', { name: 'Account details' })).toBeVisible()
+  await expect(dialog.getByRole('form', { name: 'Student profile' })).toBeVisible()
+  await expect(dialog.getByRole('tab', { name: 'Enrollments', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('tab', { name: 'Modules', exact: true })).toBeVisible()
+  await dialog.getByRole('tab', { name: 'Enrollments', exact: true }).click()
+  await expect(dialog.getByRole('form', { name: 'Enrollment details' })).toBeVisible()
+  await dialog.getByRole('tab', { name: 'Modules', exact: true }).click()
+  await expect(dialog.locator('.student-module-grant-form')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close student panel' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeFocused()
 })
 
 test('add student preserves validation inputs and shows credentials', async ({ page }) => {
@@ -45,7 +64,7 @@ test('add student preserves validation inputs and shows credentials', async ({ p
   await page.getByLabel('Search students', { exact: true }).fill(studentNumber)
   await expect(page.locator('.students-table tbody tr')).toHaveCount(1)
   await expect(page.locator('.students-table')).toContainText(studentNumber)
-  await expect(page.getByRole('button', { name: /View student/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: `View ${studentNumber}`, exact: true })).toBeVisible()
 })
 
 test('server pagination and profile filtering preserve distinct account status', async ({ page }) => {
@@ -80,7 +99,12 @@ test('server pagination and profile filtering preserve distinct account status',
 test('mobile list and add dialog keep focus and protect unsaved input', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await openStudents(page)
+  const heading = (await page.getByRole('heading', { name: 'Students' }).boundingBox())!
+  const addButton = (await page.getByRole('button', { name: 'Add student', exact: true }).boundingBox())!
+  expect(addButton.y).toBeGreaterThanOrEqual(heading.y + heading.height)
+  expect((await page.locator('.students-page .page-header').boundingBox())!.height).toBeLessThanOrEqual(120)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect(page.getByRole('button', { name: 'View E2E-001', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Add student', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Add student' })
   await dialog.getByLabel('First name', { exact: true }).fill('Unsaved')

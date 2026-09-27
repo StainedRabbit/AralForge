@@ -38,6 +38,7 @@ const mobileMore: NavItem[] = [
   { to: '/admin/gradebook', label: 'Gradebook', icon: 'grade' },
 ]
 
+const STUDENTS: WorkspaceResource[] = []
 const CLASSES: WorkspaceResource[] = ['subjects','schoolYears','terms','modules']
 const MODULES: WorkspaceResource[] = ['subjects','modules']
 const MODULE_EDITOR: WorkspaceResource[] = MODULES
@@ -54,7 +55,7 @@ export function AdminApp({ api, currentUser, profile, pendingCount, onLogout, th
     <main className="app-main"><MobileNavigation badgePath="/admin/grades" currentUser={currentUser} items={mobile} moreItems={moreItems} pendingCount={pendingCount} workspaceLabel="Teacher console" onLogout={onLogout} themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
       <Suspense fallback={<SkeletonList count={4} />}><Routes>
         <Route path="/admin" element={<AdminDashboardPage api={api} currentUser={currentUser} />} />
-        <Route path="/admin/students" element={<AdminStudentsPage api={api} />} />
+        <Route path="/admin/students" element={scoped(STUDENTS, data => <AdminStudentsPage api={api} data={data} />)} />
         <Route path="/admin/classes" element={scoped(CLASSES, data => <AdminClassesPage api={api} data={data} refresh={data.refresh} />)} />
         <Route path="/admin/academic-setup" element={<Navigate replace to="/admin/classes" />} />
         <Route path="/admin/modules" element={scoped(MODULES, data => <AdminModulesPage api={api} data={data} refresh={data.refresh} />)} />
