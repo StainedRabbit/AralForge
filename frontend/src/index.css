@@ -19,6 +19,7 @@
   --surface: #fffdf9;
   --surface-muted: #f3f6f9;
   --surface-strong: #e8eef4;
+  --surface-soft: #f8fafc;
   --text: var(--main-text);
   --text-muted: var(--muted-text);
   --text-soft: #94a3b8;
@@ -101,6 +102,18 @@ button {
 
 button:disabled {
   cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+  box-shadow: none;
+}
+
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
+:where(input, select, textarea):hover:not(:disabled) {
+  border-color: var(--border-strong);
 }
 
 a {

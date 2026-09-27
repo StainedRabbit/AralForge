@@ -36,14 +36,24 @@ async function signIn(page: Page, username: string) {
   await page.getByRole('button', { name: 'Sign in' }).click()
 }
 
+async function selectTheme(page: Page, theme: 'Dark' | 'Light') {
+  const appearance = page.locator('.sidebar .appearance-control__details')
+  const isOpen = await appearance.evaluate((element) => (element as HTMLDetailsElement).open)
+  if (!isOpen) await appearance.locator('summary').click()
+  await page.locator('.sidebar').getByRole('button', { name: theme, exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', theme.toLowerCase())
+  await appearance.locator('summary').click()
+}
+
 test('Modern Forge surfaces render across roles and responsive viewports', async ({ page }) => {
   test.setTimeout(90_000)
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
   const missingAssets: string[] = []
+  let intentionalClassError = false
 
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text())
+    if (message.type() === 'error' && !intentionalClassError) consoleErrors.push(message.text())
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   page.on('response', (response) => {
@@ -78,14 +88,15 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.waitForURL(/\/$/)
   const storageNotice = page.getByRole('button', { name: 'Got it' })
   if (await storageNotice.isVisible()) await storageNotice.click()
-  await page.locator('.sidebar .appearance-control__details summary').click()
-  await page.locator('.sidebar').getByRole('button', { name: 'Dark', exact: true }).click()
-  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark')
-  await page.locator('.sidebar .appearance-control__details summary').click()
+  await selectTheme(page, 'Dark')
   await expect(page.locator('.dashboard-hero h1')).toBeVisible()
   await expect(page.locator('img[src*="aralforge-dashboard-journey"]')).toBeVisible()
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-dashboard-desktop-1440x900.png` })
+
+  await selectTheme(page, 'Light')
+  await page.screenshot({ path: `${screenshotRoot}/student-dashboard-light-desktop-1440x900.png` })
+  await selectTheme(page, 'Dark')
 
   await page.setViewportSize({ width: 360, height: 800 })
   await assertNoViewportOverflow(page)
@@ -98,9 +109,23 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   })
   await expect(page.locator('.student-module-library')).toBeVisible()
   await expect(moduleCard).toBeVisible()
+  const moduleSearch = page.getByRole('searchbox', { name: 'Search modules' })
+  await expect(moduleSearch).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await moduleSearch.fill('no matching module exists')
+  await expect(page.getByText('No matching modules')).toBeVisible()
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/student-modules-empty-search-dark-1440x900.png` })
+  await moduleSearch.fill('')
   await page.setViewportSize({ width: 768, height: 1024 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/student-modules-tablet-768x1024.png` })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.screenshot({ path: `${screenshotRoot}/student-modules-dark-desktop-1440x900.png` })
+  await selectTheme(page, 'Light')
+  await page.screenshot({ path: `${screenshotRoot}/student-modules-light-desktop-1440x900.png` })
+  await selectTheme(page, 'Dark')
 
   const lessonHref = await moduleCard.getByRole('link').getAttribute('href')
   expect(lessonHref).toBeTruthy()
@@ -141,6 +166,7 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.setViewportSize({ width: 1440, height: 900 })
   await signIn(page, 'e2e-teacher')
   await page.waitForURL(/\/admin(?:\/)?$/)
+  await selectTheme(page, 'Light')
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-dashboard-desktop-1440x900.png` })
@@ -154,9 +180,27 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
 
   await page.goto('/admin/classes')
   await expect(page.getByRole('heading', { name: 'Classes' })).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const classListRequest = /\/api\/subjects\/subject-schedules\/\?/
+  intentionalClassError = true
+  await page.route(classListRequest, (route) => route.fulfill({ status: 503, json: { detail: 'Temporary visual test error.' } }))
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Retry classes' })).toBeVisible()
+  await assertNoViewportOverflow(page)
+  await page.screenshot({ path: `${screenshotRoot}/teacher-classes-error-light-1440x900.png` })
+  await page.unroute(classListRequest)
+  intentionalClassError = false
+  await page.getByRole('button', { name: 'Retry classes' }).click()
+  await expect(page.locator('.class-list__item').first()).toBeVisible()
   await page.setViewportSize({ width: 768, height: 1024 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-classes-tablet-768x1024.png` })
+  await expect(page.getByRole('button', { name: /Attendance/ })).toBeDisabled()
+  await page.screenshot({ path: `${screenshotRoot}/teacher-classes-disabled-actions-light-768x1024.png` })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await selectTheme(page, 'Dark')
+  await page.screenshot({ path: `${screenshotRoot}/teacher-classes-dark-desktop-1440x900.png` })
 
   await page.locator('.class-list__item').filter({ hasText: 'E2E101' }).click()
   await expect(page.getByRole('heading', { name: 'Roster' })).toBeVisible()
@@ -196,6 +240,10 @@ test('Modern Forge surfaces render across roles and responsive viewports', async
   await page.setViewportSize({ width: 390, height: 844 })
   await assertNoViewportOverflow(page)
   await page.screenshot({ path: `${screenshotRoot}/teacher-gradebook-mobile-390x844.png` })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.screenshot({ path: `${screenshotRoot}/teacher-gradebook-dark-desktop-1440x900.png` })
+  await selectTheme(page, 'Light')
+  await page.screenshot({ path: `${screenshotRoot}/teacher-gradebook-light-desktop-1440x900.png` })
 
   const brokenImages = await page.locator('img').evaluateAll((images) =>
     images

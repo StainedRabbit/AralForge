@@ -75,6 +75,10 @@ test('admin can confirm a password reset in Student details', async ({ page, bro
   await studentPage.getByLabel('Password', { exact: true }).fill('E2E-001')
   await studentPage.getByRole('button', { name: 'Sign in' }).click()
   await expect(studentPage.getByText('Create your password')).toBeVisible()
+  await studentPage.getByLabel('New password', { exact: true }).fill('e2e-password')
+  await studentPage.getByLabel('Confirm new password', { exact: true }).fill('e2e-password')
+  await studentPage.getByRole('button', { name: 'Set password and continue' }).click()
+  await expect(studentPage.locator('.sidebar')).toBeVisible()
   await studentPage.close()
 })
 

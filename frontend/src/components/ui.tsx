@@ -55,10 +55,12 @@ export function Toolbar({ children }: { children: ReactNode }) {
 }
 
 export function SearchBox({
+  label,
   onChange,
   placeholder,
   value,
 }: {
+  label: string
   onChange: (value: string) => void
   placeholder: string
   value: string
@@ -67,6 +69,7 @@ export function SearchBox({
     <label className="search-box">
       <Icon name="search" />
       <input
+        aria-label={label}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type="search"

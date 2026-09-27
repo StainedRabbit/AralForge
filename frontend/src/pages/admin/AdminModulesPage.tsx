@@ -499,7 +499,7 @@ function ModuleWorkspaceTopBar({
         {selectedLesson ? <strong>Lesson {selectedLesson.order || '-'}</strong> : null}
       </div>
       <div className="module-workspace-search">
-        <SearchBox onChange={onQueryChange} placeholder="Search topics or lessons" value={query} />
+        <SearchBox label="Search topics or lessons" onChange={onQueryChange} placeholder="Search topics or lessons" value={query} />
       </div>
       <div className="module-control-bar">
         <label className="admin-field">

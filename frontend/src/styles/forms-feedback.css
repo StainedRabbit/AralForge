@@ -68,7 +68,7 @@ code {
   place-items: center;
   border: 0;
   border-radius: calc(var(--radius) - 3px);
-  color: var(--muted);
+  color: var(--text-muted);
   background: transparent;
   cursor: pointer;
 }

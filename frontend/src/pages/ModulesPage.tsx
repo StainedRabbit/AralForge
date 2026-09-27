@@ -45,7 +45,7 @@ export function ModulesPage({ api, data }: { api: AuthedRequest; data: RouteData
     <PageHeader eyebrow="Learning library" title="Modules" description="Browse the modules available to you and continue learning at your own pace." />
     {data.loading ? <div className="module-grid"><SkeletonCard /><SkeletonCard /><SkeletonCard /></div> : <section className="student-module-library">
       <div className="student-module-library__toolbar">
-        <SearchBox onChange={setQuery} placeholder="Search modules, subjects, topics, or lessons" value={query} />
+        <SearchBox label="Search modules" onChange={setQuery} placeholder="Search modules, subjects, topics, or lessons" value={query} />
         <span className="student-module-library__count">{visibleModules.length} module{visibleModules.length === 1 ? '' : 's'}</span>
       </div>
       {visibleModules.length ? <div className="module-grid student-module-library__grid">

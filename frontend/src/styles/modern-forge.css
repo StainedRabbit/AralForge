@@ -73,7 +73,7 @@ summary {
 
 .page-header h1 {
   color: var(--forge-navy);
-  font-size: clamp(34px, 4vw, 46px);
+  font-size: 32px;
   font-weight: 820;
 }
 
@@ -125,7 +125,7 @@ summary {
   z-index: -1;
   inset: auto -90px 88px 20px;
   height: 260px;
-  opacity: 0.19;
+  opacity: 0.08;
   background:
     linear-gradient(135deg, transparent 47%, var(--forge-gold) 48% 49%, transparent 50%) 0 0 / 92px 92px,
     linear-gradient(45deg, transparent 47%, rgba(255, 255, 255, 0.42) 48% 49%, transparent 50%) 24px 18px / 120px 120px;
@@ -758,8 +758,8 @@ summary {
 }
 
 .inline-alert {
-  color: #7a4300;
-  border: 1px solid rgba(161, 92, 0, 0.24);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
 }
 
 .status-banner {
@@ -769,11 +769,11 @@ summary {
 }
 
 .status-banner--warning {
-  color: #754200;
+  color: var(--warning);
 }
 
 .status-banner--success {
-  color: #116530;
+  color: var(--success);
 }
 
 /* Authentication */
@@ -938,17 +938,17 @@ summary {
 }
 
 .stat-card:nth-child(2) .stat-card__icon {
-  color: #155d91;
+  color: var(--info);
   background: var(--info-soft);
 }
 
 .stat-card:nth-child(3) .stat-card__icon {
-  color: #116530;
+  color: var(--success);
   background: var(--success-soft);
 }
 
 .stat-card:nth-child(4) .stat-card__icon {
-  color: #7d4e00;
+  color: var(--accent-dark);
   background: var(--accent-soft);
 }
 
@@ -1004,7 +1004,7 @@ summary {
 .admin-feed__item:hover,
 .student-learning-result:hover {
   border-color: rgba(var(--ember-orange-rgb), 0.32);
-  background: #fffaf5;
+  background: var(--surface-strong);
   box-shadow: 0 8px 22px rgba(var(--forge-navy-rgb), 0.07);
   transform: translateY(-1px);
 }
@@ -1042,7 +1042,7 @@ summary {
 
 .progress-line,
 .student-module-progress__track {
-  background: #e7edf3;
+  background: var(--surface-muted);
 }
 
 .progress-line span,
@@ -1109,7 +1109,7 @@ summary {
 }
 
 .subject-chip {
-  color: #7c4700;
+  color: var(--accent-dark);
   border: 1px solid rgba(var(--forge-gold-rgb), 0.34);
   background: var(--accent-soft);
 }
@@ -1120,8 +1120,8 @@ summary {
 
 .status-pill--success,
 .status-pill--today {
-  color: #116530;
-  border-color: rgba(21, 128, 61, 0.18);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
   background: var(--success-soft);
 }
 
@@ -1613,10 +1613,8 @@ table tbody tr:hover td {
     width: 4px;
   }
 
-  .page-header h1,
-  .dashboard-hero h1 {
-    font-size: 30px;
-  }
+  .page-header h1 { font-size: 26px; }
+  .dashboard-hero h1 { font-size: 30px; }
 
   .login-visual {
     min-height: 100%;
