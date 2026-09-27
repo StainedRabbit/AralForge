@@ -595,10 +595,8 @@ a.teacher-recent-item:focus-visible {
 }
 
 .classes-setup__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
-  gap: 16px;
-  align-items: stretch;
+  display: block;
+  min-width: 0;
 }
 
 .classes-setup__panel,
@@ -614,28 +612,6 @@ a.teacher-recent-item:focus-visible {
   align-content: start;
 }
 
-@media (min-width: 1161px) {
-  .classes-setup__panel--finder {
-    align-content: stretch;
-    contain: size;
-    grid-template-rows: max-content minmax(0, 1fr);
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .classes-setup__panel--finder .class-finder {
-    grid-template-rows: max-content minmax(0, 1fr);
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .classes-setup__panel--finder .class-list {
-    height: 100%;
-    min-height: 0;
-  }
-}
-
 .class-finder__filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -649,9 +625,10 @@ a.teacher-recent-item:focus-visible {
 
 .class-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
   gap: 8px;
-  height: clamp(320px, 52vh, 440px);
+  height: 320px;
   overflow: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
@@ -1209,6 +1186,22 @@ a.teacher-recent-item:focus-visible {
   max-height: min(68vh, 680px);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.class-list > :is(.class-list__feedback, .class-list__pagination, .admin-empty-line) { grid-column: 1 / -1; }
+
+.class-schedule-drawer { position: fixed; inset: 0; z-index: 49; }
+.class-schedule-drawer__backdrop { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 0; background: rgba(15, 23, 42, .58); }
+.class-schedule-drawer__panel { position: absolute; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(720px, 94vw); height: 100dvh; border-left: 1px solid var(--border); background: var(--bg); color: var(--text); box-shadow: -12px 0 60px rgba(var(--brand-navy-rgb), .15); }
+.class-schedule-drawer__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 28px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.class-schedule-drawer__header h2 { margin: 0; font-size: 20px; }
+.class-schedule-drawer__body { overflow: auto; padding: 24px 28px 40px; }
+.class-schedule-drawer :focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+@media (max-width: 700px) {
+  .class-list { grid-template-columns: minmax(0, 1fr); }
+  .class-schedule-drawer__panel { width: 100vw; border-left: 0; }
+  .class-schedule-drawer__header { padding: 18px; }
+  .class-schedule-drawer__body { padding: 20px 16px 32px; }
 }
 
 @media (max-width: 900px) {

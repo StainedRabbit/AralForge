@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -228,6 +228,8 @@ export function AdminClassesPage({
   const [serverQuery, setServerQuery] = useState(query.trim())
   const [localPage, setLocalPage] = useState({ key: '', limit: CLASS_PAGE_SIZE })
   const [scheduleMessage, setScheduleMessage] = useState('')
+  const [schedulePanel, setSchedulePanel] = useState<'create' | 'edit' | null>(null)
+  const scheduleTrigger = useRef<HTMLElement | null>(null)
   const requestedScheduleId = Number(searchParams.get('schedule'))
   const requestedScheduleQuery = useQuery({
     queryKey: ['class-schedule', requestedScheduleId],
@@ -308,6 +310,7 @@ export function AdminClassesPage({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['classes'] }),
       queryClient.resetQueries({ queryKey: ['class-search-snapshot'] }),
+      queryClient.invalidateQueries({ queryKey: ['class-schedule'] }),
     ])
   }, [queryClient, refresh])
 
@@ -346,6 +349,12 @@ export function AdminClassesPage({
     }, { replace: true })
   }, [setSearchParams])
 
+  const openSchedulePanel = (mode: 'create' | 'edit') => {
+    scheduleTrigger.current = document.activeElement as HTMLElement | null
+    setScheduleMessage('')
+    setSchedulePanel(mode)
+  }
+
   useEffect(() => {
     if (!selectedTermId && !searchParams.has('term') && activeTerm) {
       queueMicrotask(() => setSelectedTermId(String(activeTerm.id)))
@@ -380,11 +389,12 @@ export function AdminClassesPage({
 
   return (
     <Page className="classes-page">
-      <PageHeader title="Classes" />
+      <PageHeader title="Classes" actions={<button className="button button--primary" type="button" onClick={() => openSchedulePanel('create')}><Icon name="plus" />Add class</button>} />
 
       <section className="classes-setup__grid">
         <div className="classes-setup__panel classes-setup__panel--finder section-block">
           <SectionHeading
+            action={selectedSchedule ? <button className="button button--secondary" type="button" onClick={() => openSchedulePanel('edit')}><Icon name="edit" />Edit schedule</button> : undefined}
             subtitle={`${classCount} class${classCount === 1 ? '' : 'es'}`}
             title="Select Class"
           />
@@ -417,23 +427,6 @@ export function AdminClassesPage({
           />
         </div>
 
-        <div className="classes-setup__panel section-block">
-          <SectionHeading
-            subtitle={selectedSchedule ? classScheduleSummary(selectedSchedule) : 'Create or update schedule'}
-            title="Schedule Setup"
-          />
-          <ScheduleForm
-            api={api}
-            data={data}
-            defaultTermId={activeTerm?.id ?? null}
-            key={selectedSchedule?.id ?? 'new'}
-            message={scheduleMessage}
-            refresh={refreshClasses}
-            selectedSchedule={selectedSchedule}
-            setMessage={setScheduleMessage}
-            setSelectedScheduleId={selectSchedule}
-          />
-        </div>
       </section>
 
       <ClassRoster
@@ -442,6 +435,18 @@ export function AdminClassesPage({
         key={selectedSchedule?.id ?? 'no-class'}
         selectedSchedule={selectedSchedule}
       />
+      {schedulePanel ? <ScheduleDrawer
+        api={api}
+        data={data}
+        defaultTermId={activeTerm?.id ?? null}
+        message={scheduleMessage}
+        onClose={() => setSchedulePanel(null)}
+        onSaved={(id) => { selectSchedule(id); setSchedulePanel(null) }}
+        refresh={refreshClasses}
+        returnFocus={scheduleTrigger}
+        selectedSchedule={schedulePanel === 'edit' ? selectedSchedule : null}
+        setMessage={setScheduleMessage}
+      /> : null}
     </Page>
   )
 }
@@ -616,24 +621,88 @@ function ClassFinder({
   )
 }
 
-function ScheduleForm({
-  api,
-  data,
-  defaultTermId,
-  message,
-  refresh,
-  selectedSchedule,
-  setMessage,
-  setSelectedScheduleId,
+function ScheduleDrawer({
+  api, data, defaultTermId, message, onClose, onSaved, refresh, returnFocus, selectedSchedule, setMessage,
 }: {
   api: AuthedRequest
   data: RouteData
   defaultTermId: number | null
   message: string
+  onClose: () => void
+  onSaved: (id: number) => void
+  refresh: () => Promise<void>
+  returnFocus: RefObject<HTMLElement | null>
+  selectedSchedule: SubjectSchedule | null
+  setMessage: (value: string) => void
+}) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const formState = useRef({ dirty: false, busy: false })
+  const reportState = useCallback((dirty: boolean, busy: boolean) => { formState.current = { dirty, busy } }, [])
+  const tryClose = () => {
+    if (formState.current.busy) return
+    if (formState.current.dirty && !window.confirm('Discard unsaved changes?')) return
+    onClose()
+  }
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    const trigger = returnFocus.current
+    document.body.style.overflow = 'hidden'
+    closeRef.current?.focus()
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.requestAnimationFrame(() => {
+        if (trigger?.isConnected) trigger.focus()
+      })
+    }
+  }, [returnFocus])
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('.attendance-modal')) return
+    if (event.key === 'Escape') { event.preventDefault(); tryClose(); return }
+    if (event.key !== 'Tab') return
+    const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]',
+    ) ?? []).filter((element) => element.getClientRects().length > 0)
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+  }
+  return createPortal(<div className="class-schedule-drawer" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown}>
+    <button className="class-schedule-drawer__backdrop" type="button" tabIndex={-1} aria-label="Close schedule panel" onClick={tryClose} />
+    <div className="class-schedule-drawer__panel" ref={panelRef}>
+      <header className="class-schedule-drawer__header"><h2 id={titleId}>{selectedSchedule ? 'Edit schedule' : 'Add class'}</h2>
+        <button className="icon-button" type="button" ref={closeRef} aria-label="Close schedule panel" onClick={tryClose}><Icon name="close" /></button></header>
+      <div className="class-schedule-drawer__body"><ScheduleForm
+        api={api} data={data} defaultTermId={defaultTermId} message={message} onSaved={onSaved}
+        onStateChange={reportState} refresh={refresh} selectedSchedule={selectedSchedule} setMessage={setMessage}
+      /></div>
+    </div>
+  </div>, document.body)
+}
+
+function ScheduleForm({
+  api,
+  data,
+  defaultTermId,
+  message,
+  onSaved,
+  onStateChange,
+  refresh,
+  selectedSchedule,
+  setMessage,
+}: {
+  api: AuthedRequest
+  data: RouteData
+  defaultTermId: number | null
+  message: string
+  onSaved: (id: number) => void
+  onStateChange: (dirty: boolean, busy: boolean) => void
   refresh: () => Promise<void>
   selectedSchedule: SubjectSchedule | null
   setMessage: (value: string) => void
-  setSelectedScheduleId: (value: number | null) => void
 }) {
   const [initialDraft, setInitialDraft] = useState(() =>
     scheduleDraft(selectedSchedule, defaultTermId),
@@ -651,6 +720,7 @@ function ScheduleForm({
   )
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
   const isDirty = JSON.stringify(draft) !== JSON.stringify(initialDraft)
+  useEffect(() => { onStateChange(isDirty, saving || changingStatus) }, [onStateChange, isDirty, saving, changingStatus])
 
   useEffect(() => {
     if (!isDirty) return
@@ -692,9 +762,9 @@ function ScheduleForm({
       const savedDraft = scheduleDraft(schedule, defaultTermId)
       setInitialDraft(savedDraft)
       setDraft(savedDraft)
-      setSelectedScheduleId(schedule.id)
       setMessage('Schedule saved.')
       await refresh()
+      onSaved(schedule.id)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -716,6 +786,7 @@ function ScheduleForm({
       setMessage(selectedSchedule.is_active ? 'Class archived.' : 'Class restored.')
       setShowArchiveConfirm(false)
       await refresh()
+      onSaved(selectedSchedule.id)
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -728,20 +799,6 @@ function ScheduleForm({
     <form className="class-form" onSubmit={submitForm}>
       <div className="class-form__header">
         <strong>{selectedSchedule ? 'Edit schedule' : 'New schedule'}</strong>
-        {selectedSchedule ? (
-          <button
-            className="button button--secondary"
-            disabled={changingStatus || saving}
-            onClick={() => {
-              setSelectedScheduleId(null)
-              setDraft(scheduleDraft(null, defaultTermId))
-            }}
-            type="button"
-          >
-            <Icon name="plus" />
-            <span>New</span>
-          </button>
-        ) : null}
       </div>
 
       <div className="admin-field">
@@ -909,6 +966,7 @@ function ScheduleForm({
               : 'button button--secondary class-delete-button'}
             disabled={changingStatus || saving}
             onClick={() => {
+              if (isDirty && !window.confirm('Discard unsaved schedule changes?')) return
               if (selectedSchedule.is_active) setShowArchiveConfirm(true)
               else void changeClassStatus()
             }}

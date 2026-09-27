@@ -31,6 +31,40 @@ async function selectClass(page: Page, code: string) {
   await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
 }
 
+test('schedule drawer guards unsaved work and returns focus', async ({ page }) => {
+  await openClasses(page)
+  const add = page.getByRole('button', { name: 'Add class' })
+  await add.click()
+  const drawer = page.getByRole('dialog', { name: 'Add class' })
+  await expect(drawer).toBeVisible()
+  await drawer.getByLabel('Section').fill('UNSAVED-CLASS')
+  page.once('dialog', (prompt) => prompt.dismiss())
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByLabel('Section')).toHaveValue('UNSAVED-CLASS')
+  page.once('dialog', (prompt) => prompt.accept())
+  await drawer.locator('.class-schedule-drawer__backdrop').click({ position: { x: 5, y: 5 } })
+  await expect(drawer).toHaveCount(0)
+  await expect(add).toBeFocused()
+
+  await selectClass(page, 'E2E101')
+  const selectedUrl = page.url()
+  await add.click()
+  await expect(page).toHaveURL(selectedUrl)
+  await expect(drawer.getByLabel('Subject', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: 'Close schedule panel' }).last().click()
+  const edit = page.getByRole('button', { name: 'Edit schedule' })
+  await edit.click()
+  await expect(page.getByRole('dialog', { name: 'Edit schedule' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close schedule panel' }).last().click()
+  await expect(edit).toBeFocused()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await add.click()
+  const width = await drawer.locator('.class-schedule-drawer__panel').evaluate((element) => element.getBoundingClientRect().width)
+  expect(width).toBeLessThanOrEqual(390)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
 test('debounces roster search, retains rows, ignores superseded responses, and reuses cache', async ({ page }) => {
   const searches: string[] = []
   let initialRows: Array<Record<string, unknown>> = []
@@ -302,13 +336,8 @@ test('downloads detailed grades from roster More actions and reports failures', 
 })
 
 async function startNewSchedule(page: Page) {
-  const newButton = page.locator('.class-form').getByRole('button', { name: 'New' })
-  if (/schedule=/.test(page.url())) {
-    await expect(newButton).toBeVisible()
-    await newButton.click()
-    await expect(page.locator('.class-form')).toContainText('New schedule')
-    await expect(page).not.toHaveURL(/schedule=/)
-  }
+  await page.getByRole('button', { name: 'Add class' }).click()
+  await expect(page.getByRole('dialog', { name: 'Add class' }).locator('.class-form')).toContainText('New schedule')
 }
 
 async function fillSchedule(page: Page, options: {
@@ -341,7 +370,10 @@ test('persists class selection and keeps class links scoped', async ({ page, bro
 
   await page.reload()
   await expect(page).toHaveURL(selectedUrl)
+  await expect(page.getByRole('dialog', { name: 'Edit schedule' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Edit schedule' }).click()
   await expect(page.locator('.class-form').getByLabel('Subject', { exact: true })).toHaveValue(/\d+/)
+  await page.getByRole('button', { name: 'Close schedule panel' }).last().click()
   await expect(page.getByRole('heading', { name: 'Roster' })).toBeVisible()
   const rosterTotals = page.getByRole('group', { name: 'Filter roster by status' })
   await expect(rosterTotals).toContainText('2Active')
@@ -975,29 +1007,24 @@ test('loads the Select Class list ten classes at a time inside its panel', async
 
   const desktopScrollMetrics = await classList.evaluate((element) => {
     const finderPanel = element.closest<HTMLElement>('.classes-setup__panel--finder')
-    const setupPanel = finderPanel?.parentElement?.querySelector<HTMLElement>(
-      '.classes-setup__panel:not(.classes-setup__panel--finder)',
-    )
-    const scheduleForm = setupPanel?.querySelector<HTMLElement>('.class-form')
-    if (!finderPanel || !setupPanel || !scheduleForm) throw new Error('Classes setup layout is missing.')
+    const roster = finderPanel?.parentElement?.nextElementSibling as HTMLElement | null
+    if (!finderPanel || !roster) throw new Error('Classes layout is missing.')
 
     const styles = window.getComputedStyle(element)
-    const listRect = element.getBoundingClientRect()
-    const scheduleFormRect = scheduleForm.getBoundingClientRect()
+    const items = element.querySelectorAll<HTMLElement>('.class-list__item')
     return {
       clientHeight: element.clientHeight,
-      finderPanelHeight: finderPanel.getBoundingClientRect().height,
-      listBottom: listRect.bottom,
+      finderBottom: finderPanel.getBoundingClientRect().bottom,
       overflowY: styles.overflowY,
-      scheduleFormBottom: scheduleFormRect.bottom,
+      rosterTop: roster.getBoundingClientRect().top,
       scrollHeight: element.scrollHeight,
-      setupPanelHeight: setupPanel.getBoundingClientRect().height,
+      firstRowY: items[0]?.getBoundingClientRect().top,
+      secondRowY: items[1]?.getBoundingClientRect().top,
     }
   })
   expect(desktopScrollMetrics.overflowY).toBe('auto')
-  expect(desktopScrollMetrics.finderPanelHeight).toBeCloseTo(desktopScrollMetrics.setupPanelHeight, 0)
-  expect(Math.abs(desktopScrollMetrics.listBottom - desktopScrollMetrics.scheduleFormBottom))
-    .toBeLessThanOrEqual(1)
+  expect(desktopScrollMetrics.rosterTop).toBeGreaterThan(desktopScrollMetrics.finderBottom)
+  expect(desktopScrollMetrics.firstRowY).toBeCloseTo(desktopScrollMetrics.secondRowY, 0)
   expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
 
   await classList.evaluate((element) => {
@@ -1264,7 +1291,7 @@ test('creates adjacent and overlapping schedules', async ({ page }) => {
     term: '1st Semester',
   })
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
-  await expect(page.locator('.class-form')).toContainText('Schedule saved.')
+  await expect(page.getByRole('dialog', { name: 'Add class' })).toHaveCount(0)
   await expect(page).toHaveURL(/schedule=\d+/)
   await expect.poll(() => snapshotRequests).toBeGreaterThan(initialSnapshotRequests)
 
@@ -1278,7 +1305,7 @@ test('creates adjacent and overlapping schedules', async ({ page }) => {
     term: '1st Semester',
   })
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
-  await expect(page.locator('.class-form')).toContainText('Schedule saved.')
+  await expect(page.getByRole('dialog', { name: 'Add class' })).toHaveCount(0)
   await expect(page).toHaveURL(/schedule=\d+/)
 })
 
@@ -1836,18 +1863,21 @@ test('archives and restores a class without deleting it', async ({ page }) => {
     term: '2nd Semester',
   })
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
-  await expect(page.locator('.class-form')).toContainText('Schedule saved.')
+  await expect(page.getByRole('dialog', { name: 'Add class' })).toHaveCount(0)
 
+  await page.getByRole('button', { name: 'Edit schedule' }).click()
   await page.locator('.class-form').getByRole('button', { name: 'Archive class' }).click()
   const dialog = page.getByRole('dialog', { name: 'Archive this class?' })
   await expect(dialog).toContainText('roster, attendance, and grades will be preserved')
   await dialog.getByRole('button', { name: 'Archive class' }).click()
-  await expect(page.locator('.class-form')).toContainText('Status: Archived')
+  await expect(page.getByRole('dialog', { name: 'Edit schedule' })).toHaveCount(0)
 
   await expect(page.locator('.class-list__item').filter({ hasText: 'E2E-ARCHIVE' })).toBeVisible()
 
+  await page.getByRole('button', { name: 'Edit schedule' }).click()
+  await expect(page.locator('.class-form')).toContainText('Status: Archived')
   await page.locator('.class-form').getByRole('button', { name: 'Restore class' }).click()
-  await expect(page.locator('.class-form')).toContainText('Status: Active')
+  await expect(page.getByRole('dialog', { name: 'Edit schedule' })).toHaveCount(0)
 })
 
 test('creates subjects and manages terms without leaving Schedule Setup', async ({ page }, testInfo) => {
