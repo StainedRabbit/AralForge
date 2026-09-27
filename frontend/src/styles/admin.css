@@ -583,6 +583,17 @@ a.teacher-recent-item:focus-visible {
   }
 }
 
+.classes-page { gap: 16px; }
+.classes-page .page-header { align-items: center; gap: 12px; min-height: 0; padding: 6px 0 12px 16px; }
+.classes-page .page-header::before { inset: 8px auto 12px 0; width: 4px; }
+.classes-page .page-header h1 { font-size: 28px; line-height: 1.15; }
+
+@media (max-width: 600px) {
+  .classes-page .page-header { padding-block: 4px 10px; }
+  .classes-page .page-header::before { inset-block: 5px 10px; }
+  .classes-page .page-header h1 { font-size: 24px; }
+}
+
 .classes-setup__grid {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);

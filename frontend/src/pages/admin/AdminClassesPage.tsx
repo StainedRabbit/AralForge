@@ -225,6 +225,8 @@ export function AdminClassesPage({
     searchParams.get('term') ?? activeTerm?.id.toString() ?? '',
   )
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
+  const [serverQuery, setServerQuery] = useState(query.trim())
+  const [localPage, setLocalPage] = useState({ key: '', limit: CLASS_PAGE_SIZE })
   const [scheduleMessage, setScheduleMessage] = useState('')
   const requestedScheduleId = Number(searchParams.get('schedule'))
   const requestedScheduleQuery = useQuery({
@@ -240,9 +242,24 @@ export function AdminClassesPage({
     ? String(requestedWorkspaceSchedule.school_year_semester)
     : selectedTermId
   const queryClient = useQueryClient()
+  const classSnapshotQuery = useQuery({
+    queryKey: ['class-search-snapshot', queryTermId],
+    enabled: Boolean(queryTermId && queryClient.getQueryData(['classes', queryTermId, serverQuery])),
+    staleTime: 120_000,
+    refetchOnWindowFocus: true,
+    retry: false,
+    queryFn: ({ signal }) => fetchClassSnapshot(api, queryTermId, signal),
+  })
+  const classSnapshot = classSnapshotQuery.data
+  useEffect(() => {
+    if (classSnapshot || query.trim() === serverQuery) return
+    const timeout = window.setTimeout(() => setServerQuery(query.trim()), 150)
+    return () => window.clearTimeout(timeout)
+  }, [classSnapshot, query, serverQuery])
   const scheduleListQuery = useInfiniteQuery({
     initialPageParam: 0,
-    queryKey: ['classes', queryTermId, query],
+    queryKey: ['classes', queryTermId, serverQuery],
+    enabled: !classSnapshot,
     queryFn: ({ pageParam, signal }) => {
       const params = new URLSearchParams({
         limit: String(CLASS_PAGE_SIZE),
@@ -250,7 +267,7 @@ export function AdminClassesPage({
         status: 'all',
       })
       if (queryTermId) params.set('term', queryTermId)
-      if (query.trim()) params.set('search', query.trim())
+      if (serverQuery) params.set('search', serverQuery)
       return api<ApiPage<SubjectSchedule>>(
         `/subjects/subject-schedules/?${params.toString()}`,
         { signal },
@@ -269,8 +286,11 @@ export function AdminClassesPage({
   const effectiveTermId = selectedSchedule
     ? String(selectedSchedule.school_year_semester)
     : selectedTermId
+  const localMatches = classSnapshot ? filterSchedules(classSnapshot, query, effectiveTermId) : null
+  const localPageKey = `${queryTermId}:${query.trim().toLowerCase()}`
+  const localLimit = localPage.key === localPageKey ? localPage.limit : CLASS_PAGE_SIZE
   const visibleSchedules = filterSchedules(
-    routeSchedules,
+    localMatches ? localMatches.slice(0, localLimit) : routeSchedules,
     query,
     effectiveTermId,
   )
@@ -280,13 +300,15 @@ export function AdminClassesPage({
   const finderSchedules = selectedScheduleMatchesFilters
     ? uniqueSchedules([selectedSchedule!, ...visibleSchedules])
     : visibleSchedules
-  const classCount = scheduleListQuery.data?.pages[0]?.count
-    ?? 0
+  const classCount = localMatches?.length ?? scheduleListQuery.data?.pages[0]?.count ?? 0
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
 
   const refreshClasses = useCallback(async () => {
     await refresh()
-    await queryClient.invalidateQueries({ queryKey: ['classes'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['classes'] }),
+      queryClient.resetQueries({ queryKey: ['class-search-snapshot'] }),
+    ])
   }, [queryClient, refresh])
 
   const selectSchedule = useCallback((value: number | null) => {
@@ -302,6 +324,7 @@ export function AdminClassesPage({
 
   const selectTerm = useCallback((value: string) => {
     setSelectedTermId(value)
+    setLocalPage({ key: '', limit: CLASS_PAGE_SIZE })
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
       if (value) next.set('term', value)
@@ -356,12 +379,8 @@ export function AdminClassesPage({
   ])
 
   return (
-    <Page>
-      <PageHeader
-        eyebrow="Academic structure"
-        title="Classes"
-        description="Select a class, edit its schedule, and manage its roster."
-      />
+    <Page className="classes-page">
+      <PageHeader title="Classes" />
 
       <section className="classes-setup__grid">
         <div className="classes-setup__panel classes-setup__panel--finder section-block">
@@ -371,12 +390,15 @@ export function AdminClassesPage({
           />
           <ClassFinder
             classCount={classCount}
-            errorMessage={scheduleListQuery.isError ? toErrorMessage(scheduleListQuery.error) : ''}
-            hasNextPage={scheduleListQuery.hasNextPage}
-            isFetchingNextPage={scheduleListQuery.isFetchingNextPage}
-            isNextPageError={scheduleListQuery.isFetchNextPageError}
-            isPending={scheduleListQuery.isPending}
-            loadNextPage={() => void scheduleListQuery.fetchNextPage()}
+            errorMessage={!localMatches && scheduleListQuery.isError ? toErrorMessage(scheduleListQuery.error) : ''}
+            hasNextPage={localMatches ? localLimit < localMatches.length : scheduleListQuery.hasNextPage}
+            isFetchingNextPage={!localMatches && scheduleListQuery.isFetchingNextPage}
+            isNextPageError={!localMatches && scheduleListQuery.isFetchNextPageError}
+            isPending={!localMatches && (scheduleListQuery.isPending || query.trim() !== serverQuery)}
+            loadNextPage={() => {
+              if (localMatches) setLocalPage({ key: localPageKey, limit: localLimit + CLASS_PAGE_SIZE })
+              else void scheduleListQuery.fetchNextPage()
+            }}
             query={query}
             retry={() => {
               if (scheduleListQuery.isFetchNextPageError) {
@@ -3088,11 +3110,28 @@ function filterSchedules(
     return termFiltered
   }
 
-  return termFiltered.filter((schedule) =>
-    `${schedule.subject_code} ${schedule.subject_name} ${schedule.section} ${schedule.days} ${schedule.room} ${schedule.term_name}`
-      .toLowerCase()
-      .includes(normalizedQuery),
-  )
+  return termFiltered.filter((schedule) => [
+    schedule.subject_code, schedule.subject_name, schedule.section, schedule.days, schedule.room,
+  ].some((field) => String(field ?? '').toLowerCase().includes(normalizedQuery)))
+}
+
+async function fetchClassSnapshot(api: AuthedRequest, termId: string, signal: AbortSignal) {
+  const schedules: SubjectSchedule[] = []
+  let offset = 0
+  let total: number | null = null
+  while (true) {
+    const params = new URLSearchParams({ limit: '100', offset: String(offset), status: 'all', term: termId })
+    const page = await api<ApiPage<SubjectSchedule>>(`/subjects/subject-schedules/?${params}`, { signal })
+    if (total !== null && page.count !== total) throw new Error('The class list changed while preparing search.')
+    total = page.count
+    schedules.push(...page.results)
+    if (page.next === null) {
+      if (schedules.length !== total) throw new Error('Class search preparation was incomplete.')
+      return uniqueSchedules(schedules)
+    }
+    if (page.next <= offset) throw new Error('Invalid class pagination.')
+    offset = page.next
+  }
 }
 
 function uniqueSchedules(schedules: SubjectSchedule[]) {

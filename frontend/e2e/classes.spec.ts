@@ -829,6 +829,64 @@ test('loads the roster ten students at a time and exports the complete filtered 
   expect(mobileScrollMetrics.scrollHeight).toBe(mobileScrollMetrics.clientHeight)
 })
 
+test('compact header and local class search retain pagination, term cache, and expiry', async ({ page }) => {
+  const requests: Array<{ term: string; limit: number; search: string }> = []
+  const classes = Array.from({ length: 12 }, (_, index) => ({
+    archived_at: null, archived_by: null, created_at: '2026-08-04T00:00:00Z', created_by: null,
+    days: 'MO,WE', end_time: '10:00:00', id: 9101 + index, is_active: true,
+    room: `Lab ${index + 1}`, school_year_semester: 1,
+    section: `Batch ${index + 1}`, start_time: '09:00:00', subject: 1,
+    subject_code: `FAST${String(index + 1).padStart(2, '0')}`,
+    subject_name: `Fast Class ${String(index + 1).padStart(2, '0')}`,
+    term_name: '1st Semester 2030-2031', updated_at: '2026-08-04T00:00:00Z', updated_by: null,
+  }))
+  await page.route(/\/subjects\/subject-schedules\/\?.*/, async (route) => {
+    const params = new URL(route.request().url()).searchParams
+    const term = params.get('term') ?? '1'
+    const limit = Number(params.get('limit') ?? 10)
+    const offset = Number(params.get('offset') ?? 0)
+    const search = params.get('search') ?? ''
+    requests.push({ term, limit, search })
+    const matches = (term === '1' ? classes : classes.slice(0, 2).map((item) => ({ ...item, school_year_semester: 2 })))
+      .filter((item) => !search || [item.subject_code, item.subject_name, item.section, item.days, item.room]
+        .some((field) => field.toLowerCase().includes(search.toLowerCase())))
+    await route.fulfill({ json: { count: matches.length, previous: null,
+      next: offset + limit < matches.length ? offset + limit : null, results: matches.slice(offset, offset + limit) } })
+  })
+  await openClasses(page)
+  await page.clock.install()
+  const header = page.locator('.classes-page .page-header')
+  await expect(header).not.toContainText('Academic structure')
+  await expect(header).not.toContainText('Select a class, edit its schedule')
+  expect((await header.boundingBox())!.height).toBeLessThanOrEqual(80)
+  const snapshotCount = (term: string) => requests.filter((request) => request.term === term && request.limit === 100).length
+  await expect.poll(() => snapshotCount('1')).toBe(1)
+  const list = page.locator('.class-list')
+  await expect(list.locator('.class-list__item')).toHaveCount(10)
+  const search = page.getByPlaceholder('Subject, section, day, room')
+  await search.fill('FAST12')
+  await expect(page).toHaveURL(/q=FAST12/)
+  await expect(list.locator('.class-list__item')).toHaveCount(1)
+  await expect(list).toContainText('FAST12')
+  expect(requests.filter((request) => request.search === 'FAST12')).toHaveLength(0)
+  await search.fill('FAST')
+  await expect(list.locator('.class-list__pagination')).toContainText('Showing 10 of 12 classes')
+  await list.getByRole('button', { name: 'Load more' }).click()
+  await expect(list.locator('.class-list__item')).toHaveCount(12)
+  await page.getByLabel('School-year semester').selectOption('2')
+  await expect.poll(() => snapshotCount('2')).toBe(1)
+  await page.getByLabel('School-year semester').selectOption('1')
+  await expect(list.locator('.class-list__item')).toHaveCount(10)
+  expect(snapshotCount('1')).toBe(1)
+  await page.clock.fastForward(120_001)
+  await page.getByLabel('School-year semester').selectOption('2')
+  await page.getByLabel('School-year semester').selectOption('1')
+  await expect.poll(() => snapshotCount('1')).toBe(2)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect((await header.boundingBox())!.height).toBeLessThanOrEqual(120)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
 test('loads the Select Class list ten classes at a time inside its panel', async ({ page }) => {
   const classRequests: Array<{ limit: number; offset: number; search: string; term: string }> = []
   let failNextClassPage = false
@@ -864,6 +922,10 @@ test('loads the Select Class list ten classes at a time inside its panel', async
   await page.route(/\/subjects\/subject-schedules\/\?.*/, async (route) => {
     const url = new URL(route.request().url())
     const limit = Number(url.searchParams.get('limit') ?? 50)
+    if (limit === 100) {
+      await route.fulfill({ status: 503, json: { detail: 'Background class preparation unavailable.' } })
+      return
+    }
     const offset = Number(url.searchParams.get('offset') ?? 0)
     const search = url.searchParams.get('search') ?? ''
     const term = url.searchParams.get('term') ?? ''
@@ -1182,7 +1244,16 @@ test('creates, edits, clears, and deletes a class score sheet', async ({ page })
 })
 
 test('creates adjacent and overlapping schedules', async ({ page }) => {
+  let snapshotRequests = 0
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.endsWith('/subjects/subject-schedules/') && url.searchParams.get('limit') === '100') {
+      snapshotRequests += 1
+    }
+  })
   await openClasses(page)
+  await expect.poll(() => snapshotRequests).toBeGreaterThanOrEqual(1)
+  const initialSnapshotRequests = snapshotRequests
   await startNewSchedule(page)
   await fillSchedule(page, {
     days: ['Monday', 'Wednesday'],
@@ -1195,6 +1266,7 @@ test('creates adjacent and overlapping schedules', async ({ page }) => {
   await page.locator('.class-form').getByRole('button', { name: 'Save schedule' }).click()
   await expect(page.locator('.class-form')).toContainText('Schedule saved.')
   await expect(page).toHaveURL(/schedule=\d+/)
+  await expect.poll(() => snapshotRequests).toBeGreaterThan(initialSnapshotRequests)
 
   await startNewSchedule(page)
   await fillSchedule(page, {
