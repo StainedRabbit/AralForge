@@ -4562,6 +4562,266 @@ a.teacher-recent-item:focus-visible {
   gap: 8px;
 }
 
+/* Keep the module-access controls readable in either theme and keep its
+   close control outside the independently scrolling access details. */
+.attendance-modal__panel.student-module-access-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  max-height: min(900px, calc(100dvh - 32px));
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.student-module-access-dialog > .attendance-modal__header {
+  position: relative;
+  z-index: 1;
+  min-height: 72px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.student-module-access-dialog > .attendance-modal__header > div {
+  min-width: 0;
+}
+
+.student-module-access-dialog > .attendance-modal__header strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.student-module-access-dialog > .attendance-modal__header span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.student-module-access-dialog > .attendance-modal__header .icon-button {
+  flex: 0 0 42px;
+}
+
+.student-module-access-dialog__body {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 20px;
+  padding: 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.student-module-access-dialog__body > [role='status'],
+.student-module-access-dialog__body > [role='alert'] {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.student-module-access-dialog__body > [role='alert'] {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
+  background: var(--danger-soft);
+}
+
+.student-module-access-section {
+  min-width: 0;
+}
+
+.student-module-access-section .eyebrow {
+  margin: 0 0 3px;
+  color: var(--primary);
+}
+
+.student-module-access-section h3 {
+  color: var(--text);
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.student-module-access-section > div:first-child > p:last-child {
+  max-width: 68ch;
+  margin-top: 5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.student-module-grant-form {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.student-module-grant-form .admin-field {
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.student-module-grant-form .admin-field :is(select, input) {
+  min-height: 46px;
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  color-scheme: inherit;
+}
+
+.student-module-grant-form .admin-field :is(select, input):focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+.student-module-grant-form select option {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.student-module-grant-form .button--primary {
+  min-width: 180px;
+  min-height: 46px;
+}
+
+.student-module-access-list article {
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  min-width: 0;
+  gap: 12px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.student-module-access-list__icon {
+  align-self: center;
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+}
+
+.student-module-access-list__icon .icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.student-module-access-list__icon--advance {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
+.student-module-access-list article strong {
+  color: var(--text);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.student-module-access-list article div > span,
+.student-module-access-list article div > small {
+  color: var(--text-muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.student-module-access-status {
+  display: inline-flex !important;
+  width: fit-content;
+  min-height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  font-weight: 850;
+  line-height: 1.2 !important;
+  white-space: nowrap;
+}
+
+.student-module-access-status--active,
+.student-module-access-list .status-pill--success {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: var(--success-soft);
+  color: var(--success) !important;
+}
+
+.student-module-access-status--expired,
+.student-module-access-list .student-module-access-status--expired {
+  border-color: color-mix(in srgb, var(--warning) 42%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning) !important;
+}
+
+.student-module-access-status--revoked {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger) !important;
+}
+
+.student-module-access-status--locked {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+  color: var(--text-muted) !important;
+}
+
+.student-module-access-dialog :is(button, a, input, select):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .attendance-modal__panel.student-module-access-dialog {
+    width: min(100%, 920px);
+    min-height: 0;
+    max-height: calc(100dvh - 20px);
+    border-radius: var(--radius-lg);
+  }
+
+  .student-module-access-dialog > .attendance-modal__header {
+    min-height: 66px;
+    padding: 12px 14px;
+  }
+
+  .student-module-access-dialog__body {
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .student-module-access-section {
+    gap: 12px;
+  }
+
+  .student-module-grant-form {
+    padding: 12px;
+  }
+
+  .student-module-grant-form .button--primary {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .student-module-access-list article {
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .student-module-access-list__actions,
+  .student-module-access-list article > .student-module-access-status {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .student-module-access-list__actions {
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 720px) {
   .student-module-access-launcher,
   .student-module-grant-form {

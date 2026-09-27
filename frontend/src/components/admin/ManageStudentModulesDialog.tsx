@@ -180,11 +180,12 @@ export function ManageStudentModulesDialog({
             <strong id="manage-student-modules-title">Module Access</strong>
             <span>{studentName}</span>
           </div>
-          <button className="icon-button" onClick={onClose} title="Close" type="button">
+          <button aria-label="Close module access" className="icon-button" onClick={onClose} title="Close" type="button">
             <Icon name="close" />
           </button>
         </div> : null}
 
+        <div className={embedded ? undefined : 'student-module-access-dialog__body'}>
         {enrollmentsQuery.isPending || grantsQuery.isPending ? <p role="status">Loading module access...</p> : null}
         {enrollmentsQuery.isError || grantsQuery.isError ? <div role="alert"><p>{toErrorMessage(enrollmentsQuery.error ?? grantsQuery.error)}</p><button className="button button--secondary" type="button" onClick={() => { void enrollmentsQuery.refetch(); void grantsQuery.refetch() }}>Retry module access</button></div> : null}
 
@@ -210,12 +211,8 @@ export function ManageStudentModulesDialog({
                     <strong>{module.title}</strong>
                     <span>{moduleSubjectLabel(data, module)}</span>
                   </div>
-                  <small>
-                    {grant?.is_available
-                      ? 'Active'
-                      : grant?.is_active
-                        ? 'Expired'
-                        : 'Locked'}
+                  <small className={`student-module-access-status student-module-access-status--${grant?.is_available ? 'active' : grant?.is_active ? 'expired' : 'locked'}`}>
+                    {grant?.is_available ? 'Active' : grant?.is_active ? 'Expired' : 'Locked'}
                   </small>
                 </article>
               )
@@ -300,7 +297,7 @@ export function ManageStudentModulesDialog({
                     <small>{grant.status}</small>
                   </div>
                   <div className="student-module-access-list__actions">
-                    <span className={grant.is_available ? 'status-pill status-pill--success' : 'status-pill'}>
+                      <span className={`status-pill ${grant.is_available ? 'status-pill--success' : grant.status === 'EXPIRED' ? 'student-module-access-status--expired' : 'student-module-access-status--revoked'}`}>
                       {grant.status === 'ACTIVE' ? 'Active' : grant.status === 'EXPIRED' ? 'Expired' : 'Revoked'}
                     </span>
                     {grant.is_available ? (
@@ -333,6 +330,7 @@ export function ManageStudentModulesDialog({
             ) : null}
           </div>
         </section>
+        </div>
       </div>
     </div>
   )
