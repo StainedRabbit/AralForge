@@ -275,15 +275,11 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
     def workspace(self, request, pk=None):
         schedule = self.get_object()
         section = request.query_params.get('section', '').strip().lower()
+        view = request.query_params.get('view', '').strip().lower()
         if section not in {'attendance', 'scores', 'grades'}:
             raise serializers.ValidationError({
                 'section': 'Use attendance, scores, or grades.',
             })
-        enrollments = list(schedule.students.select_related(
-            'student', 'student__student_profile', 'schedule__subject',
-            'schedule__school_year_semester__school_year',
-        ).order_by('student__last_name', 'student__first_name', 'student__username'))
-        student_ids = [enrollment.student_id for enrollment in enrollments]
 
         from accounts.serializers import StudentProfileSerializer, UserSerializer
         from attendance.models import AttendanceRecord, AttendanceSession
@@ -299,6 +295,60 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         )
 
         context = {'request': request}
+
+        if section == 'attendance' and view in {'take', 'history'}:
+            if view == 'take':
+                enrollments = list(schedule.students.select_related(
+                    'student', 'student__student_profile', 'schedule__subject',
+                    'schedule__school_year_semester__school_year',
+                ).order_by('student__last_name', 'student__first_name', 'student__username'))
+                users = [enrollment.student for enrollment in enrollments]
+                profiles = [
+                    enrollment.student.student_profile
+                    for enrollment in enrollments
+                    if hasattr(enrollment.student, 'student_profile')
+                ]
+                sessions = AttendanceSession.objects.filter(schedule=schedule).values(
+                    'id', 'schedule_id', 'date', 'title',
+                )
+                return Response({
+                    'users': UserSerializer(users, many=True, context=context).data,
+                    'profiles': StudentProfileSerializer(profiles, many=True, context=context).data,
+                    'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
+                    'attendance_sessions': [
+                        {
+                            'id': session['id'],
+                            'schedule': session['schedule_id'],
+                            'date': session['date'],
+                            'title': session['title'],
+                        }
+                        for session in sessions
+                    ],
+                })
+
+            sessions = AttendanceSession.objects.filter(schedule=schedule).select_related(
+                'school_year_semester',
+            ).prefetch_related('roster_students').order_by('-date', '-id')
+            records = AttendanceRecord.objects.filter(session__schedule=schedule)
+            return Response({
+                'attendance_sessions': AttendanceSessionSerializer(
+                    sessions, many=True, context=context,
+                ).data,
+                'attendance_records': AttendanceRecordSerializer(
+                    records, many=True, context=context,
+                ).data,
+            })
+
+        if view:
+            raise serializers.ValidationError({
+                'view': 'Use take or history for the attendance workspace.',
+            })
+
+        enrollments = list(schedule.students.select_related(
+            'student', 'student__student_profile', 'schedule__subject',
+            'schedule__school_year_semester__school_year',
+        ).order_by('student__last_name', 'student__first_name', 'student__username'))
+        student_ids = [enrollment.student_id for enrollment in enrollments]
         users = [enrollment.student for enrollment in enrollments]
         profiles = [
             enrollment.student.student_profile

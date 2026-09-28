@@ -31,6 +31,43 @@ async function selectClass(page: Page, code: string) {
   await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
 }
 
+test('attendance dialog opens immediately and can retry its roster load', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+
+  let requests = 0
+  await page.route(/\/workspace\//, async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('section') !== 'attendance' || url.searchParams.get('view') !== 'take') {
+      await route.continue()
+      return
+    }
+    requests += 1
+    if (requests === 1) await new Promise((resolve) => setTimeout(resolve, 700))
+    if (requests <= 3) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Temporary roster error.' }),
+      })
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await route.continue()
+  })
+
+  await page.getByRole('button', { name: 'Attendance', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Class attendance' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('status')).toContainText('Loading class roster...')
+  await expect(dialog.getByRole('button', { name: 'Start session' })).toHaveCount(0)
+  await expect(dialog.getByRole('alert')).toContainText('Temporary roster error.')
+  await dialog.getByRole('button', { name: 'Retry' }).click()
+  await expect(dialog.getByRole('button', { name: 'Start session' })).toBeEnabled()
+  expect(requests).toBe(4)
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+})
+
 async function chooseTheme(page: Page, name: 'Light' | 'Dark') {
   const details = page.locator('.sidebar .appearance-control__details')
   if (await details.getAttribute('open') === null) await details.locator('summary').click()

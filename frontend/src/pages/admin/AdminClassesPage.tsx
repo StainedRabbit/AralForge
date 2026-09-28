@@ -191,6 +191,13 @@ type ClassWorkspace = {
   final_grades: FinalGrade[]
 }
 
+type AttendanceTakeWorkspace = {
+  users: User[]
+  profiles: StudentProfile[]
+  enrollments: ScheduleStudent[]
+  attendance_sessions: Array<Pick<AttendanceSession, 'id' | 'schedule' | 'date' | 'title'>>
+}
+
 function mergeClassWorkspace(data: RouteData, workspace?: ClassWorkspace): RouteData {
   if (!workspace) return data
   return {
@@ -1051,10 +1058,10 @@ function ClassRoster({
   const [moduleRow, setModuleRow] = useState<RosterRowData | null>(null)
   const qrTriggerRef = useRef<HTMLButtonElement>(null)
   const qrRequestIdRef = useRef(0)
-  const attendanceWorkspaceQuery = useQuery({
-    queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
-    queryFn: ({ signal }) => api<ClassWorkspace>(
-      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=attendance`, { signal },
+  const attendanceTakeQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id, 'attendance', 'take'],
+    queryFn: ({ signal }) => api<AttendanceTakeWorkspace>(
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=attendance&view=take`, { signal },
     ),
     enabled: Boolean(selectedSchedule && isAttendanceOpen),
     staleTime: 30_000,
@@ -1075,7 +1082,6 @@ function ClassRoster({
     enabled: Boolean(selectedSchedule && gradeRow),
     staleTime: 30_000,
   })
-  const attendanceData = mergeClassWorkspace(data, attendanceWorkspaceQuery.data)
   const scoreData = mergeClassWorkspace(data, scoreWorkspaceQuery.data)
   const gradeData = mergeClassWorkspace(data, gradeWorkspaceQuery.data)
   const localRoster: ScheduleStudent[] = []
@@ -1190,7 +1196,6 @@ function ClassRoster({
 
   const refreshAttendanceWorkspace = useCallback(async () => {
     await queryClient.invalidateQueries({
-      exact: true,
       queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
     })
   }, [queryClient, selectedSchedule?.id])
@@ -1568,16 +1573,14 @@ function ClassRoster({
         />
       ) : null}
 
-      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.isPending ? (
-        <p aria-live="polite" className="admin-message">Loading attendance workspace...</p>
-      ) : null}
-      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.isError ? (
-        <p className="admin-message" role="alert">{toErrorMessage(attendanceWorkspaceQuery.error)}</p>
-      ) : null}
-      {selectedSchedule && isAttendanceOpen && attendanceWorkspaceQuery.data ? (
+      {selectedSchedule && isAttendanceOpen ? (
         <ClassAttendanceDialog
           api={api}
-          data={attendanceData}
+          data={data}
+          takeWorkspace={attendanceTakeQuery.data}
+          takeLoading={attendanceTakeQuery.isPending || (attendanceTakeQuery.isFetching && !attendanceTakeQuery.data)}
+          takeError={attendanceTakeQuery.isFetching ? '' : attendanceTakeQuery.error ? toErrorMessage(attendanceTakeQuery.error) : ''}
+          retryTake={() => void attendanceTakeQuery.refetch()}
           initialTab="take"
           key={selectedSchedule.id}
           refresh={refreshAttendanceWorkspace}

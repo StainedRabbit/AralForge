@@ -1,4 +1,4 @@
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -534,6 +534,8 @@ class SubjectScheduleApiTests(APITestCase):
         url = reverse('subjects:subject-schedule-workspace', args=[schedule.id])
 
         attendance = self.client.get(url, {'section': 'attendance'})
+        take = self.client.get(url, {'section': 'attendance', 'view': 'take'})
+        history = self.client.get(url, {'section': 'attendance', 'view': 'history'})
         scores = self.client.get(url, {'section': 'scores'})
         grades = self.client.get(url, {'section': 'grades'})
         invalid = self.client.get(url)
@@ -541,12 +543,53 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(attendance.status_code, status.HTTP_200_OK)
         self.assertEqual(len(attendance.data['attendance_sessions']), 1)
         self.assertEqual(attendance.data['grade_items'], [])
+        self.assertEqual(take.status_code, status.HTTP_200_OK)
+        self.assertEqual([user['id'] for user in take.data['users']], [self.student.id])
+        self.assertEqual(take.data['attendance_sessions'], [{
+            'id': session.id,
+            'schedule': schedule.id,
+            'date': date(2027, 8, 30),
+            'title': 'Class attendance',
+        }])
+        self.assertNotIn('attendance_records', take.data)
+        self.assertEqual(history.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(history.data['attendance_sessions']), 1)
+        self.assertEqual(len(history.data['attendance_records']), 1)
         self.assertEqual(scores.status_code, status.HTTP_200_OK)
         self.assertEqual(len(scores.data['grade_items']), 1)
         self.assertEqual(scores.data['grade_item_scores'], [])
         self.assertEqual(grades.status_code, status.HTTP_200_OK)
         self.assertEqual(len(grades.data['grade_item_scores']), 1)
         self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_attendance_history_prefetches_terms_and_rosters_across_many_sessions(self):
+        from attendance.models import AttendanceSession
+
+        schedule = self.create_schedule()
+        enrollment = ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+        sessions = [AttendanceSession.objects.create(
+            schedule=schedule,
+            subject=self.subject,
+            school_year_semester=self.term,
+            title='Class attendance',
+            date=f'2027-09-{day:02d}',
+        ) for day in range(1, 13)]
+        for session in sessions:
+            session.roster_students.add(self.student)
+
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-workspace', args=[schedule.id])
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(url, {'section': 'attendance', 'view': 'history'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['attendance_sessions']), 12)
+        self.assertTrue(enrollment.is_active)
+        sql = [query['sql'].lower() for query in queries.captured_queries]
+        session_queries = [query for query in sql if 'from "attendance_attendancesession"' in query]
+        roster_queries = [query for query in sql if 'attendance_attendancesession_roster_students' in query]
+        self.assertEqual(len(session_queries), 1)
+        self.assertEqual(len(roster_queries), 1)
 
     def test_enroll_students_action_adds_and_reactivates_atomically(self):
         schedule = self.create_schedule()

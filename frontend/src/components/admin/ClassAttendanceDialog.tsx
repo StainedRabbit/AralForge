@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
-import type { AttendanceRecord, AttendanceSession, SubjectSchedule, User } from '../../types'
+import type { AttendanceRecord, AttendanceSession, ScheduleStudent, StudentProfile, SubjectSchedule, User } from '../../types'
 import { formatDate, percent, toErrorMessage } from '../../utils/format'
 import { compareStudentsByLastName, fullName } from '../../utils/student'
 import { Icon } from '../Icon'
@@ -18,6 +19,16 @@ type AttendanceMarkOperation = AttendanceChange & {
   sessionId: number
 }
 type AttendanceStartResponse = { created: boolean; records: AttendanceRecord[]; session: AttendanceSession }
+type AttendanceTakeWorkspace = {
+  users: User[]
+  profiles: StudentProfile[]
+  enrollments: ScheduleStudent[]
+  attendance_sessions: Array<Pick<AttendanceSession, 'id' | 'schedule' | 'date' | 'title'>>
+}
+type AttendanceHistoryWorkspace = {
+  attendance_sessions: AttendanceSession[]
+  attendance_records: AttendanceRecord[]
+}
 export type AttendanceDialogTab = 'history' | 'take'
 
 const DEFAULT_SESSION_TITLE = 'Class attendance'
@@ -29,14 +40,19 @@ const attendanceStatuses: Array<{ icon: 'activity' | 'check' | 'close' | 'warnin
   { icon: 'warning', label: 'Excused', status: 'EXCUSED' },
 ]
 
-export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh, schedule }: {
+export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh, retryTake, schedule, takeError, takeLoading, takeWorkspace }: {
   api: AuthedRequest
   data: RouteData
   initialTab: AttendanceDialogTab
   onClose: () => void
   refresh: () => Promise<void>
+  retryTake: () => void
   schedule: SubjectSchedule
+  takeError: string
+  takeLoading: boolean
+  takeWorkspace?: AttendanceTakeWorkspace
 }) {
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<AttendanceDialogTab>(initialTab)
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null)
   const [drafts, setDrafts] = useState<Record<number, AttendanceDraft>>({})
@@ -64,12 +80,33 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   const processingMarksRef = useRef(false)
   const closeRequestedRef = useRef(false)
   const confirmedLastChangeRef = useRef<AttendanceChange | null>(null)
-  const currentRoster = useMemo(() => getScheduleStudents(data, schedule.id), [data, schedule.id])
-  const students = useMemo(
-    () => activeSession ? getSessionStudents(data, activeSession) : currentRoster,
-    [activeSession, currentRoster, data],
+  const historyQueryKey = ['class-workspace', schedule.id, 'attendance', 'history']
+  const historyQuery = useQuery({
+    queryKey: historyQueryKey,
+    queryFn: ({ signal }) => api<AttendanceHistoryWorkspace>(
+      `/subjects/subject-schedules/${schedule.id}/workspace/?section=attendance&view=history`,
+      { signal },
+    ),
+    enabled: tab === 'history',
+    staleTime: 30_000,
+  })
+  const attendanceData = useMemo<RouteData>(() => ({
+    ...data,
+    users: takeWorkspace?.users ?? [],
+    profiles: takeWorkspace?.profiles ?? [],
+    enrollments: takeWorkspace?.enrollments ?? [],
+    attendanceSessions: historyQuery.data?.attendance_sessions ?? [],
+    attendanceRecords: historyQuery.data?.attendance_records ?? [],
+  }), [data, historyQuery.data, takeWorkspace])
+  const currentRoster = useMemo(
+    () => takeWorkspace ? getScheduleStudents(attendanceData, schedule.id) : [],
+    [attendanceData, schedule.id, takeWorkspace],
   )
-  const matchingSession = data.attendanceSessions.find((session) =>
+  const students = useMemo(
+    () => activeSession ? getSessionStudents(attendanceData, activeSession) : currentRoster,
+    [activeSession, attendanceData, currentRoster],
+  )
+  const matchingSession = (takeWorkspace?.attendance_sessions ?? []).find((session) =>
     session.schedule === schedule.id &&
     session.date === sessionDate &&
     session.title === DEFAULT_SESSION_TITLE)
@@ -81,6 +118,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   const isFutureDate = sessionDate > todayInputValue()
 
   async function startAttendance(allowFuture = false) {
+    if (takeLoading || takeError || !takeWorkspace) return
     if (!currentRoster.length && !matchingSession) {
       setMessage('Add at least one active student before starting attendance.')
       return
@@ -102,7 +140,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
         }),
         method: 'POST',
       })
-      const sessionStudents = getSessionStudents(data, result.session)
+      const sessionStudents = getSessionStudents(attendanceData, result.session)
       const recordsByStudent = new Map(result.records.map((record) => [record.student, record]))
       const nextDrafts = Object.fromEntries(sessionStudents.map((student) => {
         const record = recordsByStudent.get(student.id)
@@ -120,6 +158,21 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       setReviewMode(false)
       setFutureDateOpen(false)
       setMessage(result.created ? 'Attendance session started.' : 'Existing session loaded with the latest saved marks.')
+      queryClient.setQueryData<AttendanceTakeWorkspace>(
+        ['class-workspace', schedule.id, 'attendance', 'take'],
+        (current) => current ? {
+          ...current,
+          attendance_sessions: [
+            {
+              id: result.session.id,
+              schedule: result.session.schedule,
+              date: result.session.date,
+              title: result.session.title,
+            },
+            ...current.attendance_sessions.filter((session) => session.id !== result.session.id),
+          ],
+        } : current,
+      )
     } catch (caughtError) {
       setMessage(toErrorMessage(caughtError))
     } finally {
@@ -335,25 +388,17 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
     setMessage('Student skipped for now.')
   }
 
-  async function synchronizeWorkspace() {
-    if (!dirtyRef.current) return
-    await refresh()
-    dirtyRef.current = false
-  }
-
   async function openHistory() {
     if (saving || pendingMarkCount) return
     setSaving(true)
     setScannerOpen(false)
     setMessage('')
-    try {
-      await synchronizeWorkspace()
-      setTab('history')
-    } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
-    } finally {
-      setSaving(false)
+    if (dirtyRef.current) {
+      void queryClient.invalidateQueries({ queryKey: historyQueryKey, exact: true, refetchType: 'none' })
+      dirtyRef.current = false
     }
+    setTab('history')
+    setSaving(false)
   }
 
   function closeDialog() {
@@ -500,10 +545,13 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
         {tab === 'take' ? <div className="attendance-roll-call">
           {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
+          {takeLoading ? <p aria-live="polite" className="admin-message" role="status">Loading class roster...</p> : null}
+          {!takeLoading && takeError ? <div className="admin-message" role="alert"><p>{takeError}</p><button className="button button--secondary button--compact" onClick={retryTake} type="button">Retry</button></div> : null}
+          {!takeLoading && !takeError && !takeWorkspace ? <p className="admin-message" role="alert">The class roster is unavailable.</p> : null}
           {activeSession ? <div className="attendance-roll-call__scan-action">
             <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => scannerOpen ? closeScanner() : setScannerOpen(true)} ref={scanButtonRef} type="button"><Icon name="search" /><span>{scannerOpen ? 'Close scanner' : 'Scan student QR'}</span></button>
           </div> : null}
-          {!activeSession ? <div className="attendance-roll-call__start">
+          {!takeLoading && !takeError && takeWorkspace && !activeSession ? <div className="attendance-roll-call__start">
             <div>
               <p className="eyebrow">Ready for roll call</p>
               <h2>{students.length} student{students.length === 1 ? '' : 's'}</h2>
@@ -514,7 +562,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
                 <span>Attendance date</span>
                 <input disabled={saving} onChange={(event) => { setSessionDate(event.target.value); setFutureDateOpen(false); setMessage('') }} type="date" value={sessionDate} />
               </label>
-              <button className="button button--primary attendance-start-button" disabled={saving || (!currentRoster.length && !matchingSession) || !sessionDate} onClick={() => void startAttendance()} type="button">
+              <button className="button button--primary attendance-start-button" disabled={saving || takeLoading || Boolean(takeError) || !takeWorkspace || (!currentRoster.length && !matchingSession) || !sessionDate} onClick={() => void startAttendance()} type="button">
                 <Icon name="check" /><span>{saving ? 'Starting...' : matchingSession ? 'Continue session' : 'Start session'}</span>
               </button>
               {isFutureDate && !matchingSession ? <p className="attendance-date-warning" role="alert">This date is in the future.</p> : null}
@@ -527,7 +575,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
                 </div>
               </div> : null}
             </div>
-          </div> : scannerOpen ? <Suspense fallback={<p role="status">Opening scanner...</p>}><AttendanceQrScanner onClose={closeScanner} onScan={scanStudentNumber} onUndo={lastQrScan === null ? null : undoLastQrScan} /></Suspense> : showSummary ? <AttendanceCompletion
+          </div> : activeSession && scannerOpen ? <Suspense fallback={<p role="status">Opening scanner...</p>}><AttendanceQrScanner onClose={closeScanner} onScan={scanStudentNumber} onUndo={lastQrScan === null ? null : undoLastQrScan} /></Suspense> : activeSession && showSummary ? <AttendanceCompletion
             onClose={() => void closeDialog()}
             onHistory={() => void openHistory()}
             onReview={() => { setCurrentIndex(0); setReviewMode(true); setShowSummary(false); setMessage('Reviewing attendance from the first student.') }}
@@ -537,7 +585,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
             saving={saving}
             summary={summary}
             total={students.length}
-          /> : currentStudent ? <div className="attendance-roll-call__runner">
+          /> : activeSession && currentStudent ? <div className="attendance-roll-call__runner">
             <div className="attendance-roll-call__progress">
               <div><strong>{currentIndex + 1} of {students.length}</strong><span>{formatDate(activeSession.date)}</span></div>
               <div>
@@ -589,7 +637,9 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
               <button className="button button--secondary" disabled={saving || excuseOpen} onClick={advanceWithoutMark} type="button"><span>{currentDraft?.status ? 'Next' : 'Skip for now'}</span><Icon name="arrow-right" /></button>
             </div>
           </div> : null}
-        </div> : <ClassAttendanceHistory api={api} data={data} refresh={refresh} schedule={schedule} />}
+        </div> : historyQuery.isPending ? <p aria-live="polite" className="admin-message" role="status">Loading attendance history...</p>
+          : historyQuery.isError ? <div className="admin-message" role="alert"><p>{toErrorMessage(historyQuery.error)}</p><button className="button button--secondary button--compact" onClick={() => void historyQuery.refetch()} type="button">Retry</button></div>
+            : <ClassAttendanceHistory api={api} data={attendanceData} refresh={refresh} schedule={schedule} />}
       </div>
     </div>
   )
