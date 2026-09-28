@@ -1,4 +1,5 @@
 :root { color-scheme: light; }
+:root { --modal-surface: var(--warm-white); }
 .brand__image--dark { display: none; }
 
 .appearance-control { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
@@ -42,6 +43,7 @@
   --surface-muted: #223047;
   --surface-strong: #2c3d56;
   --surface-soft: #1d2b40;
+  --modal-surface: var(--surface);
   --text-soft: #94a8c2;
   --brand-navy: #e8eef7;
   --primary: #ffae78;
@@ -68,6 +70,16 @@
 }
 
 :root[data-effective-theme='dark'] body { background: var(--bg); }
+:root[data-effective-theme='dark'] :is([role='dialog'], [role='alertdialog']) { color: var(--text); }
+:root[data-effective-theme='dark'] :is(.attendance-modal__panel, .lesson-focus-modal__panel, .module-outline-modal, .structured-import-modal, .paper-score-dialog, .academic-setup-dialog, .logout-confirmation__panel, .student-module-context-dialog__panel, .class-score-discard > div, .resource-drawer__panel, .class-schedule-drawer__panel, .students-drawer, .responsive-detail__panel, .mobile-more__panel, .presentation-section-drawer) {
+  color: var(--text);
+  background-color: var(--surface);
+  border-color: var(--border);
+}
+:root[data-effective-theme='dark'] :is([role='dialog'], [role='alertdialog']) :is(h1, h2, h3, h4) { color: var(--text); }
+:root[data-effective-theme='dark'] :is(.attendance-modal__header strong, .lesson-focus-modal__header strong, .responsive-detail__panel > header strong) { color: var(--text); }
+:root[data-effective-theme='dark'] .students-drawer__header { background: var(--surface); }
+:root[data-effective-theme='dark'] .student-qr-carousel__image { background: #fff; }
 :root[data-effective-theme='dark'] .brand__image--light:not(.brand__image--inverted) { display: none; }
 :root[data-effective-theme='dark'] .brand__image--dark { display: block; }
 :root[data-effective-theme='dark'] :is(.page-header h1, .section-heading h2, .stat-card strong, .lesson-content-section h2, .lesson-content-section h3, .rich-text h1, .rich-text h2, .rich-text h3, .rich-text h4, .empty-state > strong, .login-card h2, .login-card .form-stack label > span, .legal-section h2, .legal-card strong, .legal-gate__card h1, .students-name strong, table th) { color: var(--text); }

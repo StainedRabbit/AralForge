@@ -31,6 +31,47 @@ async function selectClass(page: Page, code: string) {
   await expect(page).toHaveURL(/\/admin\/classes\?schedule=\d+/)
 }
 
+async function chooseTheme(page: Page, name: 'Light' | 'Dark') {
+  const details = page.locator('.sidebar .appearance-control__details')
+  if (await details.getAttribute('open') === null) await details.locator('summary').click()
+  await page.locator('.sidebar').getByRole('button', { name, exact: true }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', name.toLowerCase())
+}
+
+test('attendance modal uses readable surfaces and controls in both themes', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  for (const theme of ['Light', 'Dark'] as const) {
+    await chooseTheme(page, theme)
+    await page.getByRole('button', { name: 'Attendance', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Class attendance' })
+    const panel = dialog.locator('.attendance-modal__panel')
+    const styles = await panel.evaluate((element) => ({
+      background: getComputedStyle(element).backgroundColor,
+      color: getComputedStyle(element).color,
+      headingColor: getComputedStyle(element.querySelector('.attendance-modal__header strong')!).color,
+    }))
+    expect(styles.background).toBe(theme === 'Dark' ? 'rgb(24, 36, 55)' : 'rgb(250, 248, 243)')
+    if (theme === 'Dark') {
+      expect(styles.color).toBe('rgb(232, 238, 247)')
+      expect(styles.headingColor).toBe('rgb(232, 238, 247)')
+      const dateField = dialog.getByLabel('Attendance date')
+      await dateField.focus()
+      const fieldStyles = await dateField.evaluate((element) => ({
+        background: getComputedStyle(element).backgroundColor,
+        color: getComputedStyle(element).color,
+      }))
+      expect(fieldStyles.background).toBe('rgb(24, 36, 55)')
+      expect(fieldStyles.color).toBe('rgb(232, 238, 247)')
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  }
+})
+
 test('scans attendance by student number and keeps the scanner open for corrections', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined })

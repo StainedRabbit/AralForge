@@ -1417,7 +1417,7 @@ table tbody tr:hover td {
 .academic-setup-dialog {
   border-color: var(--border-strong);
   border-radius: var(--radius-lg);
-  background: var(--warm-white);
+  background: var(--modal-surface, var(--warm-white));
   box-shadow: 0 28px 90px rgba(var(--forge-navy-rgb), 0.26);
 }
 
