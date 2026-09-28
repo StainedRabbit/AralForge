@@ -1196,6 +1196,52 @@ test('loads the Select Class list ten classes at a time inside its panel', async
   expect(mobileScrollMetrics.clientHeight).toBeLessThanOrEqual(340)
 })
 
+test('scores dialog opens immediately, retries setup, and loads sheets on demand', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+
+  let setupRequests = 0
+  let sheetRequests = 0
+  await page.route(/\/workspace\//, async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('section') !== 'scores') {
+      await route.continue()
+      return
+    }
+    if (url.searchParams.get('view') === 'sheets') {
+      sheetRequests += 1
+      await route.continue()
+      return
+    }
+    if (url.searchParams.get('view') !== 'setup') {
+      await route.continue()
+      return
+    }
+    setupRequests += 1
+    if (setupRequests === 1) await new Promise((resolve) => setTimeout(resolve, 700))
+    if (setupRequests <= 3) {
+      await route.fulfill({ status: 503, json: { detail: 'Temporary score setup error.' } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.getByRole('button', { name: 'Scores', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Class scores' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('status')).toContainText('Loading score setup...')
+  await expect(dialog.getByRole('button', { name: 'Start scoring' })).toBeDisabled()
+  expect(sheetRequests).toBe(0)
+  await expect(dialog.getByRole('alert')).toContainText('Temporary score setup error.')
+  await dialog.getByRole('button', { name: 'Retry score setup' }).click()
+  await expect(dialog.getByLabel('Title')).toBeVisible()
+  await expect(dialog).toContainText('2 active students')
+  await dialog.getByRole('tab', { name: 'Score sheets' }).click()
+  await expect(dialog.getByText('No manual score sheets for this class yet.')).toBeVisible()
+  expect(sheetRequests).toBe(1)
+  await dialog.getByRole('button', { name: 'Close scores' }).click()
+})
+
 test('creates, edits, clears, and deletes a class score sheet', async ({ page }) => {
   await openClasses(page)
   await selectClass(page, 'E2E101')

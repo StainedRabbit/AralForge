@@ -339,9 +339,28 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 ).data,
             })
 
+        if section == 'scores' and view in {'setup', 'sheets'}:
+            if view == 'setup':
+                categories = GradeCategory.objects.filter(subject=schedule.subject).select_related(
+                    'subject', 'template_item',
+                )
+                return Response({
+                    'grade_categories': GradeCategorySerializer(
+                        categories, many=True, context=context,
+                    ).data,
+                    'active_student_count': schedule.students.filter(is_active=True).count(),
+                })
+
+            items = GradeItem.objects.filter(
+                schedule=schedule, source_type='MANUAL',
+            ).select_related('grade_category__subject')
+            return Response({
+                'grade_items': GradeItemSerializer(items, many=True, context=context).data,
+            })
+
         if view:
             raise serializers.ValidationError({
-                'view': 'Use take or history for the attendance workspace.',
+                'view': 'Use take or history for attendance, or setup or sheets for scores.',
             })
 
         enrollments = list(schedule.students.select_related(

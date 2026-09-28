@@ -198,6 +198,11 @@ type AttendanceTakeWorkspace = {
   attendance_sessions: Array<Pick<AttendanceSession, 'id' | 'schedule' | 'date' | 'title'>>
 }
 
+type ScoreSetupWorkspace = {
+  grade_categories: GradeCategory[]
+  active_student_count: number
+}
+
 function mergeClassWorkspace(data: RouteData, workspace?: ClassWorkspace): RouteData {
   if (!workspace) return data
   return {
@@ -1066,10 +1071,10 @@ function ClassRoster({
     enabled: Boolean(selectedSchedule && isAttendanceOpen),
     staleTime: 30_000,
   })
-  const scoreWorkspaceQuery = useQuery({
-    queryKey: ['class-workspace', selectedSchedule?.id, 'scores'],
-    queryFn: ({ signal }) => api<ClassWorkspace>(
-      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=scores`, { signal },
+  const scoreSetupQuery = useQuery({
+    queryKey: ['class-workspace', selectedSchedule?.id, 'scores', 'setup'],
+    queryFn: ({ signal }) => api<ScoreSetupWorkspace>(
+      `/subjects/subject-schedules/${selectedSchedule!.id}/workspace/?section=scores&view=setup`, { signal },
     ),
     enabled: Boolean(selectedSchedule && isScoresOpen),
     staleTime: 30_000,
@@ -1082,7 +1087,6 @@ function ClassRoster({
     enabled: Boolean(selectedSchedule && gradeRow),
     staleTime: 30_000,
   })
-  const scoreData = mergeClassWorkspace(data, scoreWorkspaceQuery.data)
   const gradeData = mergeClassWorkspace(data, gradeWorkspaceQuery.data)
   const localRoster: ScheduleStudent[] = []
   const normalizedRosterQuery = rosterQuery.trim()
@@ -1198,6 +1202,13 @@ function ClassRoster({
     await queryClient.invalidateQueries({
       queryKey: ['class-workspace', selectedSchedule?.id, 'attendance'],
     })
+  }, [queryClient, selectedSchedule?.id])
+
+  const refreshScoresWorkspace = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['class-workspace', selectedSchedule?.id, 'scores'] }),
+      queryClient.invalidateQueries({ queryKey: ['class-workspace', selectedSchedule?.id, 'grades'] }),
+    ])
   }, [queryClient, selectedSchedule?.id])
 
   useEffect(() => {
@@ -1589,18 +1600,16 @@ function ClassRoster({
         />
       ) : null}
 
-      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.isPending ? (
-        <p aria-live="polite" className="admin-message">Loading score workspace...</p>
-      ) : null}
-      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.isError ? (
-        <p className="admin-message" role="alert">{toErrorMessage(scoreWorkspaceQuery.error)}</p>
-      ) : null}
-      {selectedSchedule && isScoresOpen && scoreWorkspaceQuery.data ? (
+      {selectedSchedule && isScoresOpen ? (
         <ClassScoresDialog
           api={api}
-          data={scoreData}
+          data={data}
+          setup={scoreSetupQuery.data}
+          setupLoading={scoreSetupQuery.isPending || (scoreSetupQuery.isFetching && !scoreSetupQuery.data)}
+          setupError={scoreSetupQuery.isFetching ? '' : scoreSetupQuery.error ? toErrorMessage(scoreSetupQuery.error) : ''}
+          retrySetup={() => void scoreSetupQuery.refetch()}
           key={selectedSchedule.id}
-          refresh={refreshClassRoster}
+          refresh={refreshScoresWorkspace}
           schedule={selectedSchedule}
           onClose={() => {
             setIsScoresOpen(false)

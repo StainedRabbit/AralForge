@@ -537,6 +537,8 @@ class SubjectScheduleApiTests(APITestCase):
         take = self.client.get(url, {'section': 'attendance', 'view': 'take'})
         history = self.client.get(url, {'section': 'attendance', 'view': 'history'})
         scores = self.client.get(url, {'section': 'scores'})
+        score_setup = self.client.get(url, {'section': 'scores', 'view': 'setup'})
+        score_sheets = self.client.get(url, {'section': 'scores', 'view': 'sheets'})
         grades = self.client.get(url, {'section': 'grades'})
         invalid = self.client.get(url)
 
@@ -558,9 +560,53 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(scores.status_code, status.HTTP_200_OK)
         self.assertEqual(len(scores.data['grade_items']), 1)
         self.assertEqual(scores.data['grade_item_scores'], [])
+        self.assertEqual(score_setup.status_code, status.HTTP_200_OK)
+        self.assertEqual(score_setup.data['active_student_count'], 1)
+        self.assertEqual([row['id'] for row in score_setup.data['grade_categories']], [category.id])
+        self.assertNotIn('enrollments', score_setup.data)
+        self.assertNotIn('grade_items', score_setup.data)
+        self.assertEqual(score_sheets.status_code, status.HTTP_200_OK)
+        self.assertEqual([row['id'] for row in score_sheets.data['grade_items']], [item.id])
+        self.assertNotIn('enrollments', score_sheets.data)
         self.assertEqual(grades.status_code, status.HTTP_200_OK)
         self.assertEqual(len(grades.data['grade_item_scores']), 1)
         self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_score_sheets_workspace_stays_to_one_item_query(self):
+        from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
+
+        schedule = self.create_schedule()
+        other_schedule = SubjectSchedule.objects.create(
+            subject=self.subject, school_year_semester=self.term,
+            section='B', days='MWF', start_time=time(9, 0), end_time=time(10, 0),
+        )
+        category = GradeCategory.objects.create(
+            subject=self.subject, grading_period='PRELIM',
+            category=GradeCategoryChoices.QUIZ, name='Quizzes', weight=100,
+        )
+        for index in range(15):
+            GradeItem.objects.create(
+                schedule=schedule, grade_category=category,
+                title=f'Quiz {index}', points_possible=10,
+            )
+        GradeItem.objects.create(
+            schedule=other_schedule, grade_category=category,
+            title='Other class', points_possible=10,
+        )
+        GradeItem.objects.create(
+            schedule=schedule, grade_category=category,
+            title='Module score', points_possible=10, source_type='MODULE_ACTIVITY',
+        )
+        self.client.force_authenticate(self.teacher)
+        url = reverse('subjects:subject-schedule-workspace', args=[schedule.id])
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(url, {'section': 'scores', 'view': 'sheets'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['grade_items']), 15)
+        sql = [query['sql'].lower() for query in queries.captured_queries]
+        self.assertEqual(sum('from "grades_gradeitem"' in query for query in sql), 1)
 
     def test_attendance_history_prefetches_terms_and_rosters_across_many_sessions(self):
         from attendance.models import AttendanceSession

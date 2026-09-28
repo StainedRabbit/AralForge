@@ -1,8 +1,8 @@
-import { fullName } from '../../utils/student'
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
-import type { GradeItem, SubjectSchedule } from '../../types'
+import type { GradeCategory, GradeItem, SubjectSchedule } from '../../types'
 import { formatDate, numeric, toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 
@@ -31,6 +31,7 @@ type ScoreSheetResponse = {
     score_id: number | null
     status: ScoreStatus
     student: number
+    student_full_name: string
     student_name: string
     student_number: string
   }>
@@ -68,12 +69,16 @@ type DeleteConfirmation =
   | { kind: 'score'; student: number; studentName: string }
   | { kind: 'sheet' }
 
-export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
+export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, schedule, setup, setupError, setupLoading }: {
   api: AuthedRequest
   data: RouteData
   onClose: () => void
   refresh: () => Promise<void>
+  retrySetup: () => void
   schedule: SubjectSchedule
+  setup?: { grade_categories: GradeCategory[]; active_student_count: number }
+  setupError: string
+  setupLoading: boolean
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const scoreInputRef = useRef<HTMLInputElement>(null)
@@ -102,23 +107,32 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
   const processingScoresRef = useRef(false)
   const closeRequestedRef = useRef(false)
   const confirmedLastChangeRef = useRef<ScoreChange | null>(null)
+  const sheetsQuery = useQuery({
+    queryKey: ['class-workspace', schedule.id, 'scores', 'sheets'],
+    queryFn: ({ signal }) => api<{ grade_items: GradeItem[] }>(
+      `/subjects/subject-schedules/${schedule.id}/workspace/?section=scores&view=sheets`, { signal },
+    ),
+    enabled: tab === 'sheets',
+    staleTime: 30_000,
+  })
+  const gradeCategories = setup?.grade_categories ?? data.gradeCategories
 
-  const categories = data.gradeCategories.filter((category) =>
+  const categories = (setup ? gradeCategories : []).filter((category) =>
     category.subject === schedule.subject &&
     category.grading_period === period &&
     category.category !== 'ATTENDANCE')
   const selectedCategory = categories.find((category) => category.id === Number(categoryId)) ?? categories[0] ?? null
   const scoreSheets = useMemo(() => {
     const items = activeItem
-      ? [activeItem, ...data.gradeItems.filter((item) => item.id !== activeItem.id)]
-      : data.gradeItems
+      ? [activeItem, ...(sheetsQuery.data?.grade_items ?? []).filter((item) => item.id !== activeItem.id)]
+      : sheetsQuery.data?.grade_items ?? []
     return items
       .filter((item) => item.schedule === schedule.id && item.source_type === 'MANUAL')
       .sort((left, right) =>
         (right.date ?? right.created_at.slice(0, 10)).localeCompare(left.date ?? left.created_at.slice(0, 10)) || right.id - left.id)
-  }, [activeItem, data.gradeItems, schedule.id])
+  }, [activeItem, sheetsQuery.data, schedule.id])
   const filteredScoreSheets = useMemo(() => scoreSheets.filter((item) => {
-    const category = data.gradeCategories.find((candidate) => candidate.id === item.grade_category)
+    const category = gradeCategories.find((candidate) => candidate.id === item.grade_category)
     const itemDate = item.date ?? item.created_at.slice(0, 10)
     return matchesSearch([
       item.title,
@@ -131,7 +145,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
       item.points_possible,
       `${numeric(item.points_possible)} points`,
     ].filter(Boolean).join(' '), sheetQuery)
-  }), [data.gradeCategories, scoreSheets, sheetQuery])
+  }), [gradeCategories, scoreSheets, sheetQuery])
   const activeDrafts = drafts.filter((draft) => draft.isActive)
   const inactiveDrafts = drafts.filter((draft) => !draft.isActive)
   const currentDraft = activeDrafts[currentIndex] ?? null
@@ -144,10 +158,10 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
   const excusedCount = activeDrafts.filter((draft) => draft.saved?.status === 'EXCUSED').length
   const maximum = numeric(activeItem?.points_possible ?? pointsPossible)
   const activeCategory = activeItem
-    ? data.gradeCategories.find((category) => category.id === activeItem.grade_category) ?? null
+    ? gradeCategories.find((category) => category.id === activeItem.grade_category) ?? null
     : null
   const progressPercent = activeDrafts.length ? Math.round((savedCount / activeDrafts.length) * 100) : 0
-  const editCategories = editDraft ? data.gradeCategories.filter((category) =>
+  const editCategories = editDraft ? gradeCategories.filter((category) =>
     category.subject === schedule.subject &&
     category.grading_period === editDraft.period &&
     category.category !== 'ATTENDANCE') : []
@@ -277,7 +291,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         }),
         method: 'POST',
       })
-      const nextDrafts = response.rows.map((row) => apiRowToDraft(row, data))
+      const nextDrafts = response.rows.map(apiRowToDraft)
       setActiveItem(response.item)
       setDrafts(nextDrafts)
       setCurrentIndex(firstPendingIndex(nextDrafts))
@@ -301,11 +315,11 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
     setMessage('')
     try {
       const response = await api<ScoreSheetResponse>(`/grades/items/${item.id}/roster/`)
-      const nextDrafts = response.rows.map((row) => apiRowToDraft(row, data))
+      const nextDrafts = response.rows.map(apiRowToDraft)
       const nextActiveDrafts = nextDrafts.filter((draft) => draft.isActive)
       const pendingIndex = nextActiveDrafts.findIndex((draft) => !draft.saved)
       setActiveItem(response.item)
-      setPeriod(data.gradeCategories.find((category) => category.id === item.grade_category)?.grading_period ?? 'PRELIM')
+      setPeriod(gradeCategories.find((category) => category.id === item.grade_category)?.grading_period ?? 'PRELIM')
       setCategoryId(String(item.grade_category))
       setSheetDate(item.date ?? item.created_at.slice(0, 10))
       setTitle(item.title)
@@ -328,7 +342,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
   function startEditingSheet() {
     if (!activeItem || pendingSaveCount || closeRequested) return
-    const category = data.gradeCategories.find((candidate) => candidate.id === activeItem.grade_category)
+    const category = gradeCategories.find((candidate) => candidate.id === activeItem.grade_category)
     setEditDraft({
       categoryId: String(activeItem.grade_category),
       date: activeItem.date ?? activeItem.created_at.slice(0, 10),
@@ -358,7 +372,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         method: 'PATCH',
       })
       const currentStudent = currentDraft?.student ?? null
-      const nextDrafts = response.rows.map((row) => apiRowToDraft(row, data))
+      const nextDrafts = response.rows.map(apiRowToDraft)
       const nextActiveDrafts = nextDrafts.filter((draft) => draft.isActive)
       const nextIndex = currentStudent == null
         ? firstPendingIndex(nextDrafts)
@@ -409,6 +423,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
       confirmedLastChangeRef.current = change
       setDeleteConfirmation(null)
       setMessage(`${target.studentName}'s saved result was cleared.`)
+      void refresh().catch(() => undefined)
     } catch (error) {
       setDeleteConfirmation(null)
       setMessage(toErrorMessage(error))
@@ -424,10 +439,10 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
     setMessage('')
     try {
       await api(`/grades/items/${activeItem.id}/score-sheet/`, { method: 'DELETE' })
-      await refresh()
       clearEntry()
       setTab('sheets')
       setMessage(`${deletedTitle} was permanently deleted.`)
+      void refresh().catch(() => undefined)
     } catch (error) {
       setDeleteConfirmation(null)
       setMessage(toErrorMessage(error))
@@ -495,6 +510,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         setExcuseError('')
         setLastChange(confirmedLastChangeRef.current)
         setMessage(toErrorMessage(error))
+        void refresh().catch(() => undefined)
         window.requestAnimationFrame(() => scoreInputRef.current?.focus())
         return
       }
@@ -502,6 +518,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
     processingScoresRef.current = false
     setLastChange(confirmedLastChangeRef.current)
+    void refresh().catch(() => undefined)
     if (closeRequestedRef.current) finishClose()
   }
 
@@ -588,6 +605,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
       setLastChange(null)
       confirmedLastChangeRef.current = null
       setMessage('Last score action undone.')
+      void refresh().catch(() => undefined)
     } catch (error) {
       setMessage(toErrorMessage(error))
     } finally {
@@ -652,11 +670,11 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
 
         <div aria-label="Score views" className="class-attendance-dialog__tabs" role="tablist">
           <button aria-controls="score-entry-panel" aria-selected={tab === 'enter'} className={tab === 'enter' ? 'active' : ''} disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setTab('enter')} role="tab" type="button">Enter scores</button>
-          <button aria-controls="score-sheets-panel" aria-selected={tab === 'sheets'} className={tab === 'sheets' ? 'active' : ''} disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setTab('sheets')} role="tab" type="button">Score sheets</button>
+          <button aria-controls="score-sheets-panel" aria-selected={tab === 'sheets'} className={tab === 'sheets' ? 'active' : ''} disabled={saving || Boolean(pendingSaveCount) || closeRequested || !setup} onClick={() => setTab('sheets')} role="tab" type="button">Score sheets</button>
         </div>
 
         <div hidden={tab !== 'enter'} id="score-entry-panel" role="tabpanel">
-          {editDraft && activeItem ? (
+          {!setup && setupLoading ? <div className="class-score-setup"><p aria-live="polite" className="admin-message" role="status">Loading score setup...</p><button className="button button--primary" disabled type="button">Start scoring</button></div> : !setup && setupError ? <div className="class-score-setup" role="alert"><p className="admin-message">{setupError}</p><button className="button button--secondary" onClick={retrySetup} type="button">Retry score setup</button></div> : editDraft && activeItem ? (
             <div className="class-score-setup">
               <div className="class-score-setup__intro">
                 <span className="class-score-setup__icon"><Icon name="edit" /></span>
@@ -687,7 +705,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
                 <label className="admin-field class-score-setup__category"><span>Category</span><select disabled={saving || !categories.length} onChange={(event) => setCategoryId(event.target.value)} value={selectedCategory?.id ?? ''}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} ({category.category})</option>)}</select></label>
               </div>
               {!categories.length ? <p className="admin-message class-score-setup__guidance">No non-attendance categories are configured for {periodLabels[period]}. <Link to="/admin/grades">Configure grade categories</Link>.</p> : null}
-              <div className="class-score-setup__footer"><span><Icon name="users" /> {data.enrollments.filter((enrollment) => enrollment.schedule === schedule.id && enrollment.is_active).length} active students</span><button className="button button--primary" disabled={saving || !selectedCategory || !title.trim() || !sheetDate || numeric(pointsPossible) <= 0} onClick={() => void startNewSheet()} type="button"><Icon name="arrow-right" /><span>{saving ? 'Starting...' : 'Start scoring'}</span></button></div>
+              <div className="class-score-setup__footer"><span><Icon name="users" /> {setup?.active_student_count ?? 0} active students</span><button className="button button--primary" disabled={saving || !setup || !selectedCategory || !title.trim() || !sheetDate || numeric(pointsPossible) <= 0} onClick={() => void startNewSheet()} type="button"><Icon name="arrow-right" /><span>{saving ? 'Starting...' : 'Start scoring'}</span></button></div>
             </div>
           ) : showSummary ? (
             <ScoreCompletion closeRequested={closeRequested} excused={excusedCount} graded={gradedCount} inactiveDrafts={inactiveDrafts} message={message} onClose={closeDialog} onDelete={() => setDeleteConfirmation({ kind: 'sheet' })} onEdit={startEditingSheet} onReview={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing scores from the first student.') }} onSheets={() => setTab('sheets')} onUndo={lastChange ? () => void undoLastScore() : undefined} pendingSaveCount={pendingSaveCount} saving={saving} total={activeDrafts.length} zeros={zeroCount} />
@@ -736,18 +754,18 @@ export function ClassScoresDialog({ api, data, onClose, refresh, schedule }: {
         </div>
 
         <div hidden={tab !== 'sheets'} id="score-sheets-panel" role="tabpanel">
-          <div className="class-score-sheet-browser">
+          {sheetsQuery.isPending && !sheetsQuery.data ? <p aria-live="polite" className="admin-message" role="status">Loading score sheets...</p> : sheetsQuery.isError && !sheetsQuery.data ? <div role="alert"><p className="admin-message">{toErrorMessage(sheetsQuery.error)}</p><button className="button button--secondary" onClick={() => void sheetsQuery.refetch()} type="button">Retry score sheets</button></div> : <div className="class-score-sheet-browser">
             <div className="class-score-sheet-browser__heading"><div><p className="eyebrow">Score sheet history</p><h2>Find and continue a sheet</h2></div><span>{filteredScoreSheets.length} of {scoreSheets.length}</span></div>
             <div className="score-search-field"><Icon name="search" /><input aria-label="Search score sheets" onChange={(event) => setSheetQuery(event.target.value)} placeholder="Search title, category, period, date, or points" type="search" value={sheetQuery} />{sheetQuery ? <button aria-label="Clear score sheet search" className="icon-button" onClick={() => setSheetQuery('')} type="button"><Icon name="close" /></button> : null}</div>
             <div className="class-score-sheet-list">
             {filteredScoreSheets.map((item) => {
-              const category = data.gradeCategories.find((candidate) => candidate.id === item.grade_category)
+              const category = gradeCategories.find((candidate) => candidate.id === item.grade_category)
               return <button disabled={saving || Boolean(pendingSaveCount) || closeRequested} key={item.id} onClick={() => void openSheet(item)} type="button"><span className="class-score-sheet-list__main"><strong>{item.title}</strong><span><small>{category?.name ?? 'Unknown category'}</small><small>{category ? periodLabels[category.grading_period as keyof typeof periodLabels] : 'Unknown period'}</small><small>{numeric(item.points_possible)} points</small></span></span><span className="class-score-sheet-list__date"><Icon name="calendar" />{item.date ? formatDate(item.date) : 'No date'}</span><Icon name="arrow-right" /></button>
             })}
             {!scoreSheets.length ? <p className="admin-empty-line">No manual score sheets for this class yet.</p> : null}
             {scoreSheets.length && !filteredScoreSheets.length ? <div className="class-score-search-empty"><Icon name="search" /><strong>No score sheets found</strong><span>Try a different title, category, period, date, or point value.</span><button className="button button--secondary button--compact" onClick={() => setSheetQuery('')} type="button">Clear search</button></div> : null}
             </div>
-          </div>
+          </div>}
         </div>
 
         {message && (tab === 'sheets' || !activeItem) ? <p aria-live="polite" className="admin-message">{message}</p> : null}
@@ -894,9 +912,8 @@ function normalizeSearch(value: string) {
     .trim()
 }
 
-function apiRowToDraft(row: ScoreSheetResponse['rows'][number], data: RouteData): ScoreDraft {
-  const user = data.users.find((candidate) => candidate.id === row.student)
-  const displayName = user ? fullName(user) : row.student_name
+function apiRowToDraft(row: ScoreSheetResponse['rows'][number]): ScoreDraft {
+  const displayName = row.student_full_name || row.student_name
   const saved = row.score_id == null ? null : { rawScore: row.raw_score ?? '', remarks: row.remarks, status: row.status }
   return { isActive: row.is_active, rawScore: saved?.rawScore ?? '', remarks: saved?.remarks ?? '', saved, scoreId: row.score_id, status: saved?.status ?? 'GRADED', student: row.student, studentName: displayName, studentNumber: row.student_number }
 }
