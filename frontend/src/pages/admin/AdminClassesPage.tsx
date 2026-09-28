@@ -3,10 +3,10 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from '
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import QRCode from 'qrcode'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { ApiError } from '../../api'
 import { Icon } from '../../components/Icon'
+import { studentQrImage, studentQrPayload } from '../../utils/studentQr'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
 import { ClassAttendanceDialog } from '../../components/admin/ClassAttendanceDialog'
 import { ClassScoresDialog } from '../../components/admin/ClassScoresDialog'
@@ -1893,7 +1893,7 @@ function StudentQrCarouselDialog({
   const [qrImage, setQrImage] = useState({ error: '', payload: '', url: '' })
   const panelRef = useRef<HTMLDivElement>(null)
   const card = cards[index]
-  const payload = card ? studentQrPayload(card) : ''
+  const payload = card ? studentQrPayload(card.name, card.studentNumber) : ''
 
   useEffect(() => {
     panelRef.current?.focus()
@@ -1921,12 +1921,7 @@ function StudentQrCarouselDialog({
     let cancelled = false
     if (!card) return () => { cancelled = true }
 
-    void QRCode.toDataURL(payload, {
-      color: { dark: '#0f172a', light: '#ffffff' },
-      errorCorrectionLevel: 'M',
-      margin: 2,
-      width: 480,
-    }).then((nextImageUrl) => {
+    void studentQrImage(payload).then((nextImageUrl) => {
       if (!cancelled) setQrImage({ error: '', payload, url: nextImageUrl })
     }).catch(() => {
       if (!cancelled) setQrImage({
@@ -1990,10 +1985,6 @@ function StudentQrCarouselDialog({
       </div>
     </div>
   )
-}
-
-function studentQrPayload(card: StudentQrCard) {
-  return `AralForge Student\nName: ${card.name}\nStudent Number: ${card.studentNumber}`
 }
 
 function RosterRow({

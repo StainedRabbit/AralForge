@@ -187,6 +187,51 @@
   max-width: 560px;
 }
 
+.profile-attendance-qr {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.profile-attendance-qr h3,
+.profile-attendance-qr p {
+  margin: 0;
+}
+
+.profile-attendance-qr p {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.profile-attendance-qr__image {
+  display: grid;
+  place-items: center;
+  width: min(100%, 288px);
+  min-height: 180px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.profile-attendance-qr__image img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.profile-attendance-qr > strong {
+  overflow-wrap: anywhere;
+  font-size: 1.125rem;
+  letter-spacing: 0.02em;
+}
+
 .section-heading {
   display: flex;
   align-items: flex-start;

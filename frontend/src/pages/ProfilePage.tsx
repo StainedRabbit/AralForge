@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AuthedRequest, RouteData } from '../app/types'
 import { Icon } from '../components/Icon'
 import { PasswordInput } from '../components/PasswordInput'
 import { EmptyState, MetaStrip, Page, PageHeader, SectionHeading } from '../components/ui'
 import { formatDateTime, toErrorMessage } from '../utils/format'
-import { fullName, initials } from '../utils/student'
+import { fullName } from '../utils/student'
+import { studentQrImage, studentQrPayload } from '../utils/studentQr'
 
 export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData }) {
   const user = data.currentUser
@@ -16,6 +17,26 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
+  const [attendanceQr, setAttendanceQr] = useState('')
+  const [attendanceQrError, setAttendanceQrError] = useState(false)
+  const studentNumber = profile?.student_number?.trim() ?? ''
+  const studentName = fullName(user)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!studentNumber) return
+    void studentQrImage(studentQrPayload(studentName, studentNumber))
+      .then((image) => {
+        if (!cancelled) {
+          setAttendanceQr(image)
+          setAttendanceQrError(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAttendanceQrError(true)
+      })
+    return () => { cancelled = true }
+  }, [studentName, studentNumber])
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -58,7 +79,6 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
 
       <section className="content-grid">
         <div className="profile-panel">
-          <div className="profile-avatar">{initials(user)}</div>
           <div>
             <h2>{fullName(user)}</h2>
             <p className="muted">@{user?.username ?? 'user'}</p>
@@ -68,13 +88,29 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
         <div className="section-block">
           <SectionHeading subtitle="Student profile details." title="Enrollment" />
           {profile ? (
-            <MetaStrip
-              stacked
-              items={[
-                ['Student number', profile.student_number],
-                ['Joined', formatDateTime(profile.joined_at)],
-              ]}
-            />
+            <>
+              <MetaStrip
+                stacked
+                items={[
+                  ['Student number', profile.student_number],
+                  ['Joined', formatDateTime(profile.joined_at)],
+                ]}
+              />
+              {studentNumber ? (
+                <div className="profile-attendance-qr">
+                  <div>
+                    <h3>Attendance QR code</h3>
+                    <p>Show this code to your teacher during attendance.</p>
+                  </div>
+                  <div className="profile-attendance-qr__image">
+                    {attendanceQr && !attendanceQrError
+                      ? <img alt={`Attendance QR code for ${studentName}`} src={attendanceQr} />
+                      : <span role={attendanceQrError ? 'alert' : 'status'}>{attendanceQrError ? 'QR code could not load.' : 'Generating QR code...'}</span>}
+                  </div>
+                  <strong>{studentNumber}</strong>
+                </div>
+              ) : null}
+            </>
           ) : (
             <EmptyState
               icon="profile"

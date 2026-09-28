@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type { AttendanceRecord, AttendanceSession, SubjectSchedule, User } from '../../types'
 import { formatDate, percent, toErrorMessage } from '../../utils/format'
@@ -6,6 +6,9 @@ import { compareStudentsByLastName, fullName } from '../../utils/student'
 import { Icon } from '../Icon'
 import { AttendanceSessionDetails } from './AttendanceSessionDetails'
 import { summarizeAttendance } from './attendanceHelpers'
+import type { AttendanceScanResult } from './AttendanceQrScanner'
+
+const AttendanceQrScanner = lazy(() => import('./AttendanceQrScanner').then((module) => ({ default: module.AttendanceQrScanner })))
 
 type AttendanceStatus = AttendanceRecord['status']
 type AttendanceDraft = { remarks: string; status: AttendanceStatus | '' }
@@ -51,7 +54,10 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   const [bulkPresentOpen, setBulkPresentOpen] = useState(false)
   const [futureDateOpen, setFutureDateOpen] = useState(false)
   const [reviewMode, setReviewMode] = useState(false)
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [lastQrScan, setLastQrScan] = useState<number | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const scanButtonRef = useRef<HTMLButtonElement>(null)
   const studentNameRef = useRef<HTMLHeadingElement>(null)
   const dirtyRef = useRef(false)
   const markQueueRef = useRef<AttendanceMarkOperation[]>([])
@@ -109,6 +115,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       setShowSummary(firstUnmarked < 0)
       dirtyRef.current = result.created
       setLastChange(null)
+      setLastQrScan(null)
       confirmedLastChangeRef.current = null
       setReviewMode(false)
       setFutureDateOpen(false)
@@ -186,6 +193,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
     const nextIndex = findNextUnmarked(students, nextDrafts, currentIndex)
 
     setMessage('')
+    setLastQrScan(null)
     setDrafts(nextDrafts)
     dirtyRef.current = true
     setExcuseOpen(false)
@@ -269,6 +277,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       ])))
       setBulkPresentOpen(false)
       setLastChange(null)
+      setLastQrScan(null)
       confirmedLastChangeRef.current = null
       setShowSummary(true)
       dirtyRef.current = true
@@ -335,6 +344,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
   async function openHistory() {
     if (saving || pendingMarkCount) return
     setSaving(true)
+    setScannerOpen(false)
     setMessage('')
     try {
       await synchronizeWorkspace()
@@ -356,13 +366,51 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
     finishClose()
   }
 
+  function closeScanner() {
+    setScannerOpen(false)
+    requestAnimationFrame(() => scanButtonRef.current?.focus())
+  }
+
+  async function scanStudentNumber(studentNumber: string): Promise<AttendanceScanResult> {
+    if (!activeSession) throw new Error('Start an attendance session before scanning.')
+    const result = await api<AttendanceScanResult>(`/attendance/sessions/${activeSession.id}/scan/`, {
+      body: JSON.stringify({ student_number: studentNumber }),
+      method: 'POST',
+    })
+    if (!result.already_marked) {
+      setDrafts((current) => ({
+        ...current,
+        [result.student.id]: { remarks: result.record.remarks, status: result.record.status },
+      }))
+      setLastQrScan(result.student.id)
+      setLastChange(null)
+      confirmedLastChangeRef.current = null
+      dirtyRef.current = true
+    }
+    return result
+  }
+
+  async function undoLastQrScan() {
+    if (!activeSession || lastQrScan === null) return
+    await api(`/attendance/sessions/${activeSession.id}/mark/`, {
+      body: JSON.stringify({ student: lastQrScan }),
+      method: 'DELETE',
+    })
+    setDrafts((current) => ({ ...current, [lastQrScan]: { remarks: '', status: '' } }))
+    const index = students.findIndex((student) => student.id === lastQrScan)
+    if (index >= 0) setCurrentIndex(index)
+    setShowSummary(false)
+    setLastQrScan(null)
+    dirtyRef.current = true
+  }
+
   useEffect(() => {
     panelRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    if (activeSession && !showSummary && !saving) studentNameRef.current?.focus()
-  }, [activeSession, currentIndex, saving, showSummary])
+    if (activeSession && !showSummary && !saving && !scannerOpen) studentNameRef.current?.focus()
+  }, [activeSession, currentIndex, saving, showSummary, scannerOpen])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -388,7 +436,9 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
       if (event.key === 'Escape') {
         event.preventDefault()
-        if (excuseOpen) {
+        if (scannerOpen) {
+          closeScanner()
+        } else if (excuseOpen) {
           setExcuseOpen(false)
           setExcuseError('')
         } else if (bulkPresentOpen) {
@@ -403,7 +453,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
       const target = event.target as HTMLElement
       if (target.matches('input, textarea, select, [contenteditable="true"]') || event.altKey || event.ctrlKey || event.metaKey) return
-      if (!activeSession || showSummary || excuseOpen || saving || closeRequested) return
+      if (!activeSession || scannerOpen || showSummary || excuseOpen || saving || closeRequested) return
 
       const shortcutStatus: Record<string, AttendanceStatus> = {
         '1': 'PRESENT',
@@ -450,6 +500,9 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
 
         {tab === 'take' ? <div className="attendance-roll-call">
           {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
+          {activeSession ? <div className="attendance-roll-call__scan-action">
+            <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => scannerOpen ? closeScanner() : setScannerOpen(true)} ref={scanButtonRef} type="button"><Icon name="search" /><span>{scannerOpen ? 'Close scanner' : 'Scan student QR'}</span></button>
+          </div> : null}
           {!activeSession ? <div className="attendance-roll-call__start">
             <div>
               <p className="eyebrow">Ready for roll call</p>
@@ -474,7 +527,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
                 </div>
               </div> : null}
             </div>
-          </div> : showSummary ? <AttendanceCompletion
+          </div> : scannerOpen ? <Suspense fallback={<p role="status">Opening scanner...</p>}><AttendanceQrScanner onClose={closeScanner} onScan={scanStudentNumber} onUndo={lastQrScan === null ? null : undoLastQrScan} /></Suspense> : showSummary ? <AttendanceCompletion
             onClose={() => void closeDialog()}
             onHistory={() => void openHistory()}
             onReview={() => { setCurrentIndex(0); setReviewMode(true); setShowSummary(false); setMessage('Reviewing attendance from the first student.') }}

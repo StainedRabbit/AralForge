@@ -3127,6 +3127,114 @@ a.teacher-recent-item:focus-visible {
   margin: 0 auto;
 }
 
+.attendance-roll-call__scan-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.attendance-qr-scanner {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.attendance-qr-scanner__heading,
+.attendance-qr-scanner__camera-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attendance-qr-scanner__heading h2,
+.attendance-qr-scanner__heading p {
+  margin: 0;
+}
+
+.attendance-qr-scanner__heading p {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.attendance-qr-scanner__camera {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-height: min(44vh, 360px);
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: #08121f;
+}
+
+.attendance-qr-scanner__camera video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attendance-qr-scanner__camera--unavailable {
+  display: none;
+}
+
+.attendance-qr-scanner__guide {
+  position: absolute;
+  inset: 15% 24%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.attendance-qr-scanner__result,
+.attendance-qr-scanner__camera-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.attendance-qr-scanner__result--success {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+.attendance-qr-scanner__result--warning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.attendance-qr-scanner__result--error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.attendance-qr-scanner__queue {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.attendance-qr-scanner__manual {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
+.attendance-qr-scanner__manual .admin-field {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .attendance-qr-scanner__heading,
+  .attendance-qr-scanner__camera-error,
+  .attendance-qr-scanner__manual {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .attendance-roll-call__start,
 .attendance-roll-call__runner,
 .attendance-completion {

@@ -8,6 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from accounts.models import StudentProfile
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 
 from .models import AttendanceRecord, AttendanceSession
@@ -55,6 +56,8 @@ class ClassAttendanceApiTests(APITestCase):
         )
         ScheduleStudent.objects.create(schedule=self.schedule_a, student=self.student)
         ScheduleStudent.objects.create(schedule=self.schedule_b, student=self.other_student)
+        StudentProfile.objects.create(user=self.student, student_number='ATT-001')
+        StudentProfile.objects.create(user=self.other_student, student_number='ATT-002')
         self.client.force_authenticate(self.teacher)
 
     def create_session(self, schedule):
@@ -399,6 +402,87 @@ class ClassAttendanceApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(AttendanceRecord.objects.filter(session=session).exists())
+
+    def test_scan_marks_present_and_repeated_scan_keeps_existing_record(self):
+        session = self.create_session(self.schedule_a)
+        url = reverse('attendance:attendance-session-scan-student', args=[session.id])
+
+        first = self.client.post(url, {'student_number': ' ATT-001 '}, format='json')
+        repeated = self.client.post(url, {'student_number': 'ATT-001'}, format='json')
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(first.data['student']['student_number'], 'ATT-001')
+        self.assertFalse(first.data['already_marked'])
+        self.assertEqual(first.data['record']['status'], 'PRESENT')
+        self.assertEqual(first.data['record']['points_earned'], '2.00')
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
+        self.assertTrue(repeated.data['already_marked'])
+        self.assertEqual(repeated.data['record']['id'], first.data['record']['id'])
+        self.assertEqual(AttendanceRecord.objects.filter(session=session).count(), 1)
+
+    def test_scan_preserves_late_and_rejects_non_roster_and_unknown_numbers(self):
+        session = self.create_session(self.schedule_a)
+        url = reverse('attendance:attendance-session-scan-student', args=[session.id])
+        late = AttendanceRecord.objects.create(
+            session=session, student=self.student, status='LATE', points_earned='1.00',
+        )
+
+        repeated = self.client.post(url, {'student_number': 'ATT-001'}, format='json')
+        outside = self.client.post(url, {'student_number': 'ATT-002'}, format='json')
+        unknown = self.client.post(url, {'student_number': 'MISSING'}, format='json')
+        blank = self.client.post(url, {'student_number': ' '}, format='json')
+
+        self.assertEqual(repeated.status_code, status.HTTP_200_OK)
+        self.assertTrue(repeated.data['already_marked'])
+        self.assertEqual(repeated.data['record']['status'], 'LATE')
+        self.assertEqual(outside.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(unknown.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(blank.status_code, status.HTTP_400_BAD_REQUEST)
+        late.refresh_from_db()
+        self.assertEqual(late.status, 'LATE')
+        self.assertEqual(AttendanceRecord.objects.filter(session=session).count(), 1)
+
+    def test_scan_keeps_absent_and_excused_marks_and_rejects_inactive_students(self):
+        for existing_status in ('ABSENT', 'EXCUSED'):
+            with self.subTest(existing_status=existing_status):
+                session = self.create_session(self.schedule_a)
+                record = AttendanceRecord.objects.create(
+                    session=session, student=self.student,
+                    status=existing_status, points_earned='0.00',
+                )
+                response = self.client.post(
+                    reverse('attendance:attendance-session-scan-student', args=[session.id]),
+                    {'student_number': 'ATT-001'}, format='json',
+                )
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response.data['record']['status'], existing_status)
+                record.delete()
+                session.delete()
+
+        session = self.create_session(self.schedule_a)
+        profile = StudentProfile.objects.get(user=self.student)
+        profile.is_active = False
+        profile.save(update_fields=['is_active'])
+        response = self.client.post(
+            reverse('attendance:attendance-session-scan-student', args=[session.id]),
+            {'student_number': 'ATT-001'}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(AttendanceRecord.objects.filter(session=session).exists())
+
+    def test_only_teacher_or_admin_can_scan(self):
+        session = self.create_session(self.schedule_a)
+        url = reverse('attendance:attendance-session-scan-student', args=[session.id])
+        self.client.force_authenticate(self.student)
+        denied = self.client.post(url, {'student_number': 'ATT-001'}, format='json')
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+
+        admin = get_user_model().objects.create_user(
+            username='attendance-admin', password='testpass123', role='ADMIN',
+        )
+        self.client.force_authenticate(admin)
+        allowed = self.client.post(url, {'student_number': 'ATT-001'}, format='json')
+        self.assertEqual(allowed.status_code, status.HTTP_201_CREATED)
 
     def test_deleting_class_preserves_attendance_as_legacy_history(self):
         session = self.create_session(self.schedule_a)

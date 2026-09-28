@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from accounts.permissions import IsAdminTeacherOrReadOnly
+from accounts.models import StudentProfile
 from subjects.models import ScheduleStudent
 
 from .models import AttendanceRecord, AttendanceSession
@@ -208,6 +209,61 @@ class AttendanceSessionViewSet(viewsets.ModelViewSet):
             AttendanceRecordSerializer(attendance_record).data,
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=['post'], url_path='scan')
+    def scan_student(self, request, pk=None):
+        session = self.get_write_session(pk)
+        if not session.schedule_id:
+            return Response(
+                {'detail': 'QR scanning requires a class attendance session.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student_number = request.data.get('student_number')
+        if not isinstance(student_number, str) or not student_number.strip():
+            return Response(
+                {'detail': 'Enter a student number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        student_number = student_number.strip()
+        profile = StudentProfile.objects.select_related('user').filter(
+            student_number=student_number,
+            is_active=True,
+            user__is_active=True,
+            user__role='STUDENT',
+        ).first()
+        if not profile:
+            return Response(
+                {'detail': 'No active student matches this number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not session_has_student(session, profile.user_id):
+            return Response(
+                {'detail': 'This student is not part of this attendance roster.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            record, created = AttendanceRecord.objects.get_or_create(
+                session_id=session.id,
+                student_id=profile.user_id,
+                defaults={
+                    'status': AttendanceRecord.Status.PRESENT,
+                    'points_earned': attendance_points(
+                        AttendanceRecord.Status.PRESENT,
+                        session.points_possible,
+                    ),
+                },
+            )
+        return Response({
+            'student': {
+                'id': profile.user_id,
+                'name': profile.user.get_full_name() or profile.user.username,
+                'student_number': profile.student_number,
+            },
+            'record': AttendanceRecordSerializer(record).data,
+            'already_marked': not created,
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class AttendanceRecordViewSet(viewsets.ModelViewSet):
