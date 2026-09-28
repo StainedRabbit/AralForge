@@ -1749,9 +1749,7 @@ body.student-focus-active .student-lesson-reader .student-lesson-bottom-paths {
 }
 
 body.student-focus-active .student-focus-toolbar {
-  position: sticky;
-  z-index: 20;
-  top: 0;
+  position: static;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1791,8 +1789,10 @@ body.student-focus-active .student-lesson-reader .student-lesson-context {
 }
 
 body.student-focus-active .student-lesson-reader .lesson-section-nav {
+  position: static;
+  z-index: auto;
   display: flex;
-  top: 68px;
+  top: auto;
   flex-wrap: nowrap;
   margin-inline: 0;
 }
@@ -1842,6 +1842,6 @@ body.student-focus-active :is(button, a, input, select, textarea):focus-visible 
   }
 
   body.student-focus-active .student-lesson-reader .lesson-section-nav {
-    top: 62px;
+    top: auto;
   }
 }
