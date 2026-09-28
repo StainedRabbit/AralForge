@@ -53,6 +53,7 @@ export function ModuleDetailPage({
   const viewedLessonIds = useRef(new Set<number>())
   const [progressMessage, setProgressMessage] = useState('')
   const [savingProgress, setSavingProgress] = useState(false)
+  const [focusMode, setFocusMode] = useState(false)
   const module = data.modules.find((item) => item.id === Number(moduleId))
   const topics = topicsForModule(data.moduleTopics, module?.id ?? null).filter(
     (topic) => topic.is_published,
@@ -78,6 +79,12 @@ export function ModuleDetailPage({
     (selectedLesson
       ? topics.find((topic) => topic.id === selectedLesson.topic)
       : topics.find((topic) => topic.id === requestedTopicId)) ?? null
+  const focusModeActive = focusMode && Boolean(selectedLesson)
+
+  useEffect(() => {
+    document.body.classList.toggle('student-focus-active', focusModeActive)
+    return () => document.body.classList.remove('student-focus-active')
+  }, [focusModeActive])
   const currentUserId = data.currentUser?.id ?? null
   const studentLessonProgress = useMemo(
     () =>
@@ -211,6 +218,7 @@ export function ModuleDetailPage({
   }
 
   function openLesson(lesson: ModuleLesson) {
+    setFocusMode(false)
     setSearchParams(withLearningContext({
       lesson: String(lesson.id),
       topic: String(lesson.topic),
@@ -218,10 +226,12 @@ export function ModuleDetailPage({
   }
 
   function openTopic(topic: ModuleTopic) {
+    setFocusMode(false)
     setSearchParams(withLearningContext({ topic: String(topic.id) }, learningContext))
   }
 
   function openContents() {
+    setFocusMode(false)
     setSearchParams(withLearningContext({}, learningContext))
   }
 
@@ -303,10 +313,12 @@ export function ModuleDetailPage({
           completed={Boolean(selectedProgress?.completed_at)}
           completedLessonIds={completedLessonIds}
           data={data}
+          focusMode={focusMode}
           lesson={selectedLesson}
           onOpenContents={openContents}
           onOpenTopic={() => openTopic(selectedTopic)}
           onSelectLesson={openLesson}
+          onToggleFocusMode={setFocusMode}
           onToggleComplete={toggleLessonComplete}
           publishedLessons={publishedLessons}
           refresh={refresh}
@@ -678,10 +690,12 @@ function StudentLessonReader({
   completed,
   completedLessonIds,
   data,
+  focusMode,
   lesson,
   onOpenContents,
   onOpenTopic,
   onSelectLesson,
+  onToggleFocusMode,
   onToggleComplete,
   publishedLessons,
   refresh,
@@ -695,10 +709,12 @@ function StudentLessonReader({
   completed: boolean
   completedLessonIds: Set<number>
   data: RouteData
+  focusMode: boolean
   lesson: ModuleLesson
   onOpenContents: () => void
   onOpenTopic: () => void
   onSelectLesson: (lesson: ModuleLesson) => void
+  onToggleFocusMode: (active: boolean) => void
   onToggleComplete: () => Promise<void>
   publishedLessons: ModuleLesson[]
   refresh: () => Promise<void>
@@ -709,6 +725,8 @@ function StudentLessonReader({
 }) {
   const [sectionContainer, setSectionContainer] = useState<HTMLElement | null>(null)
   const lessonHeadingRef = useRef<HTMLElement | null>(null)
+  const focusModeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const exitFocusModeButtonRef = useRef<HTMLButtonElement | null>(null)
   const module = data.modules.find((candidate) => candidate.id === topic.module)
   const lessonExamples = useMemo(
     () => data.lessonExamples.filter((example) => example.lesson === lesson.id),
@@ -811,6 +829,33 @@ function StudentLessonReader({
     lessonIndex >= 0 && lessonIndex < publishedLessons.length - 1
       ? publishedLessons[lessonIndex + 1]
       : null
+
+  function exitFocusMode() {
+    onToggleFocusMode(false)
+    window.requestAnimationFrame(() => focusModeButtonRef.current?.focus())
+  }
+
+  useEffect(() => {
+    if (!focusMode) return
+
+    function handleFocusModeKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onToggleFocusMode(false)
+        window.requestAnimationFrame(() => focusModeButtonRef.current?.focus())
+      }
+    }
+
+    window.addEventListener('keydown', handleFocusModeKeyDown)
+    return () => window.removeEventListener('keydown', handleFocusModeKeyDown)
+  }, [focusMode, onToggleFocusMode])
+
+  useEffect(() => {
+    if (!focusMode) return
+    const frame = window.requestAnimationFrame(() => exitFocusModeButtonRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusMode])
+
   useEffect(() => {
     window.requestAnimationFrame(() => {
       lessonHeadingRef.current?.scrollIntoView({
@@ -857,6 +902,18 @@ function StudentLessonReader({
 
   return (
     <div className="student-lesson-reader">
+      {focusMode ? (
+        <div className="student-focus-toolbar">
+          <div>
+            <span>Focus mode</span>
+            <strong>{module?.title} / {topic.title} / Lesson {lesson.order}</strong>
+          </div>
+          <button className="button button--secondary button--compact" onClick={exitFocusMode} ref={exitFocusModeButtonRef} type="button">
+            <Icon name="shrink" />
+            <span>Exit focus mode</span>
+          </button>
+        </div>
+      ) : null}
       <nav className="floating-lesson-nav floating-lesson-nav--top" aria-label="Module lesson navigation">
         <button
           aria-label={previousLesson ? `Previous lesson: ${previousLesson.title}` : 'No previous lesson'}
@@ -894,6 +951,17 @@ function StudentLessonReader({
           <p>{topic.essential_question || topic.overview}</p>
         </div>
         <div className="student-lesson-context__actions">
+          {!focusMode ? (
+            <button
+              className="button button--secondary"
+              onClick={() => onToggleFocusMode(true)}
+              ref={focusModeButtonRef}
+              type="button"
+            >
+              <Icon name="expand" />
+              <span>Focus mode</span>
+            </button>
+          ) : null}
           <button
             className={completed ? 'button button--secondary' : 'button button--primary'}
             disabled={savingProgress || completionBlocked}

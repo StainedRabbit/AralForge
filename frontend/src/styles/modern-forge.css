@@ -1711,3 +1711,137 @@ table tbody tr:hover td {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Student lesson focus mode: temporarily remove app chrome and use the full canvas. */
+body.student-focus-active .app-shell {
+  padding-left: 0;
+}
+
+body.student-focus-active .sidebar,
+body.student-focus-active .mobile-header,
+body.student-focus-active .mobile-tabbar,
+body.student-focus-active .page-header {
+  display: none !important;
+}
+
+body.student-focus-active .app-main {
+  padding: clamp(14px, 3vw, 42px);
+  background: var(--bg);
+}
+
+body.student-focus-active .page {
+  width: 100%;
+  max-width: none;
+  gap: 0;
+}
+
+body.student-focus-active .student-lesson-reader {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+  gap: 16px;
+}
+
+body.student-focus-active .student-lesson-reader .floating-lesson-nav--top,
+body.student-focus-active .student-lesson-reader .student-lesson-breadcrumbs,
+body.student-focus-active .student-lesson-reader .module-lesson-strip,
+body.student-focus-active .student-lesson-reader .student-lesson-bottom-paths {
+  display: none;
+}
+
+body.student-focus-active .student-focus-toolbar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.student-focus-toolbar > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.student-focus-toolbar > div > span {
+  color: var(--primary-dark);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.student-focus-toolbar strong {
+  max-width: min(62vw, 760px);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+body.student-focus-active .student-lesson-reader .student-lesson-context {
+  align-items: flex-start;
+  padding-top: 8px;
+}
+
+body.student-focus-active .student-lesson-reader .lesson-section-nav {
+  display: flex;
+  top: 68px;
+  flex-wrap: nowrap;
+  margin-inline: 0;
+}
+
+body.student-focus-active .student-topic-work {
+  width: min(100%, 1120px);
+  margin: 22px auto 0;
+}
+
+body.student-focus-active :is(button, a, input, select, textarea):focus-visible {
+  outline-color: var(--primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  body.student-focus-active .app-main {
+    padding: 10px 12px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  body.student-focus-active .student-focus-toolbar {
+    gap: 8px;
+    padding-block: 9px;
+  }
+
+  body.student-focus-active .student-focus-toolbar strong {
+    max-width: 48vw;
+    font-size: 12px;
+  }
+
+  body.student-focus-active .student-focus-toolbar .button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding-inline: 10px;
+  }
+
+  body.student-focus-active .student-focus-toolbar .button span {
+    font-size: 12px;
+  }
+
+  body.student-focus-active .student-lesson-reader .student-lesson-context {
+    flex-direction: column;
+  }
+
+  body.student-focus-active .student-lesson-reader .student-lesson-context__actions {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  body.student-focus-active .student-lesson-reader .lesson-section-nav {
+    top: 62px;
+  }
+}
