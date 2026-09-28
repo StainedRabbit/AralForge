@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import connection
@@ -234,6 +235,31 @@ class OverviewApiTests(APITestCase):
         self.assertEqual(response.data['metrics']['today_class_count'], 0)
         self.assertEqual(response.data['metrics']['attendance_complete_count'], 0)
         self.assertEqual(response.data['today_classes'], [])
+
+    def test_teacher_dashboard_uses_manila_date_after_local_midnight(self):
+        school_year = SchoolYear.objects.create(start_year=2038, end_year=2039)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year, semester=Semester.FIRST, is_active=True,
+        )
+        subject = Subject.objects.create(code='TZ101', name='Timezone Class')
+        schedule = SubjectSchedule.objects.create(
+            subject=subject, school_year_semester=term,
+            days=WEEKDAY_CODES[1], start_time='08:00', end_time='09:00',
+        )
+        session = AttendanceSession.objects.create(
+            schedule=schedule, subject=subject, school_year_semester=term,
+            title='Tuesday attendance', date='2026-09-29',
+        )
+        self.client.force_authenticate(self.teacher)
+
+        with patch('django.utils.timezone.now', return_value=datetime(
+            2026, 9, 28, 17, 0, tzinfo=datetime_timezone.utc,
+        )):
+            response = self.client.get(reverse('overview:dashboard'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['metrics']['today_class_count'], 1)
+        self.assertEqual(response.data['today_classes'][0]['attendance_session_id'], session.id)
 
     def test_coding_api_is_removed(self):
         self.client.force_authenticate(self.student)
