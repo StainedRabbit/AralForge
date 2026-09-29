@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
+import { studentNumberFromQr, studentQrPayload } from '../src/utils/studentQr'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -198,6 +199,13 @@ test('student Profile shows the saved-number QR without an initials avatar', asy
   await expect(page.locator('.profile-avatar')).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('student QR payload contains only the student number', () => {
+  expect(studentQrPayload('E2E-001')).toBe('E2E-001')
+  expect(studentNumberFromQr('E2E-001')).toBe('E2E-001')
+  expect(studentNumberFromQr('AralForge Student\nName: Alex Rivera\nStudent Number: E2E-001')).toBe('E2E-001')
+  expect(studentNumberFromQr('E2E-001 extra text')).toBeNull()
 })
 
 test('schedule drawer guards unsaved work and returns focus', async ({ page }) => {

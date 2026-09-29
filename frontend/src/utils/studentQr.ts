@@ -1,15 +1,13 @@
 import QRCode from 'qrcode'
 
-export function studentQrPayload(name: string, studentNumber: string) {
-  return `AralForge Student\nName: ${name}\nStudent Number: ${studentNumber}`
+export function studentQrPayload(studentNumber: string) {
+  return studentNumber
 }
 
 export function studentNumberFromQr(payload: string) {
-  const match = /^AralForge Student\r?\nName: [^\r\n]*\r?\nStudent Number: ([^\r\n]+)\s*$/.exec(payload)
-  const studentNumber = match?.[1]?.trim() ?? ''
-  return studentNumber.length > 0 && studentNumber.length <= 30
-    ? studentNumber
-    : null
+  const legacyMatch = /^AralForge Student\r?\nName: [^\r\n]*\r?\nStudent Number: ([^\r\n]+)\s*$/.exec(payload)
+  const studentNumber = (legacyMatch?.[1] ?? payload).trim()
+  return /^[\p{L}\p{M}\p{N}_@.+-]{1,30}$/u.test(studentNumber) ? studentNumber : null
 }
 
 export function studentQrImage(payload: string) {

@@ -25,7 +25,7 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
   useEffect(() => {
     let cancelled = false
     if (!studentNumber) return
-    void studentQrImage(studentQrPayload(studentName, studentNumber))
+    void studentQrImage(studentQrPayload(studentNumber))
       .then((image) => {
         if (!cancelled) {
           setAttendanceQr(image)
@@ -36,7 +36,7 @@ export function ProfilePage({ api, data }: { api: AuthedRequest; data: RouteData
         if (!cancelled) setAttendanceQrError(true)
       })
     return () => { cancelled = true }
-  }, [studentName, studentNumber])
+  }, [studentNumber])
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

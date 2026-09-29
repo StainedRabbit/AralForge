@@ -1905,7 +1905,7 @@ function StudentQrCarouselDialog({
   const [qrImage, setQrImage] = useState({ error: '', payload: '', url: '' })
   const panelRef = useRef<HTMLDivElement>(null)
   const card = cards[index]
-  const payload = card ? studentQrPayload(card.name, card.studentNumber) : ''
+  const payload = card ? studentQrPayload(card.studentNumber) : ''
 
   useEffect(() => {
     panelRef.current?.focus()
