@@ -128,6 +128,7 @@ test('scans attendance by student number and keeps the scanner open for correcti
   await trigger.click()
   const scanner = dialog.getByRole('region', { name: 'Scan student QR codes' })
   await expect(scanner).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Close scanner' })).toHaveCount(1)
   await expect(scanner).toContainText('Camera scanning is not supported in this browser.')
   await scanner.getByLabel('Enter student number').fill('UNKNOWN')
   await scanner.getByRole('button', { name: 'Mark Present' }).click()

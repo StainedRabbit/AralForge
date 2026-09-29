@@ -548,8 +548,8 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
           {takeLoading ? <p aria-live="polite" className="admin-message" role="status">Loading class roster...</p> : null}
           {!takeLoading && takeError ? <div className="admin-message" role="alert"><p>{takeError}</p><button className="button button--secondary button--compact" onClick={retryTake} type="button">Retry</button></div> : null}
           {!takeLoading && !takeError && !takeWorkspace ? <p className="admin-message" role="alert">The class roster is unavailable.</p> : null}
-          {activeSession ? <div className="attendance-roll-call__scan-action">
-            <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => scannerOpen ? closeScanner() : setScannerOpen(true)} ref={scanButtonRef} type="button"><Icon name="search" /><span>{scannerOpen ? 'Close scanner' : 'Scan student QR'}</span></button>
+          {activeSession && !scannerOpen ? <div className="attendance-roll-call__scan-action">
+            <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => setScannerOpen(true)} ref={scanButtonRef} type="button"><Icon name="search" /><span>Scan student QR</span></button>
           </div> : null}
           {!takeLoading && !takeError && takeWorkspace && !activeSession ? <div className="attendance-roll-call__start">
             <div>
