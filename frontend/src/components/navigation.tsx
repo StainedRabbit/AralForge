@@ -159,7 +159,6 @@ export function Sidebar({
           onToggleCollapsed={toggleCollapsed}
         /></div>
         <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`} title={currentUser?.role === 'STUDENT' ? fullName(currentUser) : undefined}>
-          {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
           {currentUser?.role === 'STUDENT' ? <span aria-hidden="true" className="sidebar__student-icon"><Icon name="profile" /></span> : null}
           <div className="sidebar__user-info">
             <div className="sidebar__user-identity">
@@ -363,7 +362,6 @@ export function MobileMoreSheet({ currentUser, items, onClose, onLogout, open, w
         <div className="mobile-more__handle" />
         <div className="mobile-more__header">
           <div className="user-chip">
-            {currentUser?.role !== 'STUDENT' ? <div className="avatar">{initials(currentUser)}</div> : null}
             <div><strong id="mobile-more-title">{fullName(currentUser)}</strong><span>{workspaceLabel || currentUser?.role?.toLowerCase() || 'Account'}</span></div>
           </div>
           <button aria-label="Close" className="icon-button" onClick={onClose} ref={closeRef} type="button"><Icon name="close" /></button>

@@ -13,6 +13,23 @@ export type AttendanceScanResult = {
 
 type ScanFeedback = { message: string; tone: 'error' | 'success' | 'warning' }
 
+function cameraStartupMessage(error: unknown) {
+  const errorName = error instanceof Error ? error.name : ''
+  if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
+    return 'Camera permission was denied. Allow camera access for this site in your browser settings, then retry.'
+  }
+  if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+    return 'No camera was found. Connect or enable a camera, or enter the student number below.'
+  }
+  if (errorName === 'NotReadableError' || errorName === 'TrackStartError' || errorName === 'AbortError') {
+    return 'The camera could not start. Close other apps using it, check your device settings, then retry.'
+  }
+  if (errorName === 'OverconstrainedError' || errorName === 'ConstraintNotSatisfiedError') {
+    return 'The requested camera is unavailable. Check your device settings or enter the student number below.'
+  }
+  return 'Camera startup failed. Check your browser and device camera settings, then retry or enter the student number below.'
+}
+
 export function AttendanceQrScanner({
   onClose,
   onScan,
@@ -85,12 +102,18 @@ export function AttendanceQrScanner({
 
     async function startCamera() {
       setCameraError('')
-      if (!navigator.mediaDevices?.getUserMedia || !video) {
-        setCameraError('Camera scanning is unavailable here. Enter the student number below.')
+      if (!window.isSecureContext) {
+        setCameraError('Camera access requires a secure HTTPS connection. Open this site over HTTPS or enter the student number below.')
         return
       }
+      if (!navigator.mediaDevices?.getUserMedia || !video) {
+        setCameraError('Camera scanning is not supported in this browser. Use a supported browser or enter the student number below.')
+        return
+      }
+      let readerLoaded = false
       try {
         const { BrowserQRCodeReader } = await import('@zxing/browser')
+        readerLoaded = true
         if (cancelled || !video) return
         const reader = new BrowserQRCodeReader()
         const started = await reader.decodeFromConstraints(
@@ -105,8 +128,12 @@ export function AttendanceQrScanner({
           controls = started
           setCameraError('')
         }
-      } catch {
-        if (!cancelled) setCameraError('Camera access failed. Check permission or enter the student number below.')
+      } catch (error) {
+        if (!cancelled) {
+          setCameraError(readerLoaded
+            ? cameraStartupMessage(error)
+            : 'The QR scanner could not load. Refresh the page and try again, or enter the student number below.')
+        }
       }
     }
 
@@ -116,7 +143,10 @@ export function AttendanceQrScanner({
       enqueueRef.current = () => undefined
       controls?.stop()
       const stream = video?.srcObject
-      if (stream && 'getTracks' in stream) stream.getTracks().forEach((track) => track.stop())
+      if (video && stream instanceof MediaStream) {
+        stream.getTracks().forEach((track) => track.stop())
+        video.srcObject = null
+      }
     }
   }, [cameraRevision])
 

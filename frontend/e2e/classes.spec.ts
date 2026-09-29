@@ -126,7 +126,7 @@ test('scans attendance by student number and keeps the scanner open for correcti
   await trigger.click()
   const scanner = dialog.getByRole('region', { name: 'Scan student QR codes' })
   await expect(scanner).toBeVisible()
-  await expect(scanner).toContainText('Camera scanning is unavailable here.')
+  await expect(scanner).toContainText('Camera scanning is not supported in this browser.')
   await scanner.getByLabel('Enter student number').fill('UNKNOWN')
   await scanner.getByRole('button', { name: 'Mark Present' }).click()
   await expect(scanner).toContainText('No active student matches this number.')
@@ -147,6 +147,39 @@ test('scans attendance by student number and keeps the scanner open for correcti
   await expect(scanner).toHaveCount(0)
   await expect(trigger).toBeFocused()
   await expect(dialog.getByRole('heading', { name: 'Alex Rivera' })).toBeVisible()
+})
+
+test('attendance scanner explains camera permission errors and retries camera startup', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, '__cameraFailure', { configurable: true, writable: true, value: 'NotAllowedError' })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => { throw new DOMException('Camera unavailable to this page', (window as Window & { __cameraFailure: string }).__cameraFailure) },
+      },
+    })
+  })
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+  await page.getByRole('button', { name: 'Attendance', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Class attendance' })
+  const date = new Date()
+  date.setDate(date.getDate() + 160 + testInfo.retry)
+  await dialog.getByLabel('Attendance date').fill(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`)
+  await dialog.getByRole('button', { name: 'Start session' }).click()
+  await dialog.getByRole('button', { name: 'Create future session' }).click()
+  await dialog.getByRole('button', { name: 'Scan student QR' }).click()
+  const scanner = dialog.getByRole('region', { name: 'Scan student QR codes' })
+  await expect(scanner).toContainText('Camera permission was denied. Allow camera access for this site in your browser settings')
+  await page.evaluate(() => { (window as Window & { __cameraFailure: string }).__cameraFailure = 'NotFoundError' })
+  await scanner.getByRole('button', { name: 'Retry camera' }).click()
+  await expect(scanner).toContainText('No camera was found.')
+  await page.evaluate(() => { (window as Window & { __cameraFailure: string }).__cameraFailure = 'NotReadableError' })
+  await scanner.getByRole('button', { name: 'Retry camera' }).click()
+  await expect(scanner).toContainText('The camera could not start. Close other apps using it')
+  await scanner.getByLabel('Enter student number').fill('E2E-001')
+  await scanner.getByRole('button', { name: 'Mark Present' }).click()
+  await expect(scanner).toContainText('Alex Rivera (E2E-001) marked Present.')
 })
 
 test('student Profile shows the saved-number QR without an initials avatar', async ({ page }) => {
