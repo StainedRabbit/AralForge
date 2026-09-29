@@ -16,7 +16,7 @@ type ScanFeedback = { message: string; tone: 'error' | 'success' | 'warning' }
 function cameraStartupMessage(error: unknown) {
   const errorName = error instanceof Error ? error.name : ''
   if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
-    return 'Camera permission was denied. Allow camera access for this site in your browser settings, then retry.'
+    return 'Camera access was blocked by your browser or device. Check this site’s camera permission and your system camera privacy settings, close other apps using the camera, then retry.'
   }
   if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
     return 'No camera was found. Connect or enable a camera, or enter the student number below.'

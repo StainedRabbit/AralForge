@@ -68,11 +68,12 @@ test('attendance dialog opens immediately and can retry its roster load', async 
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 })
 
-async function chooseTheme(page: Page, name: 'Light' | 'Dark') {
+async function chooseTheme(page: Page, name: 'System' | 'Light' | 'Dark') {
   const details = page.locator('.sidebar .appearance-control__details')
   if (await details.getAttribute('open') === null) await details.locator('summary').click()
   await page.locator('.sidebar').getByRole('button', { name, exact: true }).click()
-  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', name.toLowerCase())
+  if (name === 'System') await expect(page.locator('html')).not.toHaveAttribute('data-theme')
+  else await expect(page.locator('html')).toHaveAttribute('data-effective-theme', name.toLowerCase())
 }
 
 test('attendance modal uses readable surfaces and controls in both themes', async ({ page }) => {
@@ -107,6 +108,7 @@ test('attendance modal uses readable surfaces and controls in both themes', asyn
     await page.setViewportSize({ width: 1440, height: 900 })
     await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   }
+  await chooseTheme(page, 'System')
 })
 
 test('scans attendance by student number and keeps the scanner open for corrections', async ({ page }, testInfo) => {
@@ -170,7 +172,7 @@ test('attendance scanner explains camera permission errors and retries camera st
   await dialog.getByRole('button', { name: 'Create future session' }).click()
   await dialog.getByRole('button', { name: 'Scan student QR' }).click()
   const scanner = dialog.getByRole('region', { name: 'Scan student QR codes' })
-  await expect(scanner).toContainText('Camera permission was denied. Allow camera access for this site in your browser settings')
+  await expect(scanner).toContainText('Camera access was blocked by your browser or device. Check this site’s camera permission and your system camera privacy settings')
   await page.evaluate(() => { (window as Window & { __cameraFailure: string }).__cameraFailure = 'NotFoundError' })
   await scanner.getByRole('button', { name: 'Retry camera' }).click()
   await expect(scanner).toContainText('No camera was found.')
