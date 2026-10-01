@@ -15,6 +15,7 @@ export type IconName =
   | 'code'
   | 'computer'
   | 'dashboard'
+  | 'download'
   | 'file'
   | 'grade'
   | 'logout'
@@ -41,6 +42,13 @@ export type IconName =
   | 'users'
   | 'warning'
 const iconPaths: Record<IconName, ReactNode> = {
+  download: (
+    <>
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 20h14" />
+    </>
+  ),
   activity: (
     <>
       <path d="M3 12h4l2-6 4 12 2-6h6" />

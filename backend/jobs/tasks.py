@@ -1,8 +1,17 @@
 import logging
+import json
+import os
+import subprocess
+import tempfile
+import zipfile
 from datetime import timedelta
+from pathlib import PurePosixPath
+from shutil import copyfileobj
 
 from celery import shared_task
 from django.conf import settings
+from django.core.files import File
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -152,3 +161,108 @@ def enqueue(
 
         transaction.on_commit(send)
     return job
+
+
+def _list_media_objects(storage, path=''):
+    directories, files = storage.listdir(path)
+    for filename in files:
+        key = f'{path}/{filename}'.lstrip('/')
+        if key != 'backups' and not key.startswith('backups/'):
+            yield key
+    for directory in directories:
+        child = f'{path}/{directory}'.strip('/')
+        if child != 'backups' and not child.startswith('backups/'):
+            yield from _list_media_objects(storage, child)
+
+
+def _run_pg_dump(destination):
+    database = settings.DATABASES['default']
+    command = ['pg_dump', '--format=custom', '--no-owner', '--no-privileges', '--no-password']
+    for option, flag in (('HOST', '--host'), ('PORT', '--port'), ('USER', '--username'), ('NAME', '--dbname')):
+        value = database.get(option)
+        if value:
+            command.extend((flag, str(value)))
+    environment = os.environ.copy()
+    if database.get('PASSWORD'):
+        environment['PGPASSWORD'] = str(database['PASSWORD'])
+    for option in ('sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'target_session_attrs'):
+        value = database.get('OPTIONS', {}).get(option)
+        if value:
+            environment[f'PG{option.upper()}'] = str(value)
+    with open(destination, 'wb') as output:
+        completed = subprocess.run(command, stdout=output, stderr=subprocess.PIPE, env=environment, check=False)
+    if completed.returncode:
+        raise RuntimeError('PostgreSQL backup command failed.')
+
+
+@shared_task(bind=True)
+def create_full_backup(self, job_id):
+    job = BackgroundJob.objects.get(pk=job_id)
+    mark_running(job)
+    storage_name = f'backups/{job.pk}.zip'
+    try:
+        if settings.DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
+            raise RuntimeError('Full backups require PostgreSQL.')
+        with tempfile.TemporaryDirectory(prefix='aralforge-backup-') as workdir:
+            dump_path = os.path.join(workdir, 'database.backup')
+            archive_path = os.path.join(workdir, 'full-backup.zip')
+            _run_pg_dump(dump_path)
+            media_keys = sorted(_list_media_objects(default_storage))
+            job.total = len(media_keys) + 1
+            job.progress = 1
+            job.save(update_fields=['total', 'progress'])
+            manifest = {
+                'format': 'AralForge full backup v1',
+                'created_at': timezone.now().isoformat(),
+                'database': {'file': 'database.backup', 'format': 'PostgreSQL custom archive'},
+                'media_count': len(media_keys),
+                'media_prefix': 'media/',
+                'restore_note': 'Restore database.backup with pgAdmin Restore, then copy media/ contents to the configured media storage.',
+            }
+            with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                archive.write(dump_path, 'database.backup')
+                archive.writestr('manifest.json', json.dumps(manifest, indent=2))
+                for index, key in enumerate(media_keys, start=1):
+                    safe_key = str(PurePosixPath(key))
+                    if '\\' in key or any(part in {'..', '.'} for part in PurePosixPath(key).parts) or safe_key.startswith('/'):
+                        raise RuntimeError('Media storage returned an unsafe object path.')
+                    with default_storage.open(key, 'rb') as source, archive.open(f'media/{safe_key}', 'w') as target:
+                        copyfileobj(source, target, length=1024 * 1024)
+                    job.progress = index + 1
+                    job.save(update_fields=['progress'])
+            with open(archive_path, 'rb') as archive_file:
+                saved_name = default_storage.save(storage_name, File(archive_file, name=os.path.basename(storage_name)))
+            job.status = BackgroundJob.Status.SUCCEEDED
+            job.total = len(media_keys) + 1
+            job.progress = job.total
+            job.result = {'storage_name': saved_name, 'media_count': len(media_keys)}
+            job.finished_at = timezone.now()
+            job.save(update_fields=['status', 'total', 'progress', 'result', 'finished_at'])
+    except Exception:
+        logger.exception('Full backup job %s failed.', job.pk)
+        job.status = BackgroundJob.Status.FAILED
+        job.result = {}
+        job.error = 'The full backup could not be completed. Check the backup worker configuration and storage access.'
+        job.finished_at = timezone.now()
+        job.save(update_fields=['status', 'result', 'error', 'finished_at'])
+        if default_storage.exists(storage_name):
+            default_storage.delete(storage_name)
+        raise
+
+
+@shared_task
+def expire_old_backup_artifacts():
+    cutoff = timezone.now() - timedelta(hours=24)
+    expired = BackgroundJob.objects.filter(
+        job_type=BackgroundJob.Type.BACKUP,
+        status=BackgroundJob.Status.SUCCEEDED,
+        finished_at__lte=cutoff,
+    )
+    for job in expired.iterator():
+        storage_name = job.result.get('storage_name')
+        if storage_name and default_storage.exists(storage_name):
+            default_storage.delete(storage_name)
+        job.result = {}
+        job.status = BackgroundJob.Status.FAILED
+        job.error = 'This backup expired after 24 hours. Start a new backup to download a fresh copy.'
+        job.save(update_fields=['result', 'status', 'error'])

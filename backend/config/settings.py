@@ -271,6 +271,12 @@ CELERY_TASK_ALWAYS_EAGER = env_bool('CELERY_TASK_ALWAYS_EAGER', default=not bool
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '1800'))
+CELERY_BEAT_SCHEDULE = {
+    'expire-full-backup-artifacts': {
+        'task': 'jobs.tasks.expire_old_backup_artifacts',
+        'schedule': 3600.0,
+    },
+}
 ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS = int(os.getenv('ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS', '300'))
 # Advanced real-student privacy workflows remain installed for a future approved
 # rollout, but are deliberately dormant in the current application.

@@ -1,14 +1,23 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuthedRequest } from '../../app/types'
 import { Icon, type IconName } from '../../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../../components/ui'
 import { queryKeys } from '../../queries/queryKeys'
 import type { User } from '../../types'
-import { formatDateTime, formatTime } from '../../utils/format'
+import { formatDateTime, formatTime, toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
 
 type AttendanceStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE'
+type BackupJob = {
+  id: string
+  job_type: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  progress: number
+  total: number
+  error: string
+}
 
 type AttentionItem = {
   id: number
@@ -58,6 +67,17 @@ type TeacherDashboard = {
 }
 
 export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
+  const queryClient = useQueryClient()
+  const [backupId, setBackupId] = useState(() => localStorage.getItem('aralforge-backup-job') ?? '')
+  const [backupError, setBackupError] = useState('')
+  const [startingBackup, setStartingBackup] = useState(false)
+  const backupQuery = useQuery({
+    queryKey: ['full-backup', backupId],
+    queryFn: ({ signal }) => api<BackupJob>(`/jobs/${backupId}/`, { signal }),
+    enabled: currentUser.role === 'ADMIN' && Boolean(backupId),
+    refetchInterval: query => ['PENDING', 'RUNNING'].includes(query.state.data?.status ?? '') ? 2000 : false,
+  })
+
   const query = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: ({ signal }) => api<TeacherDashboard>('/overview/dashboard/', { signal }),
@@ -73,6 +93,38 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
   const attendanceDetail = metrics.today_class_count
     ? `${metrics.attendance_complete_count} of ${metrics.today_class_count} complete`
     : 'No classes scheduled'
+  const currentBackup = backupQuery.data?.job_type === 'BACKUP' ? backupQuery.data : undefined
+
+  async function startBackup() {
+    setBackupError('')
+    setStartingBackup(true)
+    try {
+      const job = await api<BackupJob>('/jobs/backups/', { method: 'POST' })
+      setBackupId(job.id)
+      localStorage.setItem('aralforge-backup-job', job.id)
+      await queryClient.invalidateQueries({ queryKey: ['full-backup', job.id] })
+    } catch (error) {
+      setBackupError(toErrorMessage(error))
+    } finally {
+      setStartingBackup(false)
+    }
+  }
+
+  async function downloadBackup() {
+    if (!backupId) return
+    setBackupError('')
+    try {
+      const blob = await api<Blob>(`/jobs/${backupId}/backup-download/`)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `aralforge-backup-${backupId}.zip`
+      anchor.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setBackupError(toErrorMessage(error))
+    }
+  }
 
   return (
     <Page>
@@ -87,6 +139,26 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
           </button>
         }
       />
+
+      {currentUser.role === 'ADMIN' ? (
+        <section className="section-block">
+          <SectionHeading subtitle="Download a PostgreSQL backup and uploaded media as one ZIP. Backups expire after 24 hours." title="Full backup" />
+          <div className="toolbar">
+            <button className="button button--secondary" disabled={startingBackup || ['PENDING', 'RUNNING'].includes(currentBackup?.status ?? '')} onClick={() => void startBackup()} type="button">
+              <Icon name="download" /><span>{startingBackup ? 'Starting backup...' : 'Download full backup'}</span>
+            </button>
+            {currentBackup && ['PENDING', 'RUNNING'].includes(currentBackup.status) ? (
+              <span role="status">Preparing backup: {currentBackup.progress} of {currentBackup.total || 'media files'} complete.</span>
+            ) : null}
+            {currentBackup?.status === 'SUCCEEDED' ? (
+              <button className="button button--primary" onClick={() => void downloadBackup()} type="button">
+                <Icon name="download" /><span>Download ready backup</span>
+              </button>
+            ) : null}
+          </div>
+          {backupError || currentBackup?.status === 'FAILED' ? <StatusBanner tone="warning" title="Backup unavailable" message={backupError || currentBackup?.error || 'The backup could not be completed.'} /> : null}
+        </section>
+      ) : null}
 
       <section className="stat-grid">
         <StatCard icon="grade" label="Needs review" value={metrics.attention_count} detail="Text and file submissions" />

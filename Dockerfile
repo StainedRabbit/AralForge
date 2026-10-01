@@ -14,6 +14,7 @@ RUN apt-get update \
         libopenjp2-7 \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
+        postgresql-client \
         shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 

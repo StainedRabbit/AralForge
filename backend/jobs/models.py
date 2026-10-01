@@ -17,6 +17,7 @@ class BackgroundJob(models.Model):
         PDF_GENERATION = 'PDF_GENERATION', 'PDF generation'
         IMPORT = 'IMPORT', 'Import'
         EXPORT = 'EXPORT', 'Export'
+        BACKUP = 'BACKUP', 'Full database and media backup'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job_type = models.CharField(max_length=40, choices=Type)

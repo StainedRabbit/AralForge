@@ -1,9 +1,15 @@
 from datetime import timedelta
+import json
+import tempfile
+import zipfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 from django.test import TransactionTestCase
+from django.test import override_settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -11,7 +17,7 @@ from accounts.models import User
 from learning_modules.models import Module, sync_module_progress_for_students
 
 from .models import BackgroundJob
-from .tasks import enqueue, mark_failed, mark_running
+from .tasks import create_full_backup, enqueue, mark_failed, mark_running
 
 
 class BackgroundJobApiTests(APITestCase):
@@ -190,3 +196,85 @@ class BackgroundJobEnqueueTests(TransactionTestCase):
         self.assertEqual(call.kwargs['total'], 251)
         self.assertEqual(call.kwargs['payload'], {'module_id': module.id})
         self.assertEqual(call.kwargs['idempotency_key'], f'module-progress:{module.id}')
+
+
+class FullBackupTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='backup_admin', password='testpass123', role=User.Role.ADMIN,
+        )
+        self.teacher = User.objects.create_user(
+            username='backup_teacher', password='testpass123', role=User.Role.TEACHER,
+        )
+
+    @override_settings(DATABASES={'default': {'ENGINE': 'django.db.backends.postgresql'}})
+    @patch('jobs.views.enqueue')
+    def test_only_admin_can_start_full_backup(self, mocked_enqueue):
+        mocked_enqueue.return_value = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.BACKUP, owner=self.admin,
+        )
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self.client.post('/api/jobs/backups/').status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        accepted = self.client.post('/api/jobs/backups/')
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.data['job_type'], BackgroundJob.Type.BACKUP)
+
+    def test_download_is_admin_only_and_expired_archive_is_removed(self):
+        name = default_storage.save('backups/test-backup.zip', ContentFile(b'archive'))
+        job = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.BACKUP,
+            owner=self.admin,
+            status=BackgroundJob.Status.SUCCEEDED,
+            result={'storage_name': name},
+            finished_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self.client.get(f'/api/jobs/{job.pk}/backup-download/').status_code, 403)
+
+        BackgroundJob.objects.filter(pk=job.pk).update(finished_at=timezone.now() - timedelta(hours=25))
+        self.client.force_authenticate(self.admin)
+        response = self.client.get(f'/api/jobs/{job.pk}/backup-download/')
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(default_storage.exists(name))
+
+    @override_settings(
+        DATABASES={'default': {'ENGINE': 'django.db.backends.postgresql'}},
+        CELERY_TASK_ALWAYS_EAGER=False,
+    )
+    @patch('jobs.tasks._run_pg_dump')
+    def test_backup_archive_contains_dump_manifest_and_media(self, mocked_dump):
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            media_name = default_storage.save('lesson-assets/diagram.svg', ContentFile(b'<svg />'))
+            default_storage.save('backups/previous.zip', ContentFile(b'old backup'))
+            job = BackgroundJob.objects.create(job_type=BackgroundJob.Type.BACKUP, owner=self.admin)
+
+            def write_dump(destination):
+                with open(destination, 'wb') as dump_file:
+                    dump_file.write(b'PGDMP test archive')
+
+            mocked_dump.side_effect = write_dump
+            create_full_backup.run(str(job.pk))
+            job.refresh_from_db()
+
+            self.assertEqual(job.status, BackgroundJob.Status.SUCCEEDED)
+            self.assertEqual(job.result['media_count'], 1)
+            with default_storage.open(job.result['storage_name'], 'rb') as saved:
+                with zipfile.ZipFile(saved) as archive:
+                    self.assertEqual(archive.read('database.backup'), b'PGDMP test archive')
+                    self.assertEqual(archive.read(f'media/{media_name}'), b'<svg />')
+                    self.assertNotIn('media/backups/previous.zip', archive.namelist())
+                    manifest = json.loads(archive.read('manifest.json'))
+                    self.assertEqual(manifest['media_count'], 1)
+
+    @override_settings(DATABASES={'default': {'ENGINE': 'django.db.backends.postgresql'}})
+    @patch('jobs.tasks._run_pg_dump', side_effect=RuntimeError('dump failed'))
+    def test_dump_failure_marks_backup_failed_without_artifact(self, mocked_dump):
+        job = BackgroundJob.objects.create(job_type=BackgroundJob.Type.BACKUP, owner=self.admin)
+        with self.assertRaises(RuntimeError):
+            create_full_backup.run(str(job.pk))
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackgroundJob.Status.FAILED)
+        self.assertFalse(job.result)
+        self.assertIn('could not be completed', job.error)

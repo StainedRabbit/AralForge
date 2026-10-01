@@ -98,7 +98,7 @@ services:
     plan: starter
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: celery -A config worker --loglevel=info --concurrency=2
+    dockerCommand: celery -A config worker -B --loglevel=info --concurrency=2
     autoDeployTrigger: checksPass
     envVars:
       - key: DEBUG
@@ -134,7 +134,7 @@ services:
     plan: starter
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: celery -A config worker --loglevel=info --concurrency=2
+    dockerCommand: celery -A config worker -B --loglevel=info --concurrency=2
     autoDeployTrigger: checksPass
     envVars:
       - key: DEBUG

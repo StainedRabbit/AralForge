@@ -285,6 +285,7 @@ async function parseResponse<T>(response: Response) {
     contentType.includes('text/csv') ||
     contentType.includes('text/markdown') ||
     contentType.includes('application/pdf') ||
+    contentType.includes('application/zip') ||
     contentType.includes('application/octet-stream')
   ) {
     if (!response.ok) {
