@@ -1,6 +1,27 @@
 import type { ThemePreference } from './types'
 
+export const THEME_PREFERENCE_STORAGE_KEY = 'aralforge.theme-preference'
+
 const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches
+
+export function readRememberedThemePreference(): ThemePreference | null {
+  try {
+    const preference = window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)
+    return preference === 'light' || preference === 'dark' || preference === 'system'
+      ? preference
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function rememberThemePreference(preference: ThemePreference) {
+  try {
+    window.localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference)
+  } catch {
+    // Theme application still works when browser storage is unavailable.
+  }
+}
 
 export function applyTheme(preference: ThemePreference) {
   if (preference === 'system') document.documentElement.removeAttribute('data-theme')

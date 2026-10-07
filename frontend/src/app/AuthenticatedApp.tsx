@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import type { Session } from '../api'
 import type { StudentProfile, ThemePreference, User } from '../types'
-import { applyTheme } from '../theme'
+import { applyTheme, rememberThemePreference } from '../theme'
 import { toErrorMessage } from '../utils/format'
 import type { LearningContextMetadata } from './types'
 import { MobileNavigation, Sidebar } from '../components/navigation'
@@ -44,8 +44,11 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
   const [savingTheme, setSavingTheme] = useState(false)
   const [themeError, setThemeError] = useState('')
   const themePreference = selectedTheme ?? identity.data?.user.theme_preference ?? 'system'
-  useLayoutEffect(() => applyTheme(themePreference), [themePreference])
-  useLayoutEffect(() => () => applyTheme('system'), [])
+  useLayoutEffect(() => {
+    if (!identity.data) return
+    applyTheme(themePreference)
+    rememberThemePreference(themePreference)
+  }, [identity.data, themePreference])
   async function changeTheme(next: ThemePreference) {
     if (savingTheme || next === themePreference) return
     setSelectedTheme(next)

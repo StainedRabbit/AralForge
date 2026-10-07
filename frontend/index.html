@@ -5,16 +5,34 @@
     <link rel="icon" type="image/png" sizes="300x300" href="/brand/aralforge-icon-dark.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0B1F3A" />
-    <script>document.documentElement.dataset.effectiveTheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'</script>
+    <meta name="theme-color" content="#f8fafc" />
+    <script>
+      (() => {
+        let preference = null;
+        try {
+          const remembered = localStorage.getItem('aralforge.theme-preference');
+          if (remembered === 'light' || remembered === 'dark' || remembered === 'system') preference = remembered;
+        } catch {}
+        const dark = preference === 'dark' || (preference !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.effectiveTheme = dark ? 'dark' : 'light';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0f1726' : '#f8fafc');
+      })();
+    </script>
+    <style>
+      .startup-fallback { display:grid; min-height:100vh; align-content:center; justify-items:center; gap:8px; padding:24px; background:#f8fafc; color:#1e293b; font:500 16px/1.5 system-ui,sans-serif; text-align:center; }
+      .startup-fallback a { color:#c44d0b; }
+      :root[data-effective-theme='dark'] .startup-fallback { background:#0f1726; color:#e8eef7; }
+      :root[data-effective-theme='dark'] .startup-fallback a { color:#ff9a45; }
+      :root[data-effective-theme='dark'], :root[data-effective-theme='dark'] body { background:#0f1726; }
+    </style>
     <meta name="description" content="AralForge brings lessons, Main Activities, grades, and progress into one focused academic workspace." />
     <title>AralForge</title>
   </head>
   <body>
     <div id="root">
-      <main aria-live="polite" style="display:grid;min-height:100vh;align-content:center;justify-items:center;gap:8px;padding:24px;background:#0d1728;color:#f7f9fc;font:500 16px/1.5 system-ui,sans-serif;text-align:center">
+      <main class="startup-fallback" aria-live="polite">
         <strong>AralForge is loading…</strong>
-        <p>If this page does not finish loading, <a href="" style="color:#ff9a45">reload AralForge</a>.</p>
+        <p>If this page does not finish loading, <a href="">reload AralForge</a>.</p>
       </main>
     </div>
     <script type="module" src="/src/main.tsx"></script>
