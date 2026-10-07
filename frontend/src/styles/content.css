@@ -1165,13 +1165,16 @@ button.module-row {
   font-weight: 750;
 }
 
-.student-module-library__grid {
+.module-grid.student-module-library__grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
   align-items: stretch;
 }
 
 .student-module-card {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 880px;
   min-height: 278px;
   padding: 22px;
 }
@@ -1260,11 +1263,36 @@ button.module-row {
 }
 
 .student-module-card__locked .locked-topic-downloads {
-  gap: 6px;
+  gap: 10px;
+  container-type: inline-size;
 }
 
 .student-module-card__locked .locked-topic-download {
-  padding: 9px;
+  padding: 12px;
+}
+
+.student-module-card__locked .locked-topic-download__copy {
+  overflow-wrap: anywhere;
+}
+
+.student-module-card__locked .locked-topic-download > .admin-message {
+  grid-column: 1 / -1;
+  min-height: 0;
+  overflow: visible;
+}
+
+@container (max-width: 560px) {
+  .student-module-card__locked .locked-topic-download {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .student-module-card__locked .locked-topic-download .button {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    line-height: 1.2;
+    white-space: normal;
+  }
 }
 
 .student-module-context-dialog {
