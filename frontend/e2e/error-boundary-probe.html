@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/App.css" />
+    <title>Error boundary probe</title>
+  </head>
+  <body>
+    <div id="probe"></div>
+    <script type="module">
+      import React, { lazy, Suspense } from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { AppErrorBoundary } from '../src/components/AppErrorBoundary.tsx'
+
+      const BrokenPage = lazy(() => Promise.reject(new Error('Simulated page chunk failure.')))
+      createRoot(document.getElementById('probe')).render(
+        React.createElement(AppErrorBoundary, null,
+          React.createElement(Suspense, { fallback: React.createElement('p', null, 'Loading page…') },
+            React.createElement(BrokenPage),
+          ),
+        ),
+      )
+    </script>
+  </body>
+</html>

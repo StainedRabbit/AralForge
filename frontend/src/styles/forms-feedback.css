@@ -7,6 +7,39 @@ code {
   font-size: 13px;
 }
 
+.app-error-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.app-error-screen__panel {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(100%, 520px);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+}
+
+.app-error-screen__panel h1,
+.app-error-screen__panel p {
+  margin: 0;
+}
+
+.app-error-screen__panel h1 {
+  color: var(--text);
+  font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+.app-error-screen__panel > p:not(.eyebrow) {
+  color: var(--text-muted);
+}
+
 .form-stack {
   display: grid;
   gap: 16px;
