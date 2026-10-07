@@ -1,6 +1,6 @@
 import { lazy, Suspense, useLayoutEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import type { Session } from '../api'
 import type { StudentProfile, ThemePreference, User } from '../types'
 import { applyTheme } from '../theme'
@@ -31,8 +31,15 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
   session: Session; setSession: (session: Session) => void; onLogout: () => void; onSessionExpired: () => void
 }) {
   const api = useAuthenticatedRequest(session, setSession, onSessionExpired)
+  const location = useLocation()
   const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: 600_000 })
   const queryClient = useQueryClient()
+  useQuery({
+    queryKey: queryKeys.dashboard,
+    queryFn: ({ signal }) => api<unknown>('/overview/dashboard/', { signal }),
+    staleTime: 30_000,
+    enabled: location.pathname === '/',
+  })
   const [selectedTheme, setSelectedTheme] = useState<ThemePreference | null>(null)
   const [savingTheme, setSavingTheme] = useState(false)
   const [themeError, setThemeError] = useState('')

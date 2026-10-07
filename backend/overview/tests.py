@@ -48,6 +48,33 @@ class OverviewApiTests(APITestCase):
         self.assertNotIn('blank_count', response.data['metrics'])
         self.assertLessEqual(len(queries), 25)
 
+    def test_student_dashboard_returns_only_card_fields_for_modules_and_activities(self):
+        module = Module.objects.create(
+            title='Visible module', slug='visible-dashboard-module',
+            description='A short description', is_published=True,
+        )
+        ModuleAccess.objects.create(
+            module=module, student=self.student, activated_by=self.teacher,
+        )
+        activity = ModuleActivity.objects.create(
+            module=module, title='Visible activity', instructions='Complete this activity.',
+            is_published=True,
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(reverse('overview:dashboard'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            set(response.data['recent_modules'][0]),
+            {'id', 'title', 'description', 'is_accessible', 'access_status', 'learning_contexts'},
+        )
+        self.assertTrue(response.data['recent_modules'][0]['is_accessible'])
+        self.assertEqual(
+            response.data['upcoming_activities'][0],
+            {'id': activity.id, 'title': activity.title, 'activity_type': activity.activity_type},
+        )
+
     def test_student_dashboard_includes_valid_module_learning_contexts(self):
         school_year = SchoolYear.objects.create(start_year=2038, end_year=2039)
         term = SchoolYearSemester.objects.create(

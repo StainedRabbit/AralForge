@@ -10,6 +10,17 @@ import { EmptyState, Page, SectionHeading, SkeletonList, StatCard, StatusBanner 
 import { queryKeys } from '../queries/queryKeys'
 import { activityTypeLabel, greeting } from '../utils/student'
 
+type LearningContext = {
+  type: 'CLASS' | 'PERSONAL'
+  schedule?: number
+  schedule_display?: string
+  term_name?: string
+}
+
+type DashboardModule = Pick<Module, 'id' | 'title' | 'description' | 'is_accessible' | 'access_status'> & {
+  learning_contexts: LearningContext[]
+}
+
 type StudentDashboard = {
   role: 'student'
   metrics: {
@@ -18,7 +29,7 @@ type StudentDashboard = {
     total_points: number; earned_badges: number
   }
   recent_modules: DashboardModule[]
-  upcoming_activities: ModuleActivity[]
+  upcoming_activities: Array<Pick<ModuleActivity, 'id' | 'title' | 'activity_type'>>
 }
 
 export function DashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
@@ -98,15 +109,6 @@ function moduleTarget(module: DashboardModule, context: LearningContext) {
     ? `/modules/${module.id}?schedule=${context.schedule}`
     : `/modules/${module.id}?context=PERSONAL`
 }
-
-type LearningContext = {
-  type: 'CLASS' | 'PERSONAL'
-  schedule?: number
-  schedule_display?: string
-  term_name?: string
-}
-
-type DashboardModule = Module & { learning_contexts: LearningContext[] }
 
 function navigateDashboardActivity(event: React.MouseEvent<HTMLElement>, navigate: ReturnType<typeof useNavigate>, to: string) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.target instanceof Element && event.target.closest('a'))) return

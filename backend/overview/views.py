@@ -1,5 +1,6 @@
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -7,6 +8,7 @@ from attendance.models import AttendanceSession
 from gamification.models import PointLedger, StudentBadge
 from learning_modules.models import (
     Module,
+    ModuleAccess,
     ModuleActivity,
     ModuleActivityAttempt,
     ModuleActivitySubmission,
@@ -14,7 +16,6 @@ from learning_modules.models import (
     active_module_access_filter,
     module_enrollment_filter,
 )
-from learning_modules.serializers import ModuleActivitySerializer, ModuleSerializer
 from learning_modules.services.learning_context import active_matching_enrollments
 from subjects.models import ScheduleStudent, SubjectSchedule
 from subjects.scheduling import WEEKDAY_CODES
@@ -44,6 +45,41 @@ class DashboardView(APIView):
         return Response(student_dashboard(request))
 
 
+class DashboardModuleSerializer(serializers.ModelSerializer):
+    is_accessible = serializers.SerializerMethodField()
+    access_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Module
+        fields = ('id', 'title', 'description', 'is_accessible', 'access_status')
+
+    def get_is_accessible(self, obj):
+        return self._available_grant(obj) is not None
+
+    def get_access_status(self, obj):
+        grant = self._available_grant(obj)
+        if not grant:
+            return 'LOCKED'
+        return (
+            'ADVANCE_ACTIVE'
+            if grant.access_type == ModuleAccess.AccessType.ADVANCE_STUDY
+            else 'ENROLLED_ACTIVE'
+        )
+
+    @staticmethod
+    def _available_grant(obj):
+        return next(
+            (grant for grant in getattr(obj, '_current_user_grants', ()) if grant.is_available),
+            None,
+        )
+
+
+class DashboardActivitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleActivity
+        fields = ('id', 'title', 'activity_type')
+
+
 def visible_student_modules(user):
     return Module.objects.select_related('subject').prefetch_related('subjects').filter(
         is_published=True,
@@ -68,7 +104,17 @@ def student_dashboard(request):
     upcoming = activities.exclude(id__in=submitted_activity_ids).order_by(
         'module__title', 'order', 'id',
     )[:5]
-    recent_modules = list(modules.order_by('-updated_at')[:4])
+    available_grants = ModuleAccess.objects.filter(
+        student=user,
+        is_active=True,
+        activated_by__isnull=False,
+        expires_at__gt=timezone.now(),
+    ).order_by('-updated_at')
+    recent_modules = list(
+        modules.order_by('-updated_at').prefetch_related(
+            Prefetch('access_grants', queryset=available_grants, to_attr='_current_user_grants'),
+        )[:4]
+    )
     points = PointLedger.objects.filter(student=user).aggregate(total=Sum('points'))['total'] or 0
 
     return {
@@ -86,15 +132,14 @@ def student_dashboard(request):
             'earned_badges': StudentBadge.objects.filter(student=user).count(),
         },
         'recent_modules': dashboard_modules(request, recent_modules),
-        'upcoming_activities': ModuleActivitySerializer(upcoming, many=True, context={'request': request}).data,
+        'upcoming_activities': DashboardActivitySerializer(upcoming, many=True).data,
     }
 
 
 def dashboard_modules(request, modules):
-    serialized_modules = ModuleSerializer(
+    serialized_modules = DashboardModuleSerializer(
         modules,
         many=True,
-        context={'request': request},
     ).data
     for module, payload in zip(modules, serialized_modules):
         if not payload['is_accessible']:

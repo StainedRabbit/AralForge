@@ -26,6 +26,7 @@ export function AdminAttendancePage({ api, data, refresh }: {
     requestedSchedule?.id.toString() ?? '',
   )
   const [query, setQuery] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const requestedSessionId = Number(searchParams.get('session'))
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(
     data.attendanceSessions.some((session) => session.id === requestedSessionId)
@@ -42,6 +43,19 @@ export function AdminAttendancePage({ api, data, refresh }: {
   const selectedSession =
     data.attendanceSessions.find((session) => session.id === selectedSessionId) ?? null
 
+  async function deleteSession(session: AttendanceSession) {
+    const recordCount = data.attendanceRecords.filter((record) => record.session === session.id).length
+    if (!window.confirm(`Delete this attendance session and all ${recordCount} recorded statuses? This cannot be undone.`)) return
+    setDeleteError('')
+    try {
+      await api(`/attendance/sessions/${session.id}/`, { method: 'DELETE' })
+      setSelectedSessionId(null)
+      await refresh()
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'The attendance session could not be deleted.')
+    }
+  }
+
   return (
     <Page>
       <PageHeader
@@ -49,6 +63,7 @@ export function AdminAttendancePage({ api, data, refresh }: {
         title="Attendance"
         description="Review, correct, and export attendance history. Start new attendance from the selected class roster."
       />
+      {deleteError ? <p className="admin-message" role="alert">{deleteError}</p> : null}
 
       <section className="section-block">
         <SectionHeading
@@ -105,15 +120,16 @@ export function AdminAttendancePage({ api, data, refresh }: {
         </div>
       </section>
 
-      {selectedSession ? <AttendanceHistoryDialog api={api} data={data} onClose={() => setSelectedSessionId(null)} refresh={refresh} session={selectedSession} /> : null}
+      {selectedSession ? <AttendanceHistoryDialog api={api} data={data} onClose={() => setSelectedSessionId(null)} onDelete={() => void deleteSession(selectedSession)} refresh={refresh} session={selectedSession} /> : null}
     </Page>
   )
 }
 
-function AttendanceHistoryDialog({ api, data, onClose, refresh, session }: {
+function AttendanceHistoryDialog({ api, data, onClose, onDelete, refresh, session }: {
   api: AuthedRequest
   data: RouteData
   onClose: () => void
+  onDelete: () => void
   refresh: () => Promise<void>
   session: AttendanceSession
 }) {
@@ -123,6 +139,7 @@ function AttendanceHistoryDialog({ api, data, onClose, refresh, session }: {
       <div className="attendance-modal__panel attendance-modal__panel--wide">
         <div className="attendance-modal__header">
           <div><strong id="attendance-history-title">{session.title || 'Class meeting'}</strong><span>{sessionClassLabel(data, session)} · {formatDate(session.date)}</span></div>
+          <button className="button button--danger" onClick={onDelete} type="button"><Icon name="trash" /><span>Delete session</span></button>
           <button className="icon-button" onClick={onClose} title="Close" type="button"><Icon name="close" /></button>
         </div>
         <AttendanceSessionDetails api={api} data={data} refresh={refresh} session={session} />

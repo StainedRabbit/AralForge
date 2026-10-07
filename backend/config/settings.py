@@ -276,6 +276,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'jobs.tasks.expire_old_backup_artifacts',
         'schedule': 3600.0,
     },
+    'finalize-ended-attendance-sessions': {
+        'task': 'attendance.tasks.finalize_ended_attendance_sessions',
+        'schedule': 300.0,
+    },
 }
 ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS = int(os.getenv('ROSTER_IMPORT_QUEUE_TIMEOUT_SECONDS', '300'))
 # Advanced real-student privacy workflows remain installed for a future approved
