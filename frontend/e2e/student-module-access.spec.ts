@@ -41,7 +41,6 @@ test('student module cards fill the grid for one result and align for multiple r
 
   const search = page.getByRole('searchbox', { name: 'Search modules' })
   const cards = page.locator('.student-module-card')
-  const grid = page.locator('.student-module-library__grid')
   await search.fill('E2E Quiz Workflow')
   await expect(cards).toHaveCount(1)
 
