@@ -1,4 +1,4 @@
-FROM python:3.13.3-slim
+FROM python:3.13.3-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
         fonts-dejavu-core \
         libffi8 \
         libgdk-pixbuf-2.0-0 \
@@ -14,8 +16,16 @@ RUN apt-get update \
         libopenjp2-7 \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
-        postgresql-client \
         shared-mime-info \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: bookworm-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' \
+        > /etc/apt/sources.list.d/pgdg.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-17 \
+    && pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 17\.' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
