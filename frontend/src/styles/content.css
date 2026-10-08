@@ -1174,7 +1174,6 @@ button.module-row {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 880px;
   min-height: 278px;
   padding: 22px;
 }

@@ -34,6 +34,43 @@ test('student classes include active and past enrollments', async ({ page }) => 
 })
 
 
+test('student module cards fill the grid for one result and align for multiple results', async ({ page }) => {
+  await signIn(page)
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto('/modules')
+
+  const search = page.getByRole('searchbox', { name: 'Search modules' })
+  const cards = page.locator('.student-module-card')
+  const grid = page.locator('.student-module-library__grid')
+  await search.fill('E2E Quiz Workflow')
+  await expect(cards).toHaveCount(1)
+
+  const singleCardWidths = await page.evaluate(() => {
+    const card = document.querySelector('.student-module-card')
+    const gridElement = document.querySelector('.student-module-library__grid')
+    return {
+      card: card?.getBoundingClientRect().width ?? 0,
+      grid: gridElement?.getBoundingClientRect().width ?? 0,
+    }
+  })
+  expect(Math.abs(singleCardWidths.card - singleCardWidths.grid)).toBeLessThanOrEqual(1)
+
+  await search.fill('')
+  await expect(cards.nth(1)).toBeVisible()
+  const multipleCardWidths = await cards.evaluateAll((elements) =>
+    elements.slice(0, 2).map(element => element.getBoundingClientRect().width),
+  )
+  expect(Math.abs(multipleCardWidths[0] - multipleCardWidths[1])).toBeLessThanOrEqual(1)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileWidths = await page.evaluate(() => ({
+    document: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }))
+  expect(mobileWidths.scroll).toBeLessThanOrEqual(mobileWidths.document + 1)
+})
+
+
 test('student module search icon remains inside the full-width mobile field', async ({ page }) => {
   await signIn(page)
   await page.goto('/modules')
