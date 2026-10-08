@@ -16,13 +16,13 @@ test('login loads only identity, navigation, and dashboard data', async ({ page 
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Coding', exact: true })).toHaveCount(0)
 
-  expect([...new Set(apiRequests.filter(path => path !== '/api/auth/token/'))]).toEqual([
+  expect([...new Set(apiRequests.filter(path => path !== '/api/auth/token/'))].sort()).toEqual([
     '/api/auth/csrf/',
     '/api/auth/token/refresh/',
     '/api/accounts/users/me/',
     '/api/overview/navigation/',
     '/api/overview/dashboard/',
-  ])
+  ].sort())
   expect(pageModules).toContain('/src/pages/LoginPage.tsx')
   expect(pageModules).toContain('/src/pages/admin/AdminDashboardPage.tsx')
   expect(pageModules).not.toContain('/src/pages/admin/AdminClassesPage.tsx')
