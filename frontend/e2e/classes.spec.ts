@@ -976,6 +976,7 @@ test('loads the roster ten students at a time and exports the complete filtered 
     })
   })
 
+  await page.setViewportSize({ width: 1280, height: 720 })
   await openClasses(page)
   await selectClass(page, 'E2E101')
 
@@ -991,21 +992,20 @@ test('loads the roster ten students at a time and exports the complete filtered 
     const styles = window.getComputedStyle(element)
     return {
       clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
       maxHeight: styles.maxHeight,
-      overflowY: styles.overflowY,
+      scrollWidth: element.scrollWidth,
       scrollHeight: element.scrollHeight,
     }
   })
-  expect(desktopScrollMetrics.maxHeight).not.toBe('none')
-  expect(desktopScrollMetrics.overflowY).toBe('auto')
-  expect(desktopScrollMetrics.clientHeight).toBeLessThanOrEqual(680)
-  expect(desktopScrollMetrics.scrollHeight).toBeGreaterThan(desktopScrollMetrics.clientHeight)
+  expect(desktopScrollMetrics.maxHeight).toBe('none')
+  expect(desktopScrollMetrics.scrollHeight).toBeLessThanOrEqual(desktopScrollMetrics.clientHeight + 1)
+  expect(desktopScrollMetrics.scrollWidth).toBeGreaterThan(desktopScrollMetrics.clientWidth)
+  await pagination.scrollIntoViewIfNeeded()
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
   await expect(page.locator('.class-roster-table thead th').first()).toHaveCSS('position', 'sticky')
   await expect(pagination).toHaveCSS('position', 'sticky')
 
-  await rosterScroller.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
   await expect(pagination).toContainText('Showing 12 of 12 students')
   await expect(rosterRows).toHaveCount(12)
   expect([...new Set(rosterRequests.filter((request) => request.limit === 10).map((request) => request.offset))]).toEqual([0, 10])
@@ -1031,11 +1031,14 @@ test('loads the roster ten students at a time and exports the complete filtered 
   await page.setViewportSize({ width: 390, height: 844 })
   const mobileScrollMetrics = await rosterScroller.evaluate((element) => ({
     clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
     maxHeight: window.getComputedStyle(element).maxHeight,
     scrollHeight: element.scrollHeight,
+    scrollWidth: element.scrollWidth,
   }))
   expect(mobileScrollMetrics.maxHeight).toBe('none')
   expect(mobileScrollMetrics.scrollHeight).toBe(mobileScrollMetrics.clientHeight)
+  expect(mobileScrollMetrics.scrollWidth).toBeLessThanOrEqual(mobileScrollMetrics.clientWidth + 1)
 })
 
 test('compact header and local class search retain pagination, term cache, and expiry', async ({ page }) => {

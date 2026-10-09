@@ -1182,12 +1182,6 @@ a.teacher-recent-item:focus-visible {
   min-width: 1180px;
 }
 
-.class-roster-scroll {
-  max-height: min(68vh, 680px);
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
 .class-list:has(.class-list__feedback, .admin-empty-line) {
   height: auto;
   min-height: 0;
@@ -1211,11 +1205,6 @@ a.teacher-recent-item:focus-visible {
 
 @media (max-width: 900px) {
   .class-roster-table { min-width: 0; }
-  .class-roster-scroll {
-    max-height: none;
-    overflow: visible;
-    scrollbar-gutter: auto;
-  }
   .grade-modal-email { overflow-wrap: anywhere; max-width: 100%; }
 }
 
@@ -1258,14 +1247,6 @@ a.teacher-recent-item:focus-visible {
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 750;
-}
-
-@media (max-width: 640px) {
-  .class-roster-scroll {
-    max-height: none;
-    overscroll-behavior: auto;
-    scrollbar-gutter: auto;
-  }
 }
 
 .roster-status {

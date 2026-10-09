@@ -1214,13 +1214,9 @@ function ClassRoster({
   useEffect(() => {
     const target = rosterLoadMoreRef.current
     if (!target || !hasNextRosterPage || isNextRosterPageError || isRosterSearchUpdating) return
-    const scrollContainer = target.closest<HTMLElement>('.class-roster-scroll')
-
     const observer = new IntersectionObserver((entries) => {
       if (
         entries[0]?.isIntersecting
-        && scrollContainer && scrollContainer.scrollTop > 0
-        && scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 160
         && hasNextRosterPage
         && !isFetchingNextRosterPage
       ) {
@@ -1240,8 +1236,6 @@ function ClassRoster({
 
   function resetRosterPaging() {
     setLocalRosterPage({ key: '', limit: ROSTER_PAGE_SIZE })
-    const scrollContainer = rosterLoadMoreRef.current?.closest<HTMLElement>('.class-roster-scroll')
-    if (scrollContainer) scrollContainer.scrollTop = 0
   }
 
   async function exportFilteredRoster() {
@@ -1476,21 +1470,7 @@ function ClassRoster({
         </div>
       ) : null}
 
-      <div
-        className="table-wrap class-roster-scroll"
-        onScroll={(event) => {
-          const target = event.currentTarget
-          if (
-            target.scrollTop + target.clientHeight >= target.scrollHeight - 160
-            && hasNextRosterPage
-            && !isFetchingNextRosterPage
-            && !isNextRosterPageError
-            && !isRosterSearchUpdating
-          ) {
-            void fetchNextRosterPage()
-          }
-        }}
-      >
+      <div className="table-wrap class-roster-scroll">
         <table className="admin-table class-roster-table" data-roster-search-ready={Boolean(rosterSnapshot)}>
           <thead>
             <tr>
