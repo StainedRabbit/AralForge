@@ -2,13 +2,12 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import type { AuthedRequest } from '../app/types'
-import type { Module, ModuleActivity, User } from '../types'
+import type { Module, User } from '../types'
 import dashboardJourney from '../assets/aralforge-dashboard-journey.webp'
 import { Icon } from '../components/Icon'
-import { InlineMarkdown } from '../components/RichLessonText'
 import { EmptyState, Page, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../components/ui'
 import { queryKeys } from '../queries/queryKeys'
-import { activityTypeLabel, greeting } from '../utils/student'
+import { greeting } from '../utils/student'
 
 type LearningContext = {
   type: 'CLASS' | 'PERSONAL'
@@ -29,7 +28,15 @@ type StudentDashboard = {
     total_points: number; earned_badges: number
   }
   recent_modules: DashboardModule[]
-  upcoming_activities: Array<Pick<ModuleActivity, 'id' | 'title' | 'activity_type'>>
+  personal_quizzes: Array<{
+    id: number
+    title: string
+    module_id: number
+    module_title: string
+    topic_id: number
+    lesson_id: number
+    lesson_title: string
+  }>
 }
 
 export function DashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
@@ -43,7 +50,7 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
 
   if (dashboard.isPending) return <Page><SkeletonList count={4} /></Page>
   if (dashboard.error || !dashboard.data) return <Page><StatusBanner tone="warning" title="Dashboard could not load" message="Retry the dashboard request." /></Page>
-  const { metrics, recent_modules: modules, upcoming_activities: activities } = dashboard.data
+  const { metrics, recent_modules: modules, personal_quizzes: quizzes } = dashboard.data
   const continueModule = modules.find((module) => module.is_accessible && module.learning_contexts.length > 0)
   const continueTarget = continueModule?.learning_contexts.length === 1
     ? moduleTarget(continueModule, continueModule.learning_contexts[0])
@@ -61,7 +68,7 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
       />
       <div className="dashboard-hero__content">
         <p className="eyebrow">Today in AralForge</p><h1>{greeting(currentUser)}</h1>
-        <p>Pick up your modules and activities where you left off.</p>
+        <p>Pick up your modules or jump into a Personal Study quiz.</p>
         <div className="hero-actions">
           {continueTarget ? <Link className="button button--primary" to={continueTarget}><Icon name="book" /><span>Continue learning</span></Link>
             : continueModule ? <button className="button button--primary" onClick={() => setContextModule(continueModule)} type="button"><Icon name="book" /><span>Continue learning</span></button>
@@ -78,8 +85,8 @@ export function DashboardPage({ api, currentUser }: { api: AuthedRequest; curren
       <div className="section-block"><SectionHeading action={<Link to="/modules">View all</Link>} subtitle="Your recently updated course material." title="Continue Modules" />
         <div className="card-list">{modules.length ? modules.map((module) => <DashboardModuleRow key={module.id} module={module} onChooseContext={() => setContextModule(module)} />) : <EmptyState icon="book" title="No modules yet" message="Published modules will appear here." />}</div>
       </div>
-      <div className="section-block"><SectionHeading action={<Link to="/modules">Open modules</Link>} subtitle="Unsubmitted work from your active modules." title="Upcoming Work" />
-        <div className="timeline-list">{activities.length ? activities.map((activity) => <article aria-label={`Open ${activity.title}`} className="timeline-item" key={activity.id} onClick={(event) => navigateDashboardActivity(event, navigate, `/activities/${activity.id}`)} onKeyDown={(event) => navigateDashboardActivityByKey(event, navigate, `/activities/${activity.id}`)} role="link" tabIndex={0}><span className="timeline-dot"><Icon name="activity" /></span><span className="timeline-item__body"><span className="timeline-item__title">{activity.activity_type === 'INTERACTIVE' ? <InlineMarkdown value={activity.title} /> : activity.title}</span><small>{activityTypeLabel(activity.activity_type)} · Not submitted</small></span><span className="timeline-item__action">Open <Icon name="arrow-right" /></span></article>) : <EmptyState icon="check" title="Nothing pending" message="All visible activities have a submission." />}</div>
+      <div className="section-block"><SectionHeading action={<Link to="/modules">Open modules</Link>} subtitle="Quizzes in modules available for Personal Study." title="Personal Study Quizzes" />
+        <div className="card-list">{quizzes.length ? quizzes.map((quiz) => <Link className="module-row" key={quiz.id} to={personalStudyQuizTarget(quiz)}><span><strong>{quiz.title}</strong><small>{quiz.module_title} / {quiz.lesson_title}</small></span><span className="dashboard-quiz-link__action">Open quiz <Icon name="arrow-right" /></span></Link>) : <EmptyState icon="activity" title="No Personal Study quizzes" message="Quizzes from eligible modules will appear here." />}</div>
       </div>
     </section>
     {contextModule ? <DashboardContextDialog module={contextModule} onClose={() => setContextModule(null)} onChoose={(context) => navigate(moduleTarget(contextModule, context))} /> : null}
@@ -110,13 +117,11 @@ function moduleTarget(module: DashboardModule, context: LearningContext) {
     : `/modules/${module.id}?context=PERSONAL`
 }
 
-function navigateDashboardActivity(event: React.MouseEvent<HTMLElement>, navigate: ReturnType<typeof useNavigate>, to: string) {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.target instanceof Element && event.target.closest('a'))) return
-  navigate(to)
-}
-
-function navigateDashboardActivityByKey(event: React.KeyboardEvent<HTMLElement>, navigate: ReturnType<typeof useNavigate>, to: string) {
-  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
-  event.preventDefault()
-  navigate(to)
+function personalStudyQuizTarget(quiz: StudentDashboard['personal_quizzes'][number]) {
+  const params = new URLSearchParams({
+    topic: String(quiz.topic_id),
+    lesson: String(quiz.lesson_id),
+    context: 'PERSONAL',
+  })
+  return `/modules/${quiz.module_id}?${params.toString()}#main-activity`
 }

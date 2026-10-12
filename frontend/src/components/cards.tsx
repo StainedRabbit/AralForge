@@ -91,7 +91,13 @@ export function ActivityCard({
 }) {
   const submitted = hasSubmission(data, activity.id)
   const navigate = useNavigate()
-  const to = `/activities/${activity.id}`
+  const learningContext = data.learningContext
+  const contextQuery = learningContext?.context_type === 'CLASS' && learningContext.schedule
+    ? `?schedule=${learningContext.schedule}`
+    : learningContext?.context_type === 'PERSONAL'
+      ? '?context=PERSONAL'
+      : ''
+  const to = `/activities/${activity.id}${contextQuery}`
 
   return (
     <article

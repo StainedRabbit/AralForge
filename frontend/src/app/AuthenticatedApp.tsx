@@ -6,10 +6,11 @@ import type { StudentProfile, ThemePreference, User } from '../types'
 import { applyTheme, rememberThemePreference } from '../theme'
 import { toErrorMessage } from '../utils/format'
 import type { LearningContextMetadata } from './types'
+import { Icon } from '../components/Icon'
 import { MobileNavigation, Sidebar } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
 import { EndpointWorkspace } from '../components/EndpointWorkspace'
-import { Page, SkeletonList, StatusBanner } from '../components/ui'
+import { Page, PageHeader, SkeletonList, StatusBanner } from '../components/ui'
 import { useAuthenticatedRequest } from '../hooks/useAuthenticatedRequest'
 import { queryKeys } from '../queries/queryKeys'
 import type { FinalGrade, GradeCategory, LevelRule, MainActivityState, Module, ModuleActivity, ModuleActivityAttempt, ModuleActivitySubmission, ModuleLesson, ModuleLessonExample, ModuleLessonProgress, ModuleTopic, PeriodGrade, PointLedger, ScheduleStudent, StudentCategoryGrade, Subject, SubjectSchedule } from '../types'
@@ -128,13 +129,53 @@ function ActivityWorkspaceRoute({ api, currentUser, profile }: WorkspaceRoutePro
   const requestedSchedule = searchParams.get('schedule')
   const requestedContext = searchParams.get('context')
   if (!requestedSchedule && requestedContext !== 'PERSONAL') {
-    return <Page><StatusBanner tone="warning" title="Choose a learning context" message="Open this activity from a class or Personal Study module." /><Link className="button button--primary" to="/modules">Back to Modules</Link></Page>
+    return <ActivityContextResolver api={api} activityId={activityId ?? ''} />
   }
   const context = requestedSchedule
     ? `schedule=${requestedSchedule}`
     : 'context=PERSONAL'
   const path = `/modules/activities/${Number(activityId)}/workspace/?${context}`
   return <EndpointWorkspace<ActivityWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ activities: [payload.activity], modules: [payload.module], activityAttempts: payload.attempts, submissions: payload.submissions })}>{data => <ActivityDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
+}
+
+type ActivityContextOption = { context_type: 'CLASS' | 'PERSONAL'; schedule: number | null; label: string }
+type ActivityContextOptions = { contexts: ActivityContextOption[] }
+
+function activityContextTarget(activityId: string, context: ActivityContextOption) {
+  return context.context_type === 'CLASS' && context.schedule
+    ? `/activities/${activityId}?schedule=${context.schedule}`
+    : `/activities/${activityId}?context=PERSONAL`
+}
+
+function ActivityContextResolver({ api, activityId }: { api: WorkspaceRouteProps['api']; activityId: string }) {
+  const path = `/modules/activities/${Number(activityId)}/context-options/`
+  const query = useQuery({
+    queryKey: queryKeys.resource(path),
+    queryFn: ({ signal }) => api<ActivityContextOptions>(path, { signal }),
+    staleTime: 60_000,
+  })
+
+  if (query.isPending) return <Page><SkeletonList count={3} /></Page>
+  if (query.error || !query.data) {
+    return <Page><StatusBanner tone="warning" title="Activity could not load" message="This activity may no longer be available to your account." /><Link className="button button--primary" to="/modules">Back to Modules</Link></Page>
+  }
+  if (query.data.contexts.length === 1) {
+    return <Navigate replace to={activityContextTarget(activityId, query.data.contexts[0])} />
+  }
+  if (!query.data.contexts.length) {
+    return <Page><StatusBanner tone="warning" title="No active learning context" message="This activity is available only through an active class or Personal Study module." /><Link className="button button--primary" to="/modules">Back to Modules</Link></Page>
+  }
+
+  return <Page>
+    <PageHeader eyebrow="Activity" title="Choose a learning context" description="Select the class or Personal Study space where you want to open this activity." />
+    <section aria-label="Available learning contexts" className="card-list">
+      {query.data.contexts.map((context) => <Link className="resource-row" key={`${context.context_type}-${context.schedule ?? 'personal'}`} to={activityContextTarget(activityId, context)}>
+        <span className="resource-row__icon"><Icon name={context.context_type === 'CLASS' ? 'module' : 'book'} /></span>
+        <div><strong>{context.label}</strong><span>{context.context_type === 'CLASS' ? 'Class activity workspace' : 'Personal Study workspace'}</span></div>
+      </Link>)}
+    </section>
+    <Link className="button button--secondary" to="/modules">Back to Modules</Link>
+  </Page>
 }
 
 type GradeOverview = { enrollments: ScheduleStudent[]; schedules: SubjectSchedule[]; categories: GradeCategory[]; category_grades: StudentCategoryGrade[]; period_grades: PeriodGrade[]; final_grades: FinalGrade[]; points: PointLedger[]; levels: LevelRule[] }

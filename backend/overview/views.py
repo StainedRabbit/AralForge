@@ -1,4 +1,4 @@
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db.models import Count, F, Prefetch, Q, Sum
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.response import Response
@@ -74,10 +74,14 @@ class DashboardModuleSerializer(serializers.ModelSerializer):
         )
 
 
-class DashboardActivitySerializer(serializers.ModelSerializer):
+class DashboardPersonalQuizSerializer(serializers.ModelSerializer):
+    module_title = serializers.CharField(source='module.title')
+    topic_id = serializers.IntegerField(source='lesson.topic_id')
+    lesson_title = serializers.CharField(source='lesson.title')
+
     class Meta:
         model = ModuleActivity
-        fields = ('id', 'title', 'activity_type')
+        fields = ('id', 'title', 'module_id', 'module_title', 'topic_id', 'lesson_id', 'lesson_title')
 
 
 def visible_student_modules(user):
@@ -95,15 +99,50 @@ def visible_student_activities(user):
     )
 
 
+def personal_study_quizzes(user):
+    active_class_enrollment = (
+        Q(
+            subject__schedules__students__student=user,
+            subject__schedules__students__is_active=True,
+            subject__schedules__is_active=True,
+            subject__schedules__school_year_semester__is_active=True,
+        )
+        | Q(
+            subjects__schedules__students__student=user,
+            subjects__schedules__students__is_active=True,
+            subjects__schedules__is_active=True,
+            subjects__schedules__school_year_semester__is_active=True,
+        )
+    )
+    personal_modules = Module.objects.filter(
+        is_published=True,
+        access_grants__student=user,
+        access_grants__access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+        access_grants__is_active=True,
+        access_grants__activated_by__isnull=False,
+        access_grants__expires_at__gt=timezone.now(),
+    ).exclude(active_class_enrollment).distinct()
+    return ModuleActivity.objects.filter(
+        module__in=personal_modules,
+        is_published=True,
+        lesson__is_published=True,
+        lesson__topic__is_published=True,
+        lesson__topic__module_id=F('module_id'),
+    ).select_related(
+        'module',
+        'lesson',
+        'lesson__topic',
+    ).order_by(
+        'module__title', 'lesson__topic__order', 'lesson__order', 'id',
+    )
+
+
 def student_dashboard(request):
     user = request.user
     modules = visible_student_modules(user)
     activities = visible_student_activities(user)
     submissions = ModuleActivitySubmission.objects.filter(student=user)
     submitted_activity_ids = submissions.values_list('activity_id', flat=True)
-    upcoming = activities.exclude(id__in=submitted_activity_ids).order_by(
-        'module__title', 'order', 'id',
-    )[:5]
     available_grants = ModuleAccess.objects.filter(
         student=user,
         is_active=True,
@@ -132,7 +171,10 @@ def student_dashboard(request):
             'earned_badges': StudentBadge.objects.filter(student=user).count(),
         },
         'recent_modules': dashboard_modules(request, recent_modules),
-        'upcoming_activities': DashboardActivitySerializer(upcoming, many=True).data,
+        'personal_quizzes': DashboardPersonalQuizSerializer(
+            personal_study_quizzes(user),
+            many=True,
+        ).data,
     }
 
 

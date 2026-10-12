@@ -1997,6 +1997,103 @@ class LearningContextMainActivityApiTests(APITestCase):
             {str(self.activity.id): 1},
         )
 
+    def test_activity_context_options_return_only_the_students_active_classes(self):
+        self.schedule_a.refresh_from_db()
+        self.schedule_b.refresh_from_db()
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/context-options/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['contexts'], [
+            {
+                'context_type': LearningContextType.CLASS,
+                'schedule': self.schedule_a.id,
+                'label': str(self.schedule_a),
+            },
+            {
+                'context_type': LearningContextType.CLASS,
+                'schedule': self.schedule_b.id,
+                'label': str(self.schedule_b),
+            },
+        ])
+
+    def test_activity_context_options_return_personal_study_when_eligible(self):
+        personal_student = User.objects.create_user(
+            username='context-options-personal',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            activated_by=self.teacher,
+            expires_at=timezone.now() + timezone.timedelta(days=30),
+            module=self.module,
+            student=personal_student,
+        )
+        self.client.force_authenticate(personal_student)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/context-options/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['contexts'], [{
+            'context_type': LearningContextType.PERSONAL,
+            'schedule': None,
+            'label': 'Personal Study',
+        }])
+
+    def test_activity_context_options_exclude_personal_study_with_no_advance_access(self):
+        enrolled_without_active_class = User.objects.create_user(
+            username='context-options-no-class',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ENROLLED,
+            activated_by=self.teacher,
+            module=self.module,
+            student=enrolled_without_active_class,
+        )
+        self.client.force_authenticate(enrolled_without_active_class)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/context-options/',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['contexts'], [])
+
+    def test_activity_context_options_are_hidden_when_student_cannot_access_activity(self):
+        self.client.force_authenticate(self.other_student)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/context-options/',
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_activity_workspace_rejects_a_class_the_student_is_not_enrolled_in(self):
+        unassigned_schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=self.schedule_a.school_year_semester,
+            days='F',
+            start_time='11:00',
+            end_time='12:00',
+            section='C',
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/workspace/?schedule={unassigned_schedule.id}',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('schedule', response.data)
+
     def test_review_unlock_does_not_leak_between_classes(self):
         self.create_attempt(schedule=self.schedule_a, attempt_number=1)
         self.create_attempt(schedule=self.schedule_a, attempt_number=2)
@@ -2057,6 +2154,27 @@ class LearningContextMainActivityApiTests(APITestCase):
         )
         self.assertEqual(response.data['learning_context']['context_type'], 'PERSONAL')
         self.assertEqual(response.data['learning_context']['label'], 'Personal Study')
+
+    def test_expired_personal_study_access_cannot_open_module_quiz(self):
+        personal_student = User.objects.create_user(
+            username='context-personal-expired',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            activated_by=self.teacher,
+            expires_at=timezone.now() - timezone.timedelta(days=1),
+            module=self.module,
+            student=personal_student,
+        )
+        self.client.force_authenticate(personal_student)
+
+        response = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?context=PERSONAL',
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_legacy_history_is_read_only_student_owned_and_summary_only(self):
         own = self.create_attempt(

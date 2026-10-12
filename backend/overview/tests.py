@@ -11,7 +11,14 @@ from rest_framework.test import APITestCase
 
 from accounts.models import StudentProfile
 from attendance.models import AttendanceRecord, AttendanceSession
-from learning_modules.models import Module, ModuleAccess, ModuleActivity, ModuleActivitySubmission
+from learning_modules.models import (
+    Module,
+    ModuleAccess,
+    ModuleActivity,
+    ModuleActivitySubmission,
+    ModuleLesson,
+    ModuleTopic,
+)
 from subjects.models import ScheduleStudent, SchoolYear, SchoolYearSemester, Semester, Subject, SubjectSchedule
 from subjects.scheduling import WEEKDAY_CODES
 
@@ -48,7 +55,7 @@ class OverviewApiTests(APITestCase):
         self.assertNotIn('blank_count', response.data['metrics'])
         self.assertLessEqual(len(queries), 25)
 
-    def test_student_dashboard_returns_only_card_fields_for_modules_and_activities(self):
+    def test_student_dashboard_returns_module_cards_and_keeps_pending_activity_metric(self):
         module = Module.objects.create(
             title='Visible module', slug='visible-dashboard-module',
             description='A short description', is_published=True,
@@ -70,10 +77,112 @@ class OverviewApiTests(APITestCase):
             {'id', 'title', 'description', 'is_accessible', 'access_status', 'learning_contexts'},
         )
         self.assertTrue(response.data['recent_modules'][0]['is_accessible'])
-        self.assertEqual(
-            response.data['upcoming_activities'][0],
-            {'id': activity.id, 'title': activity.title, 'activity_type': activity.activity_type},
+        self.assertNotIn('upcoming_activities', response.data)
+        self.assertEqual(response.data['personal_quizzes'], [])
+        self.assertEqual(response.data['metrics']['pending_activities'], 1)
+
+    def test_student_dashboard_lists_only_published_quizzes_with_personal_study_access(self):
+        valid_module = Module.objects.create(
+            title='Personal quiz module', slug='personal-quiz-module', is_published=True,
         )
+        expired_module = Module.objects.create(
+            title='Expired quiz module', slug='expired-quiz-module', is_published=True,
+        )
+        class_module = Module.objects.create(
+            title='Class quiz module', slug='class-quiz-module', is_published=True,
+        )
+        ModuleAccess.objects.create(
+            module=valid_module, student=self.student, activated_by=self.teacher,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            expires_at=timezone.now() + timedelta(days=10),
+        )
+        ModuleAccess.objects.create(
+            module=expired_module, student=self.student, activated_by=self.teacher,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+        ModuleAccess.objects.create(
+            module=class_module, student=self.student, activated_by=self.teacher,
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            expires_at=timezone.now() + timedelta(days=10),
+        )
+        school_year = SchoolYear.objects.create(start_year=2040, end_year=2041)
+        term = SchoolYearSemester.objects.create(
+            school_year=school_year, semester=Semester.FIRST, is_active=True,
+        )
+        subject = Subject.objects.create(code='QZ101', name='Quiz Class')
+        class_module.subject = subject
+        class_module.save(update_fields=['subject'])
+        schedule = SubjectSchedule.objects.create(
+            subject=subject, school_year_semester=term, days='MWF',
+            start_time='08:00', end_time='09:00', section='A',
+        )
+        ScheduleStudent.objects.create(schedule=schedule, student=self.student)
+
+        quizzes = []
+        for module, title in (
+            (valid_module, 'Eligible quiz'),
+            (expired_module, 'Expired quiz'),
+            (class_module, 'Class quiz'),
+        ):
+            topic = ModuleTopic.objects.create(module=module, title=f'{title} topic', is_published=True)
+            lesson = ModuleLesson.objects.create(topic=topic, title=f'{title} lesson', is_published=True)
+            quiz = ModuleActivity.objects.create(
+                module=module, topic=topic, lesson=lesson, title=title,
+                instructions='Answer the quiz.', is_published=True,
+            )
+            quizzes.append((quiz, topic, lesson))
+        eligible_topic = quizzes[0][1]
+        follow_up_lesson = ModuleLesson.objects.create(
+            topic=eligible_topic,
+            title='Eligible follow-up lesson',
+            order=1,
+            is_published=True,
+        )
+        follow_up_quiz = ModuleActivity.objects.create(
+            module=valid_module,
+            lesson=follow_up_lesson,
+            title='Eligible follow-up quiz',
+            instructions='Answer the follow-up quiz.',
+            is_published=True,
+        )
+        unpublished_topic = ModuleTopic.objects.create(
+            module=valid_module, title='Draft topic', is_published=False,
+        )
+        unpublished_lesson = ModuleLesson.objects.create(
+            topic=unpublished_topic, title='Draft lesson', is_published=True,
+        )
+        ModuleActivity.objects.create(
+            module=valid_module, lesson=unpublished_lesson, title='Draft quiz',
+            instructions='Draft quiz.', is_published=True,
+        )
+
+        self.client.force_authenticate(self.student)
+        response = self.client.get(reverse('overview:dashboard'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        eligible, topic, lesson = quizzes[0]
+        self.assertEqual(response.data['personal_quizzes'], [
+            {
+                'id': eligible.id,
+                'title': eligible.title,
+                'module_id': valid_module.id,
+                'module_title': valid_module.title,
+                'topic_id': topic.id,
+                'lesson_id': lesson.id,
+                'lesson_title': lesson.title,
+            },
+            {
+                'id': follow_up_quiz.id,
+                'title': follow_up_quiz.title,
+                'module_id': valid_module.id,
+                'module_title': valid_module.title,
+                'topic_id': eligible_topic.id,
+                'lesson_id': follow_up_lesson.id,
+                'lesson_title': follow_up_lesson.title,
+            },
+        ])
+        self.assertEqual(response.data['metrics']['pending_activities'], 4)
 
     def test_student_dashboard_includes_valid_module_learning_contexts(self):
         school_year = SchoolYear.objects.create(start_year=2038, end_year=2039)

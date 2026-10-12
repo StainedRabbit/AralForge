@@ -858,7 +858,10 @@ function StudentLessonReader({
 
   useEffect(() => {
     window.requestAnimationFrame(() => {
-      lessonHeadingRef.current?.scrollIntoView({
+      const destination = window.location.hash === '#main-activity'
+        ? document.getElementById('main-activity') ?? lessonHeadingRef.current
+        : lessonHeadingRef.current
+      destination?.scrollIntoView({
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
           ? 'auto'
           : 'smooth',

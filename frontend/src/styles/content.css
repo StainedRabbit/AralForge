@@ -321,6 +321,17 @@ button.module-row {
   min-width: 0;
 }
 
+.module-row > .dashboard-quiz-link__action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--primary-dark);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .module-row strong,
 .module-row small {
   display: block;

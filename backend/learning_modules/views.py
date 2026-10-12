@@ -84,6 +84,7 @@ from .services.activity_state import (
     evaluate_main_activity_state,
 )
 from .services.learning_context import (
+    active_matching_enrollments,
     learning_context_query,
     request_learning_context,
     resolve_learning_context,
@@ -1250,6 +1251,38 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         ).filter(
             active_module_access_filter(self.request.user, prefix='module__'),
         ).distinct()
+
+    @decorators.action(detail=True, methods=['get'], url_path='context-options')
+    def context_options(self, request, pk=None):
+        activity = self.get_object()
+        if request.user.is_admin_teacher:
+            return response.Response({'contexts': []})
+
+        enrollments = active_matching_enrollments(request.user, activity.module)
+        contexts = [
+            {
+                'context_type': LearningContextType.CLASS,
+                'schedule': enrollment.schedule_id,
+                'label': str(enrollment.schedule),
+            }
+            for enrollment in enrollments
+        ]
+        if not contexts:
+            try:
+                resolve_learning_context(
+                    request.user,
+                    activity.module,
+                    context_type=LearningContextType.PERSONAL,
+                )
+            except serializers.ValidationError:
+                pass
+            else:
+                contexts.append({
+                    'context_type': LearningContextType.PERSONAL,
+                    'schedule': None,
+                    'label': 'Personal Study',
+                })
+        return response.Response({'contexts': contexts})
 
     def create(self, request, *args, **kwargs):
         if request.data.get('lesson') not in (None, ''):
