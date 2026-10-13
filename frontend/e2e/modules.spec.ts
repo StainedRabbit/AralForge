@@ -648,8 +648,8 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
   await expect(page.getByText('Overflow Lesson 105', { exact: true })).toHaveCount(0)
 })
 
-test('shows delete failures and removes a lesson after a successful delete', async ({ page }) => {
-  const lessonTitle = 'E2E Lesson Delete Flow'
+test('shows delete failures and removes a lesson after a successful delete', async ({ page }, testInfo) => {
+  const lessonTitle = `E2E Lesson Delete Flow ${testInfo.retry}`
   const deletePath = /\/api\/modules\/lessons\/\d+\/$/
 
   await page.goto('/admin/modules')
@@ -667,9 +667,14 @@ test('shows delete failures and removes a lesson after a successful delete', asy
   await page.getByRole('link', { name: 'New Lesson' }).click()
   await page.getByLabel('Lesson Title').fill(lessonTitle)
   await page.getByLabel('Order').fill('1')
+  const createResponse = page.waitForResponse(
+    (response) => response.request().method() === 'POST' &&
+      response.url().includes('/api/modules/lessons/'),
+  )
   await page.getByRole('button', { name: 'Save lesson' }).click()
+  expect((await createResponse).status()).toBe(201)
   await page.waitForURL(/\/admin\/modules\?subject=\d+&topic=\d+&lesson=\d+/)
-  await expect(page.getByRole('heading', { name: lessonTitle })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Edit Lesson' })).toBeVisible()
   await page.getByRole('link', { name: 'Edit Lesson' }).click()
   await expect(page.getByRole('heading', { name: 'Edit Lesson' })).toBeVisible()
 
