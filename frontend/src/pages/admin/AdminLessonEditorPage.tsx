@@ -519,8 +519,12 @@ function AdminLessonEditorForm({
     try {
       await api(`/modules/lessons/${editingLesson.id}/`, { method: 'DELETE' })
       removeLessonDraft(storageKey)
+      const topicLessonsKey = queryKeys.resource(`/modules/lessons/?topic=${editingLesson.topic}`)
+      queryClient.setQueryData<ModuleLesson[]>(topicLessonsKey, (lessons) =>
+        lessons?.filter((lesson) => lesson.id !== editingLesson.id),
+      )
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.resource(`/modules/lessons/?topic=${editingLesson.topic}`),
+        queryKey: topicLessonsKey,
         refetchType: 'none',
       })
       navigate(backUrl)
