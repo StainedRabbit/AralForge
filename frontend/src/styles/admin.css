@@ -5127,6 +5127,11 @@ a.teacher-recent-item:focus-visible {
   grid-template-columns: minmax(220px, 1fr) minmax(120px, 0.25fr) auto;
 }
 
+.lesson-delete-error {
+  flex-basis: 100%;
+  text-align: right;
+}
+
 .markdown-editor {
   gap: 8px;
 }
@@ -7761,6 +7766,11 @@ a.teacher-recent-item:focus-visible {
   .lesson-save-bar .lesson-editor__actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .lesson-delete-error {
+    grid-column: 1 / -1;
+    text-align: left;
   }
 
   .lesson-save-bar .button {

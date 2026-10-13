@@ -740,6 +740,11 @@ class ModuleLessonCrudFilteringApiTests(APITestCase):
             password='testpass123',
             role=User.Role.TEACHER,
         )
+        self.student = User.objects.create_user(
+            username='lesson-filter-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
         self.subject = Subject.objects.create(
             code='FLT101',
             name='Filtered Lessons',
@@ -807,6 +812,54 @@ class ModuleLessonCrudFilteringApiTests(APITestCase):
         self.assertEqual(module_response.data['count'], 1)
         self.assertEqual(result_rows(topic_response)[0]['id'], lesson_id)
         self.assertEqual(result_rows(module_response)[0]['id'], lesson_id)
+
+    def test_teacher_can_delete_lesson_and_cascade_its_dependents(self):
+        lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Lesson to Delete',
+            order=1,
+        )
+        other_lesson = ModuleLesson.objects.create(
+            topic=self.topic,
+            title='Lesson to Keep',
+            order=2,
+        )
+        example = ModuleLessonExample.objects.create(
+            lesson=lesson,
+            order=1,
+            title='Example to Delete',
+        )
+        asset = ModuleLessonAsset.objects.create(
+            lesson=lesson,
+            file='module_lesson_assets/delete-me.svg',
+            original_name='delete-me.svg',
+        )
+        activity = ModuleActivity.objects.create(
+            module=self.module,
+            lesson=lesson,
+            title='Quiz to Delete',
+            instructions='Choose an answer.',
+        )
+        question = ModuleActivityQuestion.objects.create(
+            activity=activity,
+            question_type=ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            prompt='Which answer is correct?',
+        )
+        ModuleLessonProgress.objects.create(
+            lesson=lesson,
+            student=self.student,
+        )
+
+        response = self.client.delete(f'/api/modules/lessons/{lesson.id}/')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(ModuleLesson.objects.filter(pk=lesson.id).exists())
+        self.assertFalse(ModuleLessonExample.objects.filter(pk=example.id).exists())
+        self.assertFalse(ModuleLessonAsset.objects.filter(pk=asset.id).exists())
+        self.assertFalse(ModuleActivity.objects.filter(pk=activity.id).exists())
+        self.assertFalse(ModuleActivityQuestion.objects.filter(pk=question.id).exists())
+        self.assertFalse(ModuleLessonProgress.objects.filter(lesson_id=lesson.id).exists())
+        self.assertTrue(ModuleLesson.objects.filter(pk=other_lesson.id).exists())
 
 
 class ModuleTeacherSummaryApiTests(APITestCase):

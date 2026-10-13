@@ -1281,6 +1281,20 @@ def progress_contexts_for_module(module):
     )
 
 
+def progress_student_ids_for_topic(topic):
+    return {
+        student_id
+        for student_id, _context_type, _schedule_id in progress_contexts_for_topic(topic)
+    }
+
+
+def progress_student_ids_for_module(module):
+    return {
+        student_id
+        for student_id, _context_type, _schedule_id in progress_contexts_for_module(module)
+    }
+
+
 def sync_progress_for_topic_students(topic, student_ids=None):
     contexts = progress_contexts_for_topic(topic)
     if student_ids is not None:

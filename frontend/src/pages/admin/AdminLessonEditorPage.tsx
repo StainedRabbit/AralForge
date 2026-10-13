@@ -250,6 +250,7 @@ function AdminLessonEditorForm({
   )
   const [hasInteracted, setHasInteracted] = useState(false)
   const [message, setMessage] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('clean')
@@ -514,19 +515,17 @@ function AdminLessonEditorForm({
     }
 
     setDeleting(true)
-    setMessage('')
+    setDeleteError('')
     try {
       await api(`/modules/lessons/${editingLesson.id}/`, { method: 'DELETE' })
-      await Promise.all([
-        refresh(),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.resource(`/modules/lessons/?topic=${editingLesson.topic}`),
-        }),
-      ])
       removeLessonDraft(storageKey)
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.resource(`/modules/lessons/?topic=${editingLesson.topic}`),
+        refetchType: 'none',
+      })
       navigate(backUrl)
     } catch (caughtError) {
-      setMessage(toErrorMessage(caughtError))
+      setDeleteError(toErrorMessage(caughtError))
     } finally {
       setDeleting(false)
     }
@@ -752,6 +751,7 @@ function AdminLessonEditorForm({
                     <span>{deleting ? 'Deleting...' : 'Delete lesson'}</span>
                   </button>
                 ) : null}
+                {deleteError ? <p className="admin-message text-import-warning lesson-delete-error" role="alert">{deleteError}</p> : null}
                 <Link className="button button--secondary" onClick={confirmLeave} to={backUrl}>
                   Cancel
                 </Link>

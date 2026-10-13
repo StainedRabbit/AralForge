@@ -648,6 +648,62 @@ test('creates, selects, and reloads a lesson beyond the global first page', asyn
   await expect(page.getByText('Overflow Lesson 105', { exact: true })).toHaveCount(0)
 })
 
+test('shows delete failures and removes a lesson after a successful delete', async ({ page }) => {
+  const lessonTitle = 'E2E Lesson Delete Flow'
+  const deletePath = /\/api\/modules\/lessons\/\d+\/$/
+
+  await page.goto('/admin/modules')
+  await page.getByLabel('Student number').fill('e2e-teacher')
+  await page.getByLabel('Password', { exact: true }).fill('e2e-password')
+  const loginResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/token/' &&
+      response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  expect((await loginResponse).status()).toBe(200)
+  await page.goto('/admin/modules')
+
+  await page.getByLabel('Subject').selectOption({ label: 'E2EL1 - Lesson Authoring' })
+  await page.getByRole('link', { name: 'New Lesson' }).click()
+  await page.getByLabel('Lesson Title').fill(lessonTitle)
+  await page.getByLabel('Order').fill('1')
+  await page.getByRole('button', { name: 'Save lesson' }).click()
+  await page.waitForURL(/\/admin\/modules\?subject=\d+&topic=\d+&lesson=\d+/)
+  await expect(page.getByRole('heading', { name: lessonTitle })).toBeVisible()
+  await page.getByRole('link', { name: 'Edit Lesson' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit Lesson' })).toBeVisible()
+
+  await page.route(deletePath, async (route) => {
+    if (route.request().method() === 'DELETE') {
+      await route.fulfill({
+        contentType: 'application/json',
+        json: { detail: 'Delete failed for test.' },
+        status: 500,
+      })
+      return
+    }
+    await route.continue()
+  })
+  page.on('dialog', (dialog) => dialog.accept())
+
+  const failedDelete = page.waitForResponse(
+    (response) => response.request().method() === 'DELETE' && deletePath.test(new URL(response.url()).pathname),
+  )
+  await page.getByRole('button', { name: 'Delete lesson' }).click()
+  expect((await failedDelete).status()).toBe(500)
+  await expect(page.getByRole('alert')).toContainText('Delete failed for test.')
+  await expect(page.getByRole('heading', { name: 'Edit Lesson' })).toBeVisible()
+
+  await page.unroute(deletePath)
+  const successfulDelete = page.waitForResponse(
+    (response) => response.request().method() === 'DELETE' && deletePath.test(new URL(response.url()).pathname),
+  )
+  await page.getByRole('button', { name: 'Delete lesson' }).click()
+  expect((await successfulDelete).status()).toBe(204)
+  await page.waitForURL(/\/admin\/modules\?subject=\d+&topic=\d+$/)
+  await expect(page.getByText(lessonTitle, { exact: true })).toHaveCount(0)
+})
+
 test('starts, resumes, continues, and reviews lessons from module pages', async ({ page }) => {
   const topicDownloadPaths: string[] = []
   let topicStatusChecks = 0
