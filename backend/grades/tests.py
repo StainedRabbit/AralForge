@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.db import connection
 from django.conf import settings
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from unittest import skipUnless
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
@@ -1266,6 +1267,147 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
             format='json',
         )
 
+    def make_grade_item_without_sync(self, schedule=None):
+        with (
+            patch('grades.source_sync.sync_grade_item'),
+            patch('grades.services.recompute_grade_target_for_students'),
+        ):
+            return GradeItem.objects.create(
+                schedule=schedule or self.schedule_a,
+                grade_category=self.prelim_quiz,
+                title='Main quiz',
+                points_possible=self.activity.points_possible,
+                source_type=GradeItemSourceType.MODULE_ACTIVITY,
+                module_activity=self.activity,
+            )
+
+    def test_interactive_sync_batches_attempts_and_preserves_score_rules(self):
+        paper_student = User.objects.create_user(
+            username='bulk-paper-student', password='testpass123', role=User.Role.STUDENT,
+        )
+        override_student = User.objects.create_user(
+            username='bulk-override-student', password='testpass123', role=User.Role.STUDENT,
+        )
+        stale_student = User.objects.create_user(
+            username='bulk-stale-student', password='testpass123', role=User.Role.STUDENT,
+        )
+        roster = [self.student, paper_student, override_student, stale_student]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in roster
+        ])
+        item = self.make_grade_item_without_sync()
+
+        ModuleActivityAttempt.objects.bulk_create([
+            ModuleActivityAttempt(
+                activity=self.activity,
+                student=self.student,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                schedule=self.schedule_a,
+                context_type=LearningContextType.CLASS,
+                attempt_number=1,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                score=Decimal('4.00'),
+                max_score=Decimal('5.00'),
+            ),
+            ModuleActivityAttempt(
+                activity=self.activity,
+                student=self.student,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                schedule=self.schedule_a,
+                context_type=LearningContextType.CLASS,
+                attempt_number=2,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                score=Decimal('6.00'),
+                max_score=Decimal('10.00'),
+            ),
+            ModuleActivityAttempt(
+                activity=self.activity,
+                student=paper_student,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                paper_grade_item=item,
+                schedule=self.schedule_a,
+                context_type=LearningContextType.CLASS,
+                attempt_number=1,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                score=Decimal('3.00'),
+                max_score=Decimal('6.00'),
+            ),
+            ModuleActivityAttempt(
+                activity=self.activity,
+                student=override_student,
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                schedule=self.schedule_a,
+                context_type=LearningContextType.CLASS,
+                attempt_number=1,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                score=Decimal('9.00'),
+                max_score=Decimal('10.00'),
+            ),
+        ])
+        StudentGradeItemScore.objects.bulk_create([
+            StudentGradeItemScore(
+                grade_item=item,
+                student=override_student,
+                raw_score=Decimal('2.00'),
+                status=StudentGradeItemScore.Status.GRADED,
+                origin=StudentGradeItemScore.Origin.OVERRIDE,
+                override_reason='Teacher correction',
+                computed_at=timezone.now(),
+            ),
+            StudentGradeItemScore(
+                grade_item=item,
+                student=stale_student,
+                raw_score=Decimal('1.00'),
+                status=StudentGradeItemScore.Status.GRADED,
+                origin=StudentGradeItemScore.Origin.AUTOMATIC,
+                computed_at=timezone.now(),
+            ),
+        ])
+
+        from grades.source_sync import sync_grade_item
+
+        with patch('grades.services.recompute_grade_target_for_students') as recompute:
+            changed = sync_grade_item(item)
+
+        self.assertEqual(changed, 3)
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=self.student).raw_score,
+            Decimal('8.00'),
+        )
+        self.assertEqual(
+            StudentGradeItemScore.objects.get(grade_item=item, student=paper_student).raw_score,
+            Decimal('5.00'),
+        )
+        override = StudentGradeItemScore.objects.get(grade_item=item, student=override_student)
+        self.assertEqual(override.raw_score, Decimal('2.00'))
+        self.assertEqual(override.origin, StudentGradeItemScore.Origin.OVERRIDE)
+        self.assertFalse(
+            StudentGradeItemScore.objects.filter(grade_item=item, student=stale_student).exists(),
+        )
+        recompute.assert_called_once()
+
+    def test_interactive_sync_query_count_does_not_grow_with_roster(self):
+        additional_students = [
+            User.objects.create_user(
+                username=f'bulk-roster-{index}', password='testpass123', role=User.Role.STUDENT,
+            )
+            for index in range(30)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=self.schedule_a, student=student)
+            for student in [self.student, *additional_students]
+        ])
+        item = self.make_grade_item_without_sync()
+
+        from grades.source_sync import sync_grade_item
+
+        with CaptureQueriesContext(connection) as queries:
+            changed = sync_grade_item(item, recompute=False)
+
+        self.assertEqual(changed, 0)
+        self.assertLessEqual(len(queries.captured_queries), 6)
+
     def test_bulk_assignment_creates_updates_and_is_idempotent(self):
         rows = [
             {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
@@ -1371,6 +1513,20 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
         ])
 
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())
+
+    def test_failure_during_bulk_assignment_rolls_back_prior_links(self):
+        rows = [
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+        ]
+        with patch(
+            'grades.source_sync.sync_grade_item',
+            side_effect=[None, RuntimeError('Simulated score sync failure.')],
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'Simulated score sync failure'):
+                self.assign(rows)
+
         self.assertFalse(GradeItem.objects.filter(module_activity=self.activity).exists())
 
     def test_rejects_wrong_subject_archived_duplicate_and_non_teacher(self):

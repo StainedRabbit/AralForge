@@ -61,11 +61,21 @@ test('verifies Quiz links after HTML gateway errors and preserves selections whe
 
   let assignmentRequest = 0
   let failVerification = false
+  let unmatchedClassName = ''
   const gatewayHtml = '<!DOCTYPE html><html><title>502: Bad gateway</title><body>Origin unavailable</body></html>'
   await page.route('**/api/grades/items/assign-main-activity/', async (route) => {
     assignmentRequest += 1
-    if (assignmentRequest === 3) {
-      const upstream = await route.fetch()
+    if (assignmentRequest === 1 || assignmentRequest === 3) {
+      const body = route.request().postDataJSON() as {
+        module_activity: number
+        assignments: Array<{ schedule: number; grade_category: number }>
+      }
+      if (assignmentRequest === 1) {
+        const rowText = await page.locator('.activity-grading-row').nth(3).innerText()
+        unmatchedClassName = rowText.match(/E2E-[A-Z]/)?.[0] ?? ''
+        body.assignments = body.assignments.slice(0, 3)
+      }
+      const upstream = await route.fetch({ postData: JSON.stringify(body) })
       expect(upstream.status()).toBe(200)
     }
     if (assignmentRequest === 4) failVerification = true
@@ -87,24 +97,28 @@ test('verifies Quiz links after HTML gateway errors and preserves selections whe
   const editor = page.locator('#lesson-editor-main-activity')
   await editor.getByRole('button', { name: /^Grading/ }).click()
   const rows = editor.locator('.activity-grading-row')
-  await expect(rows).toHaveCount(2)
+  await expect(rows).toHaveCount(4)
   await editor.getByRole('button', { name: 'Select all' }).click()
   const apply = editor.getByRole('button', { name: 'Apply selected assignments' })
 
   await apply.click()
-  await expect(editor.getByRole('status')).toContainText('Verification found 0 of 2 selected class links')
+  await expect(editor.getByRole('status')).toContainText('Verification found 3 of 4 selected class links')
+  await expect(editor.getByRole('status')).toContainText(unmatchedClassName)
   await expect(editor.getByRole('status')).not.toContainText('<!DOCTYPE html>')
+  expect(assignmentRequest).toBe(1)
   await expect(rows.nth(0).getByRole('checkbox')).toBeChecked()
   await expect(rows.nth(1).getByRole('checkbox')).toBeChecked()
-  await expect(editor.getByText('Not linked', { exact: true })).toHaveCount(2)
+  await expect(rows.nth(2).getByRole('checkbox')).toBeChecked()
+  await expect(rows.nth(3).getByRole('checkbox')).toBeChecked()
+  await expect(editor.getByText('Not linked', { exact: true })).toHaveCount(1)
 
   await apply.click()
   await expect(editor.getByRole('status')).toContainText('Select an existing Quiz category.')
-  await expect(editor.getByRole('status')).toContainText('Verification found 0 of 2 selected class links')
+  await expect(editor.getByRole('status')).toContainText('Verification found 3 of 4 selected class links')
 
   await apply.click()
-  await expect(editor.getByRole('status')).toContainText('Verification confirms all 2 selected class links are saved.')
-  await expect(editor.getByRole('link', { name: 'Open Gradebook' })).toHaveCount(2)
+  await expect(editor.getByRole('status')).toContainText('Verification confirms all 4 selected class links are saved.')
+  await expect(editor.getByRole('link', { name: 'Open Gradebook' })).toHaveCount(4)
 
   await apply.click()
   await expect(editor.getByRole('status')).toContainText('Unable to verify the class links')
@@ -116,7 +130,7 @@ test('verifies Quiz links after HTML gateway errors and preserves selections whe
 
   failVerification = false
   await editor.getByRole('button', { name: 'Retry verification' }).click()
-  await expect(editor.getByRole('status')).toContainText('Verification confirms all 2 selected class links are saved.')
+  await expect(editor.getByRole('status')).toContainText('Verification confirms all 4 selected class links are saved.')
   await expect(apply).toBeEnabled()
   expect(assignmentRequest).toBe(4)
 })
@@ -286,15 +300,17 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
   expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(1)
 
   const classRows = editor.locator('.activity-grading-row')
-  await expect(classRows).toHaveCount(2)
+  await expect(classRows).toHaveCount(4)
   await editor.getByRole('button', { name: 'Select all' }).click()
   await expect(classRows.nth(0).getByRole('checkbox')).toBeChecked()
   await expect(classRows.nth(1).getByRole('checkbox')).toBeChecked()
+  await expect(classRows.nth(2).getByRole('checkbox')).toBeChecked()
+  await expect(classRows.nth(3).getByRole('checkbox')).toBeChecked()
   await editor.getByRole('button', { name: 'Apply selected assignments' }).click()
-  await expect(editor.getByRole('status')).toContainText('Assignments applied: 2 linked')
+  await expect(editor.getByRole('status')).toContainText('Assignments applied: 4 linked')
 
   const gradebookLinks = editor.getByRole('link', { name: 'Open Gradebook' })
-  await expect(gradebookLinks).toHaveCount(2)
+  await expect(gradebookLinks).toHaveCount(4)
   await testInfo.attach('bulk-main-activity-links', {
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',

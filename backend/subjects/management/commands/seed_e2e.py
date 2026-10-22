@@ -245,6 +245,24 @@ class Command(BaseCommand):
                 section='E2E-D',
                 room='Lab 4',
             ),
+            SubjectSchedule.objects.create(
+                subject=workflow_subject,
+                school_year_semester=first_term,
+                days='MO,WE',
+                start_time=time(15, 0),
+                end_time=time(16, 0),
+                section='E2E-E',
+                room='Lab 5',
+            ),
+            SubjectSchedule.objects.create(
+                subject=workflow_subject,
+                school_year_semester=first_term,
+                days='TU,TH',
+                start_time=time(16, 0),
+                end_time=time(17, 0),
+                section='E2E-F',
+                room='Lab 6',
+            ),
         ]
         for schedule in workflow_classes:
             for student in students:

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from subjects.models import ScheduleStudent
 
@@ -57,10 +58,129 @@ def source_score(item, student):
     }.get(item.source_type, lambda *_: None)(item, student)
 
 
+def _sync_interactive_activity_item(item, *, recompute):
+    """Backfill an interactive Quiz item without per-student queries or saves."""
+    from learning_modules.models import ModuleActivity, ModuleActivityAttempt
+
+    if item.module_activity.activity_type != ModuleActivity.ActivityType.INTERACTIVE:
+        return None
+
+    student_ids = list(ScheduleStudent.objects.filter(
+        schedule_id=item.schedule_id,
+        is_active=True,
+    ).values_list('student_id', flat=True))
+    if not student_ids:
+        return 0
+
+    existing = {
+        score.student_id: score
+        for score in StudentGradeItemScore.objects.filter(
+            grade_item_id=item.id,
+            student_id__in=student_ids,
+        )
+    }
+    attempt_scores = {}
+    attempts = ModuleActivityAttempt.objects.filter(
+        activity_id=item.module_activity_id,
+        student_id__in=student_ids,
+        status=ModuleActivityAttempt.Status.SUBMITTED,
+    ).filter(
+        Q(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            context_type='CLASS',
+            schedule_id=item.schedule_id,
+        )
+        | Q(
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+            paper_grade_item_id=item.id,
+        )
+    ).values_list('student_id', 'score', 'max_score')
+    for student_id, earned, maximum in attempts:
+        normalized = _normalized_score(earned, maximum, item.points_possible)
+        if normalized is not None:
+            attempt_scores.setdefault(student_id, []).append(normalized)
+
+    synced_at = timezone.now()
+    creates = []
+    updates = []
+    delete_ids = []
+    recompute_ids = set()
+    changed = 0
+    for student_id in student_ids:
+        current = existing.get(student_id)
+        if current and current.origin == StudentGradeItemScore.Origin.OVERRIDE:
+            continue
+
+        candidates = attempt_scores.get(student_id, [])
+        score = max(candidates) if candidates else None
+        if score is None:
+            if current and current.origin == StudentGradeItemScore.Origin.AUTOMATIC:
+                delete_ids.append(current.id)
+                recompute_ids.add(student_id)
+                changed += 1
+            continue
+
+        recompute_ids.add(student_id)
+        changed += 1
+        if current:
+            current.raw_score = score
+            current.status = StudentGradeItemScore.Status.GRADED
+            current.origin = StudentGradeItemScore.Origin.AUTOMATIC
+            current.override_reason = ''
+            current.remarks = 'Synchronized from linked work.'
+            current.computed_at = synced_at
+            updates.append(current)
+        else:
+            creates.append(StudentGradeItemScore(
+                grade_item_id=item.id,
+                student_id=student_id,
+                raw_score=score,
+                status=StudentGradeItemScore.Status.GRADED,
+                origin=StudentGradeItemScore.Origin.AUTOMATIC,
+                override_reason='',
+                remarks='Synchronized from linked work.',
+                computed_at=synced_at,
+            ))
+
+    if delete_ids:
+        StudentGradeItemScore.objects.filter(id__in=delete_ids).delete()
+    if creates:
+        StudentGradeItemScore.objects.bulk_create(creates, batch_size=500)
+    if updates:
+        StudentGradeItemScore.objects.bulk_update(
+            updates,
+            (
+                'raw_score',
+                'status',
+                'origin',
+                'override_reason',
+                'remarks',
+                'computed_at',
+            ),
+            batch_size=500,
+        )
+
+    if recompute and recompute_ids:
+        from .services import recompute_grade_target_for_students
+
+        recompute_grade_target_for_students(
+            recompute_ids,
+            item.grade_category,
+            item.schedule,
+        )
+    return changed
+
+
 @transaction.atomic
-def sync_grade_item(item):
+def sync_grade_item(item, *, recompute=True):
     if item.source_type == GradeItemSourceType.MANUAL or not item.schedule_id:
         return 0
+
+    if item.source_type == GradeItemSourceType.MODULE_ACTIVITY and item.module_activity_id:
+        changed = _sync_interactive_activity_item(item, recompute=recompute)
+        if changed is not None:
+            return changed
+
     students = [
         enrollment.student
         for enrollment in ScheduleStudent.objects.filter(

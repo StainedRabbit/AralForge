@@ -395,7 +395,7 @@ class GradeItem(models.Model):
         from .source_sync import sync_grade_item
 
         if self.source_type != GradeItemSourceType.MANUAL and self.schedule_id:
-            sync_grade_item(self)
+            sync_grade_item(self, recompute=False)
 
         recompute_grade_target_for_students(
             self._affected_student_ids(self), self.grade_category, self.schedule,

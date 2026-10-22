@@ -1143,18 +1143,40 @@ function assignmentVerificationMessage(
   payload: MainActivityBulkAssignmentRequest,
   errorMessage: string,
 ) {
-  const confirmed = payload.assignments.filter((assignment) => {
+  const mismatches = payload.assignments.flatMap((assignment) => {
     const links = workspace.grade_items.filter((item) =>
       item.module_activity === payload.module_activity &&
       item.schedule === assignment.schedule,
     )
-    return links.length === 1 && links[0].grade_category === assignment.grade_category
-  }).length
+    if (links.length === 1 && links[0].grade_category === assignment.grade_category) {
+      return []
+    }
+
+    const schedule = workspace.schedules.find((candidate) => candidate.id === assignment.schedule)
+    const expectedCategory = workspace.grade_categories.find(
+      (category) => category.id === assignment.grade_category,
+    )
+    const className = schedule
+      ? `${schedule.subject_code}${schedule.section ? ` ${schedule.section}` : ''}`
+      : `Class ${assignment.schedule}`
+    let currentState = 'not linked'
+    if (links.length > 1) {
+      currentState = `has ${links.length} duplicate links`
+    } else if (links.length === 1) {
+      const currentCategory = workspace.grade_categories.find(
+        (category) => category.id === links[0].grade_category,
+      )
+      currentState = `linked to ${currentCategory?.name ?? `category ${links[0].grade_category}`}`
+    }
+    const requestedCategory = expectedCategory?.name ?? `category ${assignment.grade_category}`
+    return [`${className} (${currentState}; requested ${requestedCategory})`]
+  })
   const total = payload.assignments.length
-  if (confirmed === total) {
+  const confirmed = total - mismatches.length
+  if (!mismatches.length) {
     return `${errorMessage} Verification confirms all ${total} selected class links are saved.`
   }
-  return `${errorMessage} Verification found ${confirmed} of ${total} selected class links with the requested Quiz categories. Review the links before applying again.`
+  return `${errorMessage} Verification found ${confirmed} of ${total} selected class links with the requested Quiz categories. Check ${mismatches.join('; ')} before applying again.`
 }
 
 function formatPeriod(period: GradingPeriod) {
