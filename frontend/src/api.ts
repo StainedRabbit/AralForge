@@ -294,6 +294,12 @@ async function parseResponse<T>(response: Response) {
     return (await response.blob()) as T
   }
   const hasJson = contentType.includes('application/json')
+  if (!response.ok && !hasJson) {
+    const message = response.status >= 500
+      ? `The server is temporarily unavailable (HTTP ${response.status}). Please try again.`
+      : `The server returned an unexpected response (HTTP ${response.status}).`
+    throw new ApiError(message, response.status)
+  }
   const payload = hasJson ? await response.json() : await response.text()
 
   if (!response.ok) {

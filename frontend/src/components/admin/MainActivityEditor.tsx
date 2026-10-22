@@ -810,6 +810,7 @@ function ActivityGradingAssignments({
     queryKey: queryKeys.resource(workspacePath),
     queryFn: () => api<MainActivityGradingWorkspace>(workspacePath),
     staleTime: 30_000,
+    retry: false,
   })
   const fetchedLinkedClassCount = workspaceQuery.data?.linked_class_count
 
@@ -827,7 +828,7 @@ function ActivityGradingAssignments({
     )
   }
 
-  if (workspaceQuery.error || !workspaceQuery.data) {
+  if (!workspaceQuery.data) {
     return (
       <section className="main-activity-tab-panel activity-grading-panel">
         <p className="admin-message" role="alert">
@@ -854,7 +855,13 @@ function ActivityGradingAssignments({
       activity={activity}
       api={api}
       data={scopedData}
-      refresh={async () => { await workspaceQuery.refetch() }}
+      refresh={async () => {
+        const result = await workspaceQuery.refetch()
+        if (result.error || !result.data) {
+          throw result.error ?? new Error('Grading details are unavailable.')
+        }
+        return result.data
+      }}
     />
   )
 }
@@ -868,7 +875,7 @@ function ActivityGradingAssignmentsContent({
   activity: ModuleActivity
   api: AuthedRequest
   data: ActivityGradingData
-  refresh: () => Promise<void>
+  refresh: () => Promise<MainActivityGradingWorkspace>
 }) {
   const schedules = data.schedules
   const period = activity.grading_period
@@ -896,6 +903,10 @@ function ActivityGradingAssignmentsContent({
   )
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [pendingVerification, setPendingVerification] = useState<{
+    payload: MainActivityBulkAssignmentRequest
+    errorMessage: string
+  } | null>(null)
 
   function updateDraft(scheduleId: number, changes: Partial<AssignmentDraft>) {
     setDrafts((current) => ({
@@ -920,6 +931,7 @@ function ActivityGradingAssignmentsContent({
   }
 
   async function applyAssignments() {
+    if (saving || pendingVerification) return
     const selected = schedules.filter((schedule) => drafts[schedule.id]?.selected)
     if (!selected.length) {
       setMessage('Select at least one class to assign.')
@@ -944,12 +956,39 @@ function ActivityGradingAssignmentsContent({
         '/grades/items/assign-main-activity/',
         { method: 'POST', body: JSON.stringify(payload) },
       )
-      setMessage(
-        `Assignments applied: ${result.created_count} linked, ${result.updated_count} updated. Unselected classes were unchanged.`,
-      )
-      await refresh()
+      try {
+        await refresh()
+        setMessage(
+          `Assignments applied: ${result.created_count} linked, ${result.updated_count} updated. Unselected classes were unchanged.`,
+        )
+      } catch {
+        setPendingVerification({ payload, errorMessage: 'Assignments were accepted, but the class links could not be refreshed.' })
+        setMessage('Assignments were accepted, but the class links could not be refreshed. Retry verification to see the current links.')
+      }
     } catch (error) {
-      setMessage(`Nothing was changed. ${toErrorMessage(error)}`)
+      const errorMessage = toErrorMessage(error)
+      setPendingVerification({ payload, errorMessage })
+      try {
+        const workspace = await refresh()
+        setPendingVerification(null)
+        setMessage(assignmentVerificationMessage(workspace, payload, errorMessage))
+      } catch {
+        setMessage(`${errorMessage} Unable to verify the class links. Retry verification before applying assignments again.`)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function retryVerification() {
+    if (!pendingVerification || saving) return
+    setSaving(true)
+    try {
+      const workspace = await refresh()
+      setMessage(assignmentVerificationMessage(workspace, pendingVerification.payload, pendingVerification.errorMessage))
+      setPendingVerification(null)
+    } catch {
+      setMessage(`${pendingVerification.errorMessage} Unable to verify the class links. Retry verification before applying assignments again.`)
     } finally {
       setSaving(false)
     }
@@ -958,7 +997,7 @@ function ActivityGradingAssignmentsContent({
   async function removeAssignment(scheduleId: number) {
     const schedule = schedules.find((candidate) => candidate.id === scheduleId)
     const existingItem = existingItemsBySchedule.get(scheduleId)?.[0]
-    if (!schedule || !existingItem || !window.confirm(
+    if (saving || pendingVerification || !schedule || !existingItem || !window.confirm(
       `Remove ${activity.title} from ${schedule.subject_code} ${schedule.section || ''}? Its linked scores will also be removed.`,
     )) return
     setSaving(true)
@@ -989,7 +1028,7 @@ function ActivityGradingAssignmentsContent({
         <div className="lesson-editor__actions">
           <button
             className="button button--secondary button--compact"
-            disabled={!period}
+            disabled={!period || saving || Boolean(pendingVerification)}
             onClick={() => schedules.filter((schedule) => schedule.is_active && schedule.term_is_active).forEach((schedule) => selectSchedule(schedule.id, true))}
             type="button"
           >
@@ -997,6 +1036,7 @@ function ActivityGradingAssignmentsContent({
           </button>
           <button
             className="button button--secondary button--compact"
+            disabled={saving || Boolean(pendingVerification)}
             onClick={() => schedules.forEach((schedule) => selectSchedule(schedule.id, false))}
             type="button"
           >
@@ -1016,7 +1056,7 @@ function ActivityGradingAssignmentsContent({
               <label className="activity-grading-row__select">
                 <input
                   checked={draft.selected}
-                  disabled={!period || !schedule.is_active || !schedule.term_is_active || existingItems.length > 1}
+                  disabled={saving || Boolean(pendingVerification) || !period || !schedule.is_active || !schedule.term_is_active || existingItems.length > 1}
                   onChange={(event) => selectSchedule(schedule.id, event.target.checked)}
                   type="checkbox"
                 />
@@ -1031,7 +1071,7 @@ function ActivityGradingAssignmentsContent({
               <label className="admin-field">
                 <span>Quiz category</span>
                 <select
-                  disabled={!draft.selected || !categories.length || existingItems.length > 1}
+                  disabled={saving || Boolean(pendingVerification) || !draft.selected || !categories.length || existingItems.length > 1}
                   onChange={(event) => updateDraft(schedule.id, { categoryId: event.target.value })}
                   value={draft.categoryId}
                 >
@@ -1049,7 +1089,7 @@ function ActivityGradingAssignmentsContent({
                   </Link>
                 ) : null}
                 {existingItem ? (
-                  <button className="button button--secondary button--compact" disabled={saving} onClick={() => void removeAssignment(schedule.id)} type="button">
+                  <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingVerification)} onClick={() => void removeAssignment(schedule.id)} type="button">
                     Remove
                   </button>
                 ) : null}
@@ -1068,9 +1108,14 @@ function ActivityGradingAssignmentsContent({
       </div>
       {message ? <p className="admin-message" role="status">{message}</p> : null}
       <div className="lesson-editor__actions">
+        {pendingVerification ? (
+          <button className="button button--secondary" disabled={saving} onClick={() => void retryVerification()} type="button">
+            {saving ? 'Verifying...' : 'Retry verification'}
+          </button>
+        ) : null}
         <button
           className="button button--primary"
-          disabled={saving || !schedules.some((schedule) => drafts[schedule.id]?.selected)}
+          disabled={saving || Boolean(pendingVerification) || !schedules.some((schedule) => drafts[schedule.id]?.selected)}
           onClick={() => void applyAssignments()}
           type="button"
         >
@@ -1091,6 +1136,25 @@ function quizCategoriesFor(data: ActivityGradingData, scheduleId: number, period
       category.category === 'QUIZ' &&
       category.grading_period === period,
   )
+}
+
+function assignmentVerificationMessage(
+  workspace: MainActivityGradingWorkspace,
+  payload: MainActivityBulkAssignmentRequest,
+  errorMessage: string,
+) {
+  const confirmed = payload.assignments.filter((assignment) => {
+    const links = workspace.grade_items.filter((item) =>
+      item.module_activity === payload.module_activity &&
+      item.schedule === assignment.schedule,
+    )
+    return links.length === 1 && links[0].grade_category === assignment.grade_category
+  }).length
+  const total = payload.assignments.length
+  if (confirmed === total) {
+    return `${errorMessage} Verification confirms all ${total} selected class links are saved.`
+  }
+  return `${errorMessage} Verification found ${confirmed} of ${total} selected class links with the requested Quiz categories. Review the links before applying again.`
 }
 
 function formatPeriod(period: GradingPeriod) {

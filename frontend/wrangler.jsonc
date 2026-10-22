@@ -5,6 +5,10 @@
   // and any additional bindings here. keep_vars preserves variables, not routes.
   "main": "worker/index.mjs",
   "compatibility_date": "2026-09-16",
+  "routes": [
+    { "pattern": "aralforge.com", "custom_domain": true },
+    { "pattern": "www.aralforge.com/*", "zone_name": "aralforge.com" }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

@@ -1,5 +1,6 @@
 from decimal import Decimal
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.db import connection
@@ -1218,6 +1219,14 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
             subject=self.subject, school_year_semester=term, days='TTH',
             start_time='09:00', end_time='10:00', section='B',
         )
+        self.schedule_c = SubjectSchedule.objects.create(
+            subject=self.subject, school_year_semester=term, days='MWF',
+            start_time='10:00', end_time='11:00', section='C',
+        )
+        self.schedule_d = SubjectSchedule.objects.create(
+            subject=self.subject, school_year_semester=term, days='TTH',
+            start_time='11:00', end_time='12:00', section='D',
+        )
         self.other_schedule = SubjectSchedule.objects.create(
             subject=self.other_subject, school_year_semester=term, days='MWF',
             start_time='10:00', end_time='11:00', section='C',
@@ -1263,15 +1272,77 @@ class MainActivityBulkAssignmentApiTests(APITestCase):
             {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
         ]
         created = self.assign(rows)
-        repeated = self.assign(rows)
+        with (
+            patch('grades.source_sync.sync_grade_item') as sync_grade_item,
+            patch('grades.services.recompute_grade_target_for_students') as recompute_grade_target,
+        ):
+            repeated = self.assign(rows)
 
         self.assertEqual(created.status_code, 200)
         self.assertEqual(created.data['created_count'], 2)
         self.assertEqual(created.data['updated_count'], 0)
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(repeated.data['created_count'], 0)
-        self.assertEqual(repeated.data['updated_count'], 2)
+        self.assertEqual(repeated.data['updated_count'], 0)
+        sync_grade_item.assert_not_called()
+        recompute_grade_target.assert_not_called()
         self.assertEqual(GradeItem.objects.filter(module_activity=self.activity).count(), 2)
+
+    def test_bulk_assignment_creates_missing_link_without_resaving_matches(self):
+        rows = [
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_b.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_c.id, 'grade_category': self.prelim_quiz.id},
+            {'schedule': self.schedule_d.id, 'grade_category': self.prelim_quiz.id},
+        ]
+        initial = self.assign(rows[:3])
+
+        with (
+            patch('grades.source_sync.sync_grade_item') as sync_grade_item,
+            patch('grades.services.recompute_grade_target_for_students') as recompute_grade_target,
+        ):
+            completed = self.assign(rows)
+
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.data['created_count'], 3)
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.data['created_count'], 1)
+        self.assertEqual(completed.data['updated_count'], 0)
+        self.assertEqual(len(completed.data['items']), 4)
+        self.assertEqual(GradeItem.objects.filter(module_activity=self.activity).count(), 4)
+        sync_grade_item.assert_called_once()
+        recompute_grade_target.assert_called_once()
+
+        with (
+            patch('grades.source_sync.sync_grade_item') as sync_grade_item,
+            patch('grades.services.recompute_grade_target_for_students') as recompute_grade_target,
+        ):
+            repeated = self.assign(rows)
+
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['created_count'], 0)
+        self.assertEqual(repeated.data['updated_count'], 0)
+        sync_grade_item.assert_not_called()
+        recompute_grade_target.assert_not_called()
+
+    def test_bulk_assignment_counts_real_updates_but_not_repeated_noops(self):
+        rows = [
+            {'schedule': self.schedule_a.id, 'grade_category': self.prelim_quiz.id},
+        ]
+        self.assign(rows)
+        item = GradeItem.objects.get(schedule=self.schedule_a, module_activity=self.activity)
+        GradeItem.objects.filter(pk=item.pk).update(is_required=False)
+
+        updated = self.assign(rows)
+        repeated = self.assign(rows)
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data['created_count'], 0)
+        self.assertEqual(updated.data['updated_count'], 1)
+        self.assertTrue(GradeItem.objects.get(pk=item.pk).is_required)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['created_count'], 0)
+        self.assertEqual(repeated.data['updated_count'], 0)
 
     def test_bulk_assignment_rejects_category_from_another_period(self):
         self.assign([

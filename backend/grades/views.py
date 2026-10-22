@@ -722,9 +722,20 @@ class GradeItemViewSet(viewsets.ModelViewSet):
                 'source_type': GradeItemSourceType.MODULE_ACTIVITY,
                 'module_activity': activity.id,
             }
+            if existing_item and not any((
+                existing_item.schedule_id != schedule.id,
+                existing_item.grade_category_id != category.id,
+                existing_item.title != activity.title,
+                existing_item.points_possible != activity.points_possible,
+                not existing_item.is_required,
+                existing_item.source_type != GradeItemSourceType.MODULE_ACTIVITY,
+                existing_item.module_activity_id != activity.id,
+            )):
+                items.append(existing_item)
+                continue
+
             if existing_item:
                 item_serializer = self.get_serializer(existing_item, data=values, partial=True)
-                updated_count += 1
             else:
                 maximum = GradeItem.objects.filter(
                     schedule=schedule,
@@ -732,9 +743,12 @@ class GradeItemViewSet(viewsets.ModelViewSet):
                 ).aggregate(maximum=Max('order'))['maximum']
                 values['order'] = (maximum if maximum is not None else -1) + 1
                 item_serializer = self.get_serializer(data=values)
-                created_count += 1
             item_serializer.is_valid(raise_exception=True)
             items.append(item_serializer.save())
+            if existing_item:
+                updated_count += 1
+            else:
+                created_count += 1
 
         return Response({
             'items': self.get_serializer(items, many=True).data,

@@ -41,6 +41,86 @@ async function findWorkflowLesson(page: Page) {
   })
 }
 
+test('verifies Quiz links after HTML gateway errors and preserves selections when verification fails', async ({ page }) => {
+  await signIn(page)
+  const target = await findWorkflowLesson(page)
+  expect(target).toEqual({ lesson: expect.any(Number), module: expect.any(Number), topic: expect.any(Number) })
+
+  await page.evaluate(async (lessonId) => {
+    const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
+    const activityResponse = await fetch('http://127.0.0.1:8001/api/modules/activities/?limit=100', { headers })
+    const activities = await activityResponse.json()
+    const activity = activities.results.find((candidate: { lesson: number }) => candidate.lesson === lessonId)
+    const itemsResponse = await fetch('http://127.0.0.1:8001/api/grades/items/?limit=100', { headers })
+    const items = await itemsResponse.json()
+    for (const item of items.results.filter((candidate: { module_activity: number }) => candidate.module_activity === activity.id)) {
+      const response = await fetch(`http://127.0.0.1:8001/api/grades/items/${item.id}/`, { headers, method: 'DELETE' })
+      if (!response.ok) throw new Error('Could not reset Quiz links for gateway error test.')
+    }
+  }, target.lesson)
+
+  let assignmentRequest = 0
+  let failVerification = false
+  const gatewayHtml = '<!DOCTYPE html><html><title>502: Bad gateway</title><body>Origin unavailable</body></html>'
+  await page.route('**/api/grades/items/assign-main-activity/', async (route) => {
+    assignmentRequest += 1
+    if (assignmentRequest === 3) {
+      const upstream = await route.fetch()
+      expect(upstream.status()).toBe(200)
+    }
+    if (assignmentRequest === 4) failVerification = true
+    if (assignmentRequest === 2) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ detail: 'Select an existing Quiz category.' }) })
+      return
+    }
+    await route.fulfill({ status: 502, contentType: 'text/html', body: gatewayHtml })
+  })
+  await page.route(/\/api\/modules\/activities\/\d+\/grading-workspace\//, async (route) => {
+    if (failVerification) {
+      await route.fulfill({ status: 502, contentType: 'text/html', body: gatewayHtml })
+    } else {
+      await route.continue()
+    }
+  })
+
+  await page.goto(`/admin/modules/${target.module}/topics/${target.topic}/lessons/${target.lesson}/edit`)
+  const editor = page.locator('#lesson-editor-main-activity')
+  await editor.getByRole('button', { name: /^Grading/ }).click()
+  const rows = editor.locator('.activity-grading-row')
+  await expect(rows).toHaveCount(2)
+  await editor.getByRole('button', { name: 'Select all' }).click()
+  const apply = editor.getByRole('button', { name: 'Apply selected assignments' })
+
+  await apply.click()
+  await expect(editor.getByRole('status')).toContainText('Verification found 0 of 2 selected class links')
+  await expect(editor.getByRole('status')).not.toContainText('<!DOCTYPE html>')
+  await expect(rows.nth(0).getByRole('checkbox')).toBeChecked()
+  await expect(rows.nth(1).getByRole('checkbox')).toBeChecked()
+  await expect(editor.getByText('Not linked', { exact: true })).toHaveCount(2)
+
+  await apply.click()
+  await expect(editor.getByRole('status')).toContainText('Select an existing Quiz category.')
+  await expect(editor.getByRole('status')).toContainText('Verification found 0 of 2 selected class links')
+
+  await apply.click()
+  await expect(editor.getByRole('status')).toContainText('Verification confirms all 2 selected class links are saved.')
+  await expect(editor.getByRole('link', { name: 'Open Gradebook' })).toHaveCount(2)
+
+  await apply.click()
+  await expect(editor.getByRole('status')).toContainText('Unable to verify the class links')
+  await expect(editor.getByRole('heading', { name: 'Count this Quiz in the gradebook' })).toBeVisible()
+  await expect(rows.nth(0).getByRole('checkbox')).toBeChecked()
+  await expect(rows.nth(1).getByRole('checkbox')).toBeChecked()
+  await expect(apply).toBeDisabled()
+  await expect(editor.getByRole('button', { name: 'Retry verification' })).toBeEnabled()
+
+  failVerification = false
+  await editor.getByRole('button', { name: 'Retry verification' }).click()
+  await expect(editor.getByRole('status')).toContainText('Verification confirms all 2 selected class links are saved.')
+  await expect(apply).toBeEnabled()
+  expect(assignmentRequest).toBe(4)
+})
+
 test('copies the Quiz structured-import example without changing the draft', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' })
   await signIn(page)
