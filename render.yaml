@@ -86,7 +86,7 @@ services:
       - key: API_SLOW_REQUEST_MS
         value: "750"
       - key: API_DB_TIMING_ENABLED
-        value: "False"
+        value: "True"
       - key: REDIS_URL
         sync: false
 
