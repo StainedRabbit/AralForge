@@ -48,8 +48,9 @@ test('theme follows each account across reloads and browsers', async ({ page, br
   try {
     const teacher = await teacherBrowser.newPage()
     await signIn(teacher, 'e2e-teacher')
-    await teacher.locator('.sidebar .appearance-control__details summary').click()
-    await expect(teacher.locator('.sidebar').getByRole('button', { name: 'System', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    // Earlier E2E cases may have changed this shared account's saved preference.
+    // Establish a known baseline before checking the rest of this account's flow.
+    await chooseTheme(teacher, 'System')
     await chooseTheme(teacher, 'Dark')
     await expect(teacher.getByRole('heading', { name: /Welcome back/ })).toBeVisible()
     await teacher.goto('/admin/classes')
