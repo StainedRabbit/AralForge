@@ -1045,3 +1045,9 @@
     scroll-behavior: auto;
   }
 }
+
+@media (max-width: 900px) and (max-height: 600px) {
+  .lesson-save-bar {
+    position: static;
+  }
+}

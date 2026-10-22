@@ -207,13 +207,17 @@ test('teacher routes fit representative devices and headers align with their mar
     if (viewport.width === 901) {
       await page.screenshot({ path: 'test-results/responsive-audit/quiz-grading-901x700.png' })
     }
-    await applyAssignments.evaluate((element) => element.scrollIntoView({ block: 'center' }))
-    const actionIsReachable = await applyAssignments.evaluate((element) => {
+    await applyAssignments.scrollIntoViewIfNeeded()
+    await expect.poll(() => applyAssignments.evaluate((element) => {
       const rect = element.getBoundingClientRect()
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       return Boolean(hit && (hit === element || element.contains(hit)))
-    })
-    expect(actionIsReachable, `Quiz apply action is obscured at ${viewport.width}x${viewport.height}`).toBe(true)
+    }), {
+      message: `Quiz apply action is obscured at ${viewport.width}x${viewport.height}`,
+    }).toBe(true)
+    if (viewport.width === 430 && viewport.height === 500) {
+      await page.screenshot({ path: 'test-results/responsive-audit/quiz-apply-reachable-430x500.png' })
+    }
   }
 
   await page.goto('/admin')

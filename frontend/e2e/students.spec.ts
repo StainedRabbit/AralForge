@@ -145,7 +145,7 @@ test('repeat searches reuse fresh results and profile filters get separate cache
   expect(count('E2E-001')).toBe(1)
 })
 
-test('a search older than two minutes refreshes when revisited', async ({ page }) => {
+test('a search older than one hour refreshes when revisited', async ({ page }) => {
   await openStudents(page)
   await page.clock.install()
   const requests: string[] = []
@@ -161,7 +161,7 @@ test('a search older than two minutes refreshes when revisited', async ({ page }
   await search.fill('E2E-002')
   await expect.poll(() => count('E2E-002')).toBe(1)
   await expect(page.getByRole('button', { name: 'View E2E-002' })).toBeVisible()
-  await page.clock.fastForward(120_001)
+  await page.clock.fastForward(3_600_001)
   await search.fill('E2E-001')
   await expect.poll(() => count('E2E-001')).toBe(2)
 })

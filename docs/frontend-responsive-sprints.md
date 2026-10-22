@@ -10,6 +10,7 @@ Keep the existing workflows intact while making phone, tablet, desktop, wide-scr
 - [x] Add marker, title, description, and action geometry checks at 320, 390, 768, 900, and 901px for student Modules, teacher Classes, the module editor, and Gradebook.
 - [x] Make the Gradebook controls use two columns from 901 through 1280px and stack the Gradebook panels from 901 through 1050px.
 - [x] Reflow Quiz grading assignments into two columns at narrow desktop widths so the editor stays inside the page.
+- [x] Keep the lesson save bar in normal document flow on short phone and tablet screens so it cannot cover Quiz assignment actions.
 
 ### Confirmed defects and evidence
 
@@ -18,6 +19,7 @@ Keep the existing workflows intact while making phone, tablet, desktop, wide-scr
 | P1 | `/modules`, `/admin/classes`, `/admin/modules/:id/edit`; phone and tablet widths through 900px | Open a page with a `PageHeader` at 390 or 768px. The title and sometimes its actions appear centered while the orange marker remains on the left. The Classes rule overrides the shared mobile alignment. | Corrected-layout screenshots: [student Modules](responsive-evidence/student-modules-tablet-768x1024.png), [teacher Classes](responsive-evidence/teacher-classes-tablet-768x1024.png), [module editor](responsive-evidence/teacher-module-editor-mobile-430x932.png). | Title and description share a left edge, actions start at that edge, and all sit to the right of the marker at 320, 390, 768, and 900px. The 901px header keeps its desktop row layout. |
 | P1 | `/admin/gradebook`; 901px wide desktop viewport | Open Gradebook with the desktop sidebar at 901px. Its four minimum-width controls exceed the available content area; the document measured 1,079px wide. | [Corrected layout](responsive-evidence/teacher-gradebook-901x844.png). | No document-level horizontal overflow at 901, 1024, 1160, 1161, 1280, or 1281px; controls and panels fit their available width. |
 | P1 | `/admin/modules/:moduleId/topics/:topicId/lessons/:lessonId/edit`, Quiz Grading tab; 901px | Open a lesson with a Quiz main activity, select Grading, and resize to 901px. The assignment rows retain wide desktop minimum columns, pushing the document to 1,152px. | [Corrected layout](responsive-evidence/quiz-grading-901x700.png). | The grading heading and assignment rows fit at the audited narrow desktop widths, with no document-level horizontal overflow and usable per-class controls. |
+| P1 | Lesson editor Quiz Grading tab; 430×500 | Open Quiz Grading on a short phone screen and scroll to Apply selected assignments. The sticky lesson save bar covers the Quiz action. | Before: [overlapped action](responsive-evidence/quiz-apply-obscured-430x500-before.png). After: [reachable action](responsive-evidence/quiz-apply-reachable-430x500.png). | The Apply selected assignments button receives pointer hits at short heights and remains clear of both the lesson save bar and mobile navigation. |
 
 ## Sprint 2 — Device and state audit
 
