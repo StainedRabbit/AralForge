@@ -5,6 +5,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import { ApiError } from '../../api'
+import { HOUR_MS, LIVE_STALE_MS } from '../../queries/persistentCache'
 import { Icon } from '../../components/Icon'
 import { studentQrImage, studentQrPayload } from '../../utils/studentQr'
 import { SubjectCreateDialog, TermManagementDialog } from '../../components/admin/AcademicSetupDialogs'
@@ -142,7 +143,7 @@ type CreateStudentErrors = Partial<Record<CreateStudentField, string>>
 type RosterApiItem = ScheduleStudent & {
   search_fields?: string[]
   email: string
-  grade_summary: Partial<Record<
+  grade_summary?: Partial<Record<
     'prelim' | 'midterm' | 'prefinal' | 'final' | 'overall' | 'remarks',
     string | number | null
   >>
@@ -249,7 +250,7 @@ export function AdminClassesPage({
       `/subjects/subject-schedules/${requestedScheduleId}/`, { signal },
     ),
     enabled: Boolean(requestedScheduleId),
-    staleTime: 60_000,
+    staleTime: HOUR_MS,
   })
   const requestedWorkspaceSchedule = requestedScheduleQuery.data ?? null
   const queryTermId = requestedWorkspaceSchedule
@@ -259,7 +260,7 @@ export function AdminClassesPage({
   const classSnapshotQuery = useQuery({
     queryKey: ['class-search-snapshot', queryTermId],
     enabled: Boolean(queryTermId && queryClient.getQueryData(['classes', queryTermId, serverQuery])),
-    staleTime: 120_000,
+    staleTime: HOUR_MS,
     refetchOnWindowFocus: true,
     retry: false,
     queryFn: ({ signal }) => fetchClassSnapshot(api, queryTermId, signal),
@@ -1122,7 +1123,7 @@ function ClassRoster({
     enabled: Boolean(selectedSchedule && !rosterSnapshot),
     initialPageParam: 0,
     queryKey: ['class-roster', selectedSchedule?.id, requestedRosterQuery, rosterStatus],
-    staleTime: 30_000,
+    staleTime: HOUR_MS,
     placeholderData: (previousData, previousQuery) => (
       previousQuery?.queryKey[1] === selectedSchedule?.id
       && previousQuery?.queryKey[3] === rosterStatus ? previousData : undefined
@@ -1134,6 +1135,7 @@ function ClassRoster({
         requestedRosterQuery,
         ROSTER_PAGE_SIZE,
         Number(pageParam),
+        'directory',
       ),
       { signal },
     ),
@@ -1178,8 +1180,25 @@ function ClassRoster({
     })
   }, [rosterSnapshot, localRosterKey, localRosterLimit, fetchNextServerRosterPage])
   const firstRosterPage = rosterPageQuery.data?.pages[0]
+  const gradeSummaryQuery = useQuery({
+    queryKey: ['class-roster-grades', selectedSchedule?.id, requestedRosterQuery, rosterStatus,
+      rosterPageQuery.data?.pageParams],
+    enabled: Boolean(selectedSchedule && !rosterSnapshot && rosterPageQuery.data),
+    staleTime: LIVE_STALE_MS,
+    queryFn: async ({ signal }) => {
+      const pages = rosterPageQuery.data?.pages ?? []
+      const offsets = rosterPageQuery.data?.pageParams ?? []
+      const results = await Promise.all(pages.map((_, index) => api<ApiPage<{
+        student: number; grade_summary: NonNullable<RosterApiItem['grade_summary']>
+      }>>(buildRosterPath(selectedSchedule!.id, rosterStatus, requestedRosterQuery,
+        ROSTER_PAGE_SIZE, Number(offsets[index]), 'grades'), { signal })))
+      return Object.fromEntries(results.flatMap((page) => page.results.map((row) =>
+        [row.student, row.grade_summary]))) as Record<number, NonNullable<RosterApiItem['grade_summary']>>
+    },
+  })
   const visibleRows = snapshotMatches ? snapshotMatches.slice(0, localRosterLimit).map(apiRosterRow) : rosterPageQuery.data
-    ? rosterPageQuery.data.pages.flatMap((page) => page.results.map(apiRosterRow))
+    ? rosterPageQuery.data.pages.flatMap((page) => page.results.map((row) =>
+      apiRosterRow({ ...row, grade_summary: gradeSummaryQuery.data?.[row.student] })))
     : localFilteredRows.slice(0, ROSTER_PAGE_SIZE)
   const filteredCount = snapshotMatches?.length ?? firstRosterPage?.count ?? localFilteredRows.length
   const activeCount = rosterSnapshot?.active_count ?? firstRosterPage?.active_count
@@ -1194,6 +1213,7 @@ function ClassRoster({
     await Promise.all([
       queryClient.resetQueries({ queryKey: ['class-roster-search', selectedSchedule?.id] }),
       queryClient.invalidateQueries({ queryKey: ['class-roster', selectedSchedule?.id] }),
+      queryClient.invalidateQueries({ queryKey: ['class-roster-grades', selectedSchedule?.id] }),
       queryClient.invalidateQueries({ queryKey: ['class-workspace', selectedSchedule?.id] }),
     ])
   }, [queryClient, selectedSchedule?.id])
@@ -3575,7 +3595,7 @@ function csvEscape(value: string) {
 }
 
 function apiRosterRow(enrollment: RosterApiItem): RosterRowData {
-  const summary = enrollment.grade_summary
+  const summary = enrollment.grade_summary ?? {}
   return {
     email: enrollment.email || 'None',
     enrollment,
@@ -3683,6 +3703,7 @@ function buildRosterPath(
   query: string,
   limit: number,
   offset: number,
+  view?: 'directory' | 'grades',
 ) {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -3690,6 +3711,7 @@ function buildRosterPath(
     status,
   })
   if (query) params.set('search', query)
+  if (view) params.set('view', view)
   return `/subjects/subject-schedules/${scheduleId}/roster/?${params.toString()}`
 }
 

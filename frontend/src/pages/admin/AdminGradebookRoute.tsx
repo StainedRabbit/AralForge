@@ -19,7 +19,7 @@ export function AdminGradebookRoute({ api, currentUser, profile }: {
   const scheduleList = useQuery({
     queryKey: ['gradebook-schedules'],
     queryFn: ({ signal }) => api<ApiList<SubjectSchedule>>('/subjects/subject-schedules/?status=active&limit=100', { signal }),
-    staleTime: 60_000,
+    staleTime: 60 * 60 * 1000,
   })
   const schedules = asArray(scheduleList.data ?? [])
   const scheduleId = searchParams.get('schedule') ?? schedules[0]?.id.toString() ?? ''

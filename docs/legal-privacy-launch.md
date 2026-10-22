@@ -6,7 +6,10 @@ AralForge uses essential browser and session storage only:
   persist for up to 90 inactive days by default and renew on use;
 - a short-lived access token held only in memory;
 - CSRF protection for cookie-session operations;
-- local editing drafts, interface preferences, and the storage-notice acknowledgment.
+- local editing drafts, interface preferences, and the storage-notice acknowledgment;
+- an account-scoped IndexedDB cache of non-grade page data, including rosters and
+  attendance history, used for up to one hour and cleared on sign-out. The school
+  DPO must confirm this cache retention before production rollout.
 
 The application does not include payment, subscription, refund, advertising, analytics, marketing, tracking, or public-registration features in this baseline.
 

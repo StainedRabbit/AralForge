@@ -8,9 +8,9 @@ export type LegalConfig = {
   retentionPolicy: string
 }
 
-export const STORAGE_NOTICE_VERSION = '2026-09-10'
+export const STORAGE_NOTICE_VERSION = '2026-10-22'
 export const STORAGE_NOTICE_KEY = 'aralforge.legal.storage-notice'
-export const LEGAL_DOCUMENT_VERSION = '2026-09-10'
+export const LEGAL_DOCUMENT_VERSION = '2026-10-22'
 
 const safeDefaults: LegalConfig = {
   operatorName: 'AralForge',

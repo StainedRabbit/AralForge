@@ -284,7 +284,8 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
   await expect(previewTitle.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/modules')
   await editor.getByRole('button', { name: 'Setup', exact: true }).click()
   expect(editorRequests.filter(request => request.path.includes('/grading-workspace/'))).toHaveLength(0)
-  expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`)).toBe(true)
+  expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/?view=content`)).toBe(true)
+  expect(editorRequests.some(request => request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/?view=links`)).toBe(true)
   const forbiddenInitialCollections = [
     '/api/modules/activities/',
     '/api/modules/activity-questions/',
@@ -315,9 +316,9 @@ test('bulk links a Quiz and records score-only paper submissions', async ({ page
   await atomicSave
   await expect(editor.getByText('Saved', { exact: true }).first()).toBeVisible()
   const workspaceGetsAfterSave = editorRequests.filter(
-    request => request.method === 'GET' && request.path === `/api/modules/lessons/${target.lesson}/main-activity-workspace/`,
+    request => request.method === 'GET' && request.path.includes(`/api/modules/lessons/${target.lesson}/main-activity-workspace/`),
   )
-  expect(workspaceGetsAfterSave).toHaveLength(1)
+  expect(workspaceGetsAfterSave).toHaveLength(2)
   const gradingWorkspace = page.waitForResponse(
     response => response.url().includes('/grading-workspace/') && response.request().method() === 'GET',
   )

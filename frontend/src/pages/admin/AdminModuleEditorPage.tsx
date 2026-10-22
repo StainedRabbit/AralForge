@@ -39,7 +39,7 @@ export function AdminModuleEditorPage({
     queryKey: queryKeys.resource(`/modules/modules/${numericModuleId}/`),
     queryFn: ({ signal }) => api<Module>(`/modules/modules/${numericModuleId}/`, { signal }),
     enabled: Boolean(moduleId && numericModuleId),
-    staleTime: 60_000,
+    staleTime: 60 * 60 * 1000,
   })
   const editingModule = moduleQuery.data
     ?? data.modules.find((module) => module.id === numericModuleId)

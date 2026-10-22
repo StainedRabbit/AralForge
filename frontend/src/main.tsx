@@ -4,12 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { HOUR_MS } from './queries/persistentCache'
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
-      staleTime: 30_000,
+      refetchOnWindowFocus: true,
+      staleTime: HOUR_MS,
+      gcTime: HOUR_MS,
       retry: (failureCount, error) => {
         const status = typeof error === 'object' && error && 'status' in error
           ? Number(error.status) : 0

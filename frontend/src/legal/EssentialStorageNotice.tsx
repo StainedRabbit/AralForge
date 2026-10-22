@@ -33,7 +33,8 @@ export function EssentialStorageNotice() {
         <strong id="storage-notice-title">Essential browser storage only</strong>
         <p>
           AralForge uses a Secure, HttpOnly sign-in cookie, memory-only access tokens, local editing drafts,
-          interface preferences, and this notice acknowledgment.
+          interface preferences, and a one-hour on-device cache of non-grade pages, including class rosters
+          and attendance history. Saved page data is cleared on sign-out.
           This launch does not use advertising, analytics, or marketing trackers.
         </p>
       </div>

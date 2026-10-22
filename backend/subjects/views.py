@@ -199,6 +199,9 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         schedule = get_object_or_404(self.get_base_queryset(), pk=pk)
         self.check_object_permissions(request, schedule)
         include_search_fields = request.query_params.get('include_search_fields') == '1'
+        view = request.query_params.get('view', '').strip().lower()
+        if view not in {'', 'directory', 'grades'}:
+            raise serializers.ValidationError({'view': 'Use directory or grades.'})
         if include_search_fields and not request.user.is_admin_teacher:
             raise PermissionDenied('Only teachers and administrators can prepare roster search.')
         queryset = self.filtered_roster(schedule, request)
@@ -211,12 +214,17 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
         limit = bounded_int(request.query_params.get('limit'), default=50, maximum=100)
         offset = bounded_int(request.query_params.get('offset'), default=0)
         enrollments = list(queryset[offset:offset + limit])
-        summaries = grade_summaries(schedule, enrollments)
+        summaries = grade_summaries(schedule, enrollments) if view != 'directory' else {}
         results = []
         for enrollment in enrollments:
+            if view == 'grades':
+                results.append({'student': enrollment.student_id,
+                                'grade_summary': summaries.get(enrollment.student_id, {})})
+                continue
             item = ScheduleStudentSerializer(enrollment).data
             item['email'] = enrollment.student.email
-            item['grade_summary'] = summaries.get(enrollment.student_id, {})
+            if view != 'directory':
+                item['grade_summary'] = summaries.get(enrollment.student_id, {})
             if include_search_fields:
                 student = enrollment.student
                 item['search_fields'] = [

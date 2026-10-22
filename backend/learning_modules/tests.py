@@ -2050,6 +2050,50 @@ class LearningContextMainActivityApiTests(APITestCase):
             {str(self.activity.id): 1},
         )
 
+        content = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?schedule={self.schedule_a.id}&view=content',
+        )
+        state = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?schedule={self.schedule_a.id}&view=state',
+        )
+        self.assertEqual(content.status_code, 200, content.data)
+        self.assertEqual(state.status_code, 200, state.data)
+        self.assertEqual(content.data['module']['id'], self.module.id)
+        self.assertEqual(content.data['activities'][0]['id'], self.activity.id)
+        self.assertNotIn('activity_attempts', content.data)
+        self.assertNotIn('activity_states', content.data)
+        self.assertNotIn('lesson_progress', content.data)
+        self.assertEqual([row['id'] for row in state.data['activity_attempts']], [attempt_a.id])
+        self.assertNotIn('module', state.data)
+        self.assertNotIn('topics', state.data)
+
+        forbidden_context = self.client.get(
+            f'/api/modules/modules/{self.module.id}/workspace/?schedule=999999&view=content',
+        )
+        self.assertEqual(forbidden_context.status_code, 400)
+
+    def test_activity_workspace_content_and_state_are_separate(self):
+        attempt = self.create_attempt(schedule=self.schedule_a, score='1.00')
+        self.client.force_authenticate(self.student)
+        base = f'/api/modules/activities/{self.activity.id}/workspace/?schedule={self.schedule_a.id}'
+
+        content = self.client.get(f'{base}&view=content')
+        state = self.client.get(f'{base}&view=state')
+        self.assertEqual(content.status_code, 200, content.data)
+        self.assertEqual(state.status_code, 200, state.data)
+        self.assertEqual(content.data['activity']['id'], self.activity.id)
+        self.assertIn('questions', content.data)
+        self.assertNotIn('attempts', content.data)
+        self.assertNotIn('activity_state', content.data)
+        self.assertEqual([row['id'] for row in state.data['attempts']], [attempt.id])
+        self.assertNotIn('questions', state.data)
+        self.assertNotIn('activity', state.data)
+
+        unassigned = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/workspace/?schedule=999999&view=content',
+        )
+        self.assertEqual(unassigned.status_code, 400)
+
     def test_activity_context_options_return_only_the_students_active_classes(self):
         self.schedule_a.refresh_from_db()
         self.schedule_b.refresh_from_db()
@@ -4143,11 +4187,25 @@ class LessonMainActivityApiTests(APITestCase):
             {row['prompt'] for row in response.data['questions']},
         )
 
+        content = self.client.get(
+            f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/?view=content',
+        )
+        links = self.client.get(
+            f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/?view=links',
+        )
+        self.assertEqual(content.status_code, 200, content.data)
+        self.assertEqual(links.status_code, 200, links.data)
+        self.assertNotIn('linked_class_count', content.data)
+        self.assertEqual(links.data, {'linked_class_count': 0})
+
         self.client.force_authenticate(self.student)
         forbidden = self.client.get(
             f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/',
         )
         self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(self.client.get(
+            f'/api/modules/lessons/{self.lesson.id}/main-activity-workspace/?view=content',
+        ).status_code, 403)
 
     def test_grading_workspace_is_activity_scoped(self):
         school_year = SchoolYear.objects.create(start_year=2026, end_year=2027)

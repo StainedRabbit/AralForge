@@ -108,15 +108,17 @@ def bounded_int(value, default=0, maximum=None):
     return min(number, maximum) if maximum is not None else number
 
 
-def serialize_main_activity_editor_workspace(activity, request):
+def serialize_main_activity_editor_workspace(activity, request, *, include_link_count=True):
     if not activity:
-        return {
+        result = {
             'activity': None,
             'questions': [],
             'choices': [],
             'matching_pairs': [],
-            'linked_class_count': 0,
         }
+        if include_link_count:
+            result['linked_class_count'] = 0
+        return result
     questions = list(activity.questions.prefetch_related(
         Prefetch(
             'choices',
@@ -132,7 +134,7 @@ def serialize_main_activity_editor_workspace(activity, request):
         pair for question in questions for pair in question.matching_pairs.all()
     ]
     context = {'request': request}
-    return {
+    result = {
         'activity': ModuleActivitySerializer(activity, context=context).data,
         'questions': ModuleActivityQuestionSerializer(
             questions,
@@ -149,11 +151,13 @@ def serialize_main_activity_editor_workspace(activity, request):
             many=True,
             context=context,
         ).data,
-        'linked_class_count': GradeItem.objects.filter(
+    }
+    if include_link_count:
+        result['linked_class_count'] = GradeItem.objects.filter(
             module_activity=activity,
             schedule__isnull=False,
-        ).values('schedule_id').distinct().count(),
-    }
+        ).values('schedule_id').distinct().count()
+    return result
 
 
 def serialize_attempt_with_state(attempt, request, *, created=False):
@@ -486,30 +490,27 @@ class ModuleViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def workspace(self, request, pk=None):
+        workspace_view = request.query_params.get('view')
+        if workspace_view not in (None, 'content', 'state'):
+            raise serializers.ValidationError({'view': 'Choose content or state.'})
+        include_content = workspace_view != 'state'
+        include_state = workspace_view != 'content'
         module = self.get_object()
         context = {'request': request}
         subjects = Subject.objects.filter(modules=module) | Subject.objects.filter(
             learning_module=module,
         )
-        if (
-            not request.user.is_admin_teacher
-            and not user_has_module_access(request.user, module)
-        ):
-            return response.Response({
+        if not request.user.is_admin_teacher and not user_has_module_access(request.user, module):
+            content_data = {
                 'module': ModuleSerializer(module, context=context).data,
-                'topics': [],
-                'lessons': [],
-                'lesson_examples': [],
-                'lesson_progress': [],
+                'topics': [], 'lessons': [], 'lesson_examples': [],
                 'activities': [],
-                'activity_attempts': [],
-                'activity_states': [],
-                'subjects': SubjectSerializer(
-                    subjects,
-                    many=True,
-                    context=context,
-                ).data,
-            })
+                'subjects': SubjectSerializer(subjects, many=True, context=context).data,
+            } if include_content else {}
+            state_data = {
+                'lesson_progress': [], 'activity_attempts': [], 'activity_states': [],
+            } if include_state else {}
+            return response.Response({**content_data, **state_data})
 
         topics = ModuleTopic.objects.filter(module=module)
         lessons = ModuleLesson.objects.filter(topic__module=module)
@@ -521,68 +522,60 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 Q(lesson__isnull=True)
                 | Q(lesson__is_published=True, lesson__topic__is_published=True)
             )
-        activities = list(activities)
-        examples = ModuleLessonExample.objects.filter(lesson__in=lessons)
-        legacy_history_counts = {}
-        if not request.user.is_admin_teacher:
             context_type, schedule = request_learning_context(request, module)
-            context_filter = learning_context_query(context_type, schedule)
-            lesson_progress = ModuleLessonProgress.objects.filter(
-                lesson__in=lessons,
-                student=request.user,
-                **context_filter,
-            )
-            attempts = list(ModuleActivityAttempt.objects.filter(
-                activity__in=activities,
-                student=request.user,
-                **context_filter,
-            ).defer('question_snapshot', 'draft_answers'))
-            legacy_rows = ModuleActivityAttempt.objects.filter(
-                activity__in=activities,
-                student=request.user,
-                context_type=LearningContextType.LEGACY,
-            ).values('activity_id').annotate(count=Count('id'))
-            legacy_history_counts = {
-                str(row['activity_id']): row['count']
-                for row in legacy_rows
+        activities = list(activities)
+        content_data = {}
+        if include_content:
+            examples = ModuleLessonExample.objects.filter(lesson__in=lessons)
+            content_data = {
+                'module': ModuleSerializer(module, context=context).data,
+                'topics': ModuleTopicSerializer(topics, many=True, context=context).data,
+                'lessons': ModuleLessonSerializer(lessons, many=True, context=context).data,
+                'lesson_examples': ModuleLessonExampleSerializer(examples, many=True, context=context).data,
+                'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
+                'subjects': SubjectSerializer(subjects, many=True, context=context).data,
             }
-        else:
-            lesson_progress = ModuleLessonProgress.objects.none()
-            attempts = []
-        return response.Response({
-            'module': ModuleSerializer(module, context=context).data,
-            'topics': ModuleTopicSerializer(topics, many=True, context=context).data,
-            'lessons': ModuleLessonSerializer(lessons, many=True, context=context).data,
-            'lesson_examples': ModuleLessonExampleSerializer(examples, many=True, context=context).data,
-            'lesson_progress': ModuleLessonProgressSerializer(lesson_progress, many=True, context=context).data,
-            'activities': ModuleActivitySerializer(activities, many=True, context=context).data,
-            'activity_attempts': ModuleActivityAttemptSummarySerializer(
-                attempts,
-                many=True,
-                context=context,
-            ).data,
-            'subjects': SubjectSerializer(
-                subjects,
-                many=True, context=context,
-            ).data,
-            'activity_states': (
-                activity_states_for_attempts(activities, attempts)
-                if not request.user.is_admin_teacher
-                else []
-            ),
-            'learning_context': {
-                'context_type': context_type if not request.user.is_admin_teacher else None,
-                'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
-                'label': (
-                    f'{schedule.subject.code} {schedule.section}'.strip()
-                    if not request.user.is_admin_teacher and schedule
-                    else 'Personal Study'
-                    if not request.user.is_admin_teacher
-                    else 'Teacher preview'
+        state_data = {}
+        if include_state:
+            legacy_history_counts = {}
+            if not request.user.is_admin_teacher:
+                context_filter = learning_context_query(context_type, schedule)
+                lesson_progress = ModuleLessonProgress.objects.filter(
+                    lesson__in=lessons, student=request.user, **context_filter,
+                )
+                attempts = list(ModuleActivityAttempt.objects.filter(
+                    activity__in=activities, student=request.user, **context_filter,
+                ).defer('question_snapshot', 'draft_answers'))
+                legacy_rows = ModuleActivityAttempt.objects.filter(
+                    activity__in=activities, student=request.user,
+                    context_type=LearningContextType.LEGACY,
+                ).values('activity_id').annotate(count=Count('id'))
+                legacy_history_counts = {
+                    str(row['activity_id']): row['count'] for row in legacy_rows
+                }
+            else:
+                lesson_progress = ModuleLessonProgress.objects.none()
+                attempts = []
+            state_data = {
+                'lesson_progress': ModuleLessonProgressSerializer(lesson_progress, many=True, context=context).data,
+                'activity_attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
+                'activity_states': (
+                    activity_states_for_attempts(activities, attempts)
+                    if not request.user.is_admin_teacher else []
                 ),
-            },
-            'legacy_history_counts': legacy_history_counts,
-        })
+                'learning_context': {
+                    'context_type': context_type if not request.user.is_admin_teacher else None,
+                    'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
+                    'label': (
+                        f'{schedule.subject.code} {schedule.section}'.strip()
+                        if not request.user.is_admin_teacher and schedule
+                        else 'Personal Study' if not request.user.is_admin_teacher
+                        else 'Teacher preview'
+                    ),
+                },
+                'legacy_history_counts': legacy_history_counts,
+            }
+        return response.Response({**content_data, **state_data})
 
     @decorators.action(
         detail=True,
@@ -1115,13 +1108,24 @@ class ModuleLessonViewSet(viewsets.ModelViewSet):
     def main_activity_workspace(self, request, pk=None):
         if not request.user.is_admin_teacher:
             raise PermissionDenied('Only teachers can open the Quiz editor workspace.')
+        workspace_view = request.query_params.get('view')
+        if workspace_view not in (None, 'content', 'links'):
+            raise serializers.ValidationError({'view': 'Choose content or links.'})
         lesson = self.get_object()
         activity = ModuleActivity.objects.filter(lesson=lesson).select_related(
             'module',
             'topic',
             'lesson',
         ).first()
-        return response.Response(serialize_main_activity_editor_workspace(activity, request))
+        if workspace_view == 'links':
+            return response.Response({
+                'linked_class_count': GradeItem.objects.filter(
+                    module_activity=activity, schedule__isnull=False,
+                ).values('schedule_id').distinct().count() if activity else 0,
+            })
+        return response.Response(serialize_main_activity_editor_workspace(
+            activity, request, include_link_count=workspace_view != 'content',
+        ))
 
     @decorators.action(
         detail=True,
@@ -1606,51 +1610,62 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=True, methods=['get'])
     def workspace(self, request, pk=None):
+        workspace_view = request.query_params.get('view')
+        if workspace_view not in (None, 'content', 'state'):
+            raise serializers.ValidationError({'view': 'Choose content or state.'})
+        include_content = workspace_view != 'state'
+        include_state = workspace_view != 'content'
         activity = self.get_object()
-        questions = ModuleActivityQuestion.objects.filter(activity=activity).prefetch_related(
-            Prefetch(
-                'choices',
-                queryset=ModuleActivityQuestionChoice.objects.order_by('order', 'id'),
-            ),
-            Prefetch(
-                'matching_pairs',
-                queryset=ModuleActivityMatchingPair.objects.order_by('order', 'id'),
-            ),
-        )
-        if not request.user.is_admin_teacher:
-            questions = questions.filter(is_published=True)
-        attempts = ModuleActivityAttempt.objects.filter(activity=activity)
-        submissions = ModuleActivitySubmission.objects.filter(activity=activity)
         if not request.user.is_admin_teacher:
             context_type, schedule = request_learning_context(request, activity.module)
-            attempts = attempts.filter(
-                student=request.user,
-                **learning_context_query(context_type, schedule),
-            )
-            submissions = submissions.filter(student=request.user)
-        attempts = list(attempts)
         context = {'request': request}
-        return response.Response({
-            'activity': ModuleActivitySerializer(activity, context=context).data,
-            'module': ModuleSerializer(activity.module, context=context).data,
-            'questions': ModuleActivityQuestionSerializer(questions, many=True, context=context).data,
-            'attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
-            'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,
-            'learning_context': {
+        content_data = {}
+        if include_content:
+            questions = ModuleActivityQuestion.objects.filter(activity=activity).prefetch_related(
+                Prefetch(
+                    'choices',
+                    queryset=ModuleActivityQuestionChoice.objects.order_by('order', 'id'),
+                ),
+                Prefetch(
+                    'matching_pairs',
+                    queryset=ModuleActivityMatchingPair.objects.order_by('order', 'id'),
+                ),
+            )
+            if not request.user.is_admin_teacher:
+                questions = questions.filter(is_published=True)
+            content_data = {
+                'activity': ModuleActivitySerializer(activity, context=context).data,
+                'module': ModuleSerializer(activity.module, context=context).data,
+                'questions': ModuleActivityQuestionSerializer(questions, many=True, context=context).data,
+            }
+        state_data = {}
+        if include_state:
+            attempts = ModuleActivityAttempt.objects.filter(activity=activity)
+            submissions = ModuleActivitySubmission.objects.filter(activity=activity)
+            if not request.user.is_admin_teacher:
+                attempts = attempts.filter(
+                    student=request.user,
+                    **learning_context_query(context_type, schedule),
+                )
+                submissions = submissions.filter(student=request.user)
+            attempts = list(attempts)
+            state_data = {
+                'attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
+                'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,
+                'learning_context': {
                 'context_type': context_type if not request.user.is_admin_teacher else None,
                 'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
-            },
-            'activity_state': (
-                evaluate_main_activity_state(activity, attempts)
-                if not request.user.is_admin_teacher
-                else None
-            ),
-            'legacy_history_count': ModuleActivityAttempt.objects.filter(
-                activity=activity,
-                student=request.user,
-                context_type=LearningContextType.LEGACY,
-            ).count() if not request.user.is_admin_teacher else 0,
-        })
+                },
+                'activity_state': (
+                    evaluate_main_activity_state(activity, attempts)
+                    if not request.user.is_admin_teacher else None
+                ),
+                'legacy_history_count': ModuleActivityAttempt.objects.filter(
+                    activity=activity, student=request.user,
+                    context_type=LearningContextType.LEGACY,
+                ).count() if not request.user.is_admin_teacher else 0,
+            }
+        return response.Response({**content_data, **state_data})
 
     @decorators.action(detail=True, methods=['get'], url_path='legacy-history')
     def legacy_history(self, request, pk=None):

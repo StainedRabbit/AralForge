@@ -8,6 +8,8 @@ import { toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 import type { AdminColumn, AdminField } from './AdminResourcePanel'
 import { SectionHeading } from '../ui'
+import { HOUR_MS, LIVE_STALE_MS, isPersistableQueryKey } from '../../queries/persistentCache'
+import { queryKeys } from '../../queries/queryKeys'
 
 type DraftValue = boolean | File | null | string | string[]
 type ProgressivePage<T> = {
@@ -71,7 +73,7 @@ export function ProgressiveAdminResourcePanel<TItem extends { id: number }>({
     },
     getNextPageParam: (lastPage) => nextOffset(lastPage.next),
     retry: false,
-    staleTime: 60_000,
+    staleTime: isPersistableQueryKey(queryKey) ? HOUR_MS : LIVE_STALE_MS,
   })
   const rows = pageQuery.data?.pages.flatMap((page) => page.results) ?? []
   const count = pageQuery.data?.pages[0]?.count ?? 0
@@ -306,7 +308,7 @@ function RemoteRelatedSelect({ api, disabled, fieldName, label, nullable, onChan
       const separator = config.endpoint.includes('?') ? '&' : '?'
       return api<ApiList<Record<string, unknown>>>(`${config.endpoint}${separator}limit=20&search=${encodeURIComponent(debounced)}`, { signal })
     },
-    staleTime: 60_000,
+    staleTime: isPersistableQueryKey(queryKeys.resource(config.endpoint)) ? HOUR_MS : LIVE_STALE_MS,
   })
   const options = asArray(optionsQuery.data ?? [])
   return <div className="remote-select"><label className="admin-field"><span>Find {label.toLowerCase()}</span><input disabled={disabled} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`} type="search" value={search} /></label><label className="admin-field"><span>{label}</span><select disabled={disabled || optionsQuery.isPending} onChange={(event) => onChange(event.target.value)} required={!nullable} value={value}><option value="">{nullable ? 'None' : optionsQuery.isPending ? 'Loading options...' : 'Select'}</option>{options.map((item) => <option key={String(item.id)} value={String(item.id)}>{config.label(item)}</option>)}{value && !options.some((item) => String(item.id) === value) ? <option value={value}>Selected #{value}</option> : null}</select></label></div>

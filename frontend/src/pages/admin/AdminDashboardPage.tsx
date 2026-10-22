@@ -75,6 +75,7 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
     queryKey: ['full-backup', backupId],
     queryFn: ({ signal }) => api<BackupJob>(`/jobs/${backupId}/`, { signal }),
     enabled: currentUser.role === 'ADMIN' && Boolean(backupId),
+    staleTime: 0,
     refetchInterval: query => ['PENDING', 'RUNNING'].includes(query.state.data?.status ?? '') ? 2000 : false,
   })
 

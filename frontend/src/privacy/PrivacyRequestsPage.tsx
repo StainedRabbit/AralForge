@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { LIVE_STALE_MS } from '../queries/persistentCache'
 import type { AuthedRequest } from '../app/types'
 import { Icon } from '../components/Icon'
 import { EmptyState, Page, PageHeader, StatusBanner } from '../components/ui'
@@ -16,6 +17,7 @@ export function PrivacyRequestsPage({ api, currentUser }: { api: AuthedRequest; 
   const query = useQuery({
     queryKey: ['privacy', 'requests'],
     queryFn: ({ signal }) => api<ApiPage<PrivacyRequestRecord>>('/privacy/requests/', { signal }),
+    staleTime: LIVE_STALE_MS,
   })
   const [requestType, setRequestType] = useState<keyof typeof requestLabels>('ACCESS')
   const [details, setDetails] = useState('')

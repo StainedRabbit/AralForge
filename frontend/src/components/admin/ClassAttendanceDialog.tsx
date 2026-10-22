@@ -88,7 +88,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
       { signal },
     ),
     enabled: tab === 'history',
-    staleTime: 30_000,
+    staleTime: 60 * 60 * 1000,
   })
   const attendanceData = useMemo<RouteData>(() => ({
     ...data,

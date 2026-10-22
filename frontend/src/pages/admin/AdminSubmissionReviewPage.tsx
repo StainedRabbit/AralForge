@@ -39,6 +39,7 @@ export function AdminSubmissionReviewPage({ api }: { api: AuthedRequest }) {
     enabled: Number.isInteger(submissionId) && submissionId > 0,
     queryKey: ['submission-review', submissionId],
     queryFn: ({ signal }) => api<SubmissionReview>(`/modules/submissions/${submissionId}/review/`, { signal }),
+    staleTime: 30_000,
   })
 
   const gradeMutation = useMutation({

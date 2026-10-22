@@ -9,6 +9,7 @@ import { MarkdownEditor } from '../../components/MarkdownEditor'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatusBanner } from '../../components/ui'
 import { usePaginatedResource } from '../../queries/useScopedWorkspace'
 import { queryKeys } from '../../queries/queryKeys'
+import { HOUR_MS, LIVE_STALE_MS } from '../../queries/persistentCache'
 import type {
   MainActivityEditorWorkspace,
   Module,
@@ -103,19 +104,19 @@ export function AdminLessonEditorPage({
     queryKey: queryKeys.resource(`/modules/modules/${numericModuleId}/`),
     queryFn: ({ signal }) => api<Module>(`/modules/modules/${numericModuleId}/`, { signal }),
     enabled: Boolean(numericModuleId),
-    staleTime: 60_000,
+    staleTime: HOUR_MS,
   })
   const topicQuery = useQuery({
     queryKey: queryKeys.resource(`/modules/topics/${numericTopicId}/`),
     queryFn: ({ signal }) => api<ModuleTopic>(`/modules/topics/${numericTopicId}/`, { signal }),
     enabled: Boolean(numericTopicId),
-    staleTime: 60_000,
+    staleTime: HOUR_MS,
   })
   const lessonQuery = useQuery({
     queryKey: queryKeys.resource(`/modules/lessons/${numericLessonId}/`),
     queryFn: ({ signal }) => api<ModuleLesson>(`/modules/lessons/${numericLessonId}/`, { signal }),
     enabled: Boolean(numericLessonId),
-    staleTime: 60_000,
+    staleTime: HOUR_MS,
   })
   const examplesQuery = usePaginatedResource<ModuleLessonExample>(
     api,
@@ -126,20 +127,30 @@ export function AdminLessonEditorPage({
   const mainActivityWorkspacePath = numericLessonId
     ? `/modules/lessons/${numericLessonId}/main-activity-workspace/`
     : null
+  const mainActivityContentPath = mainActivityWorkspacePath
+    ? `${mainActivityWorkspacePath}?view=content` : null
+  const mainActivityLinksPath = mainActivityWorkspacePath
+    ? `${mainActivityWorkspacePath}?view=links` : null
   const mainActivityWorkspaceQuery = useQuery({
-    queryKey: queryKeys.resource(mainActivityWorkspacePath ?? 'main-activity-workspace-disabled'),
-    queryFn: () => api<MainActivityEditorWorkspace>(mainActivityWorkspacePath!),
-    enabled: Boolean(mainActivityWorkspacePath),
-    staleTime: 60_000,
+    queryKey: queryKeys.resource(mainActivityContentPath ?? 'main-activity-workspace-disabled'),
+    queryFn: () => api<Omit<MainActivityEditorWorkspace, 'linked_class_count'>>(mainActivityContentPath!),
+    enabled: Boolean(mainActivityContentPath),
+    staleTime: HOUR_MS,
+  })
+  const mainActivityLinksQuery = useQuery({
+    queryKey: queryKeys.resource(mainActivityLinksPath ?? 'main-activity-links-disabled'),
+    queryFn: () => api<Pick<MainActivityEditorWorkspace, 'linked_class_count'>>(mainActivityLinksPath!),
+    enabled: Boolean(mainActivityLinksPath),
+    staleTime: LIVE_STALE_MS,
   })
   const isEditing = Boolean(lessonId)
   const isPending = moduleQuery.isPending || topicQuery.isPending ||
     (isEditing && (
-      lessonQuery.isPending || examplesQuery.isPending || mainActivityWorkspaceQuery.isPending
+      lessonQuery.isPending || examplesQuery.isPending || mainActivityWorkspaceQuery.isPending || mainActivityLinksQuery.isPending
     ))
   const queryError = moduleQuery.error || topicQuery.error ||
     (isEditing
-      ? lessonQuery.error || examplesQuery.error || mainActivityWorkspaceQuery.error
+      ? lessonQuery.error || examplesQuery.error || mainActivityWorkspaceQuery.error || mainActivityLinksQuery.error
       : null)
 
   if (isPending) {
@@ -177,7 +188,7 @@ export function AdminLessonEditorPage({
       moduleQuery.refetch(),
       topicQuery.refetch(),
       ...(isEditing
-        ? [lessonQuery.refetch(), examplesQuery.refetch(), mainActivityWorkspaceQuery.refetch()]
+        ? [lessonQuery.refetch(), examplesQuery.refetch(), mainActivityWorkspaceQuery.refetch(), mainActivityLinksQuery.refetch()]
         : []),
     ])
   }
@@ -186,13 +197,21 @@ export function AdminLessonEditorPage({
     <AdminLessonEditorForm
       api={api}
       data={scopedData}
-      mainActivityLinkedClassCount={mainActivityWorkspaceQuery.data?.linked_class_count ?? 0}
+      mainActivityLinkedClassCount={mainActivityLinksQuery.data?.linked_class_count ?? 0}
       onMainActivityWorkspaceSaved={(workspace) => {
-        if (mainActivityWorkspacePath) {
+        if (mainActivityContentPath && mainActivityLinksPath) {
           queryClient.setQueryData(
-            queryKeys.resource(mainActivityWorkspacePath),
-            workspace,
+            queryKeys.resource(mainActivityContentPath),
+            {
+              activity: workspace.activity,
+              questions: workspace.questions,
+              choices: workspace.choices,
+              matching_pairs: workspace.matching_pairs,
+            },
           )
+          queryClient.setQueryData(queryKeys.resource(mainActivityLinksPath), {
+            linked_class_count: workspace.linked_class_count,
+          })
         }
       }}
       refresh={refreshScopedData}

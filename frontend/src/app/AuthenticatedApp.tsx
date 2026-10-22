@@ -1,4 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import type { Session } from '../api'
@@ -9,10 +9,11 @@ import type { LearningContextMetadata } from './types'
 import { Icon } from '../components/Icon'
 import { MobileNavigation, Sidebar } from '../components/navigation'
 import { RouteWorkspace } from '../components/RouteWorkspace'
-import { EndpointWorkspace } from '../components/EndpointWorkspace'
+import { EndpointWorkspace, SplitEndpointWorkspace } from '../components/EndpointWorkspace'
 import { Page, PageHeader, SkeletonList, StatusBanner } from '../components/ui'
 import { useAuthenticatedRequest } from '../hooks/useAuthenticatedRequest'
 import { queryKeys } from '../queries/queryKeys'
+import { LIVE_STALE_MS, startPersistentCache } from '../queries/persistentCache'
 import type { FinalGrade, GradeCategory, LevelRule, MainActivityState, Module, ModuleActivity, ModuleActivityAttempt, ModuleActivitySubmission, ModuleLesson, ModuleLessonExample, ModuleLessonProgress, ModuleTopic, PeriodGrade, PointLedger, ScheduleStudent, StudentCategoryGrade, Subject, SubjectSchedule } from '../types'
 
 const AdminApp = lazy(() => import('./AdminApp').then(module => ({ default: module.AdminApp })))
@@ -33,12 +34,27 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
 }) {
   const api = useAuthenticatedRequest(session, setSession, onSessionExpired)
   const location = useLocation()
-  const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: 600_000 })
+  const identity = useQuery({ queryKey: queryKeys.me, queryFn: ({ signal }) => api<Identity>('/accounts/users/me/', { signal }), staleTime: LIVE_STALE_MS })
   const queryClient = useQueryClient()
+  const [cacheReadyFor, setCacheReadyFor] = useState<number | null>(null)
+  const verifiedUserId = identity.data?.user.id
+  useEffect(() => {
+    if (!verifiedUserId) return
+    let disposed = false
+    let stop: () => void = () => undefined
+    void startPersistentCache(queryClient, verifiedUserId).then((unsubscribe) => {
+      if (disposed) unsubscribe()
+      else {
+        stop = unsubscribe
+        setCacheReadyFor(verifiedUserId)
+      }
+    })
+    return () => { disposed = true; stop() }
+  }, [queryClient, verifiedUserId])
   useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: ({ signal }) => api<unknown>('/overview/dashboard/', { signal }),
-    staleTime: 30_000,
+    staleTime: LIVE_STALE_MS,
     enabled: location.pathname === '/',
   })
   const [selectedTheme, setSelectedTheme] = useState<ThemePreference | null>(null)
@@ -72,10 +88,11 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
   const isAdminTeacher = Boolean(
     identity.data?.user.is_admin_teacher || identity.data?.user.role === 'ADMIN',
   )
-  const navigation = useQuery({ queryKey: queryKeys.navigation, queryFn: ({ signal }) => api<Navigation>('/overview/navigation/', { signal }), staleTime: 30_000, enabled: isAdminTeacher })
+  const navigation = useQuery({ queryKey: queryKeys.navigation, queryFn: ({ signal }) => api<Navigation>('/overview/navigation/', { signal }), staleTime: LIVE_STALE_MS, enabled: isAdminTeacher })
 
   if (identity.isPending) return <main className="app-main"><Page><SkeletonList count={4} /></Page></main>
   if (!identity.data || identity.error) return <main className="app-main"><Page><StatusBanner tone="warning" title="Account could not load" message="Please try loading your account again." /><button className="button button--secondary" type="button" disabled={identity.isFetching} onClick={() => void identity.refetch()}>{identity.isFetching ? 'Retrying…' : 'Retry'}</button></Page></main>
+  if (cacheReadyFor !== identity.data.user.id) return <main className="app-main"><Page><SkeletonList count={4} /></Page></main>
   const { user, student_profile: profile } = identity.data
   const pendingCount = navigation.data?.pending_count ?? 0
   if (isAdminTeacher) return <Suspense fallback={<main className="app-main"><Page><SkeletonList count={4} /></Page></main>}><AdminApp api={api} currentUser={user} profile={profile} pendingCount={pendingCount} onLogout={onLogout} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} /></Suspense>
@@ -107,6 +124,8 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
 
 type WorkspaceRouteProps = { api: ReturnType<typeof useAuthenticatedRequest>; currentUser: User; profile: StudentProfile | null }
 type ModuleWorkspace = { module: Module; topics: ModuleTopic[]; lessons: ModuleLesson[]; lesson_examples: ModuleLessonExample[]; lesson_progress: ModuleLessonProgress[]; activities: ModuleActivity[]; activity_attempts: ModuleActivityAttempt[]; activity_states: MainActivityState[]; subjects: Subject[]; learning_context: LearningContextMetadata; legacy_history_counts: Record<number, number> }
+type ModuleContent = Pick<ModuleWorkspace, 'module' | 'topics' | 'lessons' | 'lesson_examples' | 'activities' | 'subjects'>
+type ModuleState = Pick<ModuleWorkspace, 'lesson_progress' | 'activity_attempts' | 'activity_states' | 'learning_context' | 'legacy_history_counts'>
 function ModuleWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
   const { moduleId } = useParams()
   const [searchParams] = useSearchParams()
@@ -119,10 +138,12 @@ function ModuleWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps
     ? `schedule=${requestedSchedule}`
     : 'context=PERSONAL'
   const path = `/modules/modules/${Number(moduleId)}/workspace/?${context}`
-  return <EndpointWorkspace<ModuleWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ modules: [payload.module], moduleTopics: payload.topics, moduleLessons: payload.lessons, lessonExamples: payload.lesson_examples, lessonProgress: payload.lesson_progress, activities: payload.activities, activityAttempts: payload.activity_attempts, activityStates: payload.activity_states, subjects: payload.subjects, learningContext: payload.learning_context, legacyHistoryCounts: payload.legacy_history_counts })}>{data => <ModuleDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
+  return <SplitEndpointWorkspace<ModuleContent, ModuleState> api={api} currentUser={currentUser} profile={profile} contentPath={`${path}&view=content`} statePath={`${path}&view=state`} map={(content, state) => ({ modules: [content.module], moduleTopics: content.topics, moduleLessons: content.lessons, lessonExamples: content.lesson_examples, lessonProgress: state.lesson_progress, activities: content.activities, activityAttempts: state.activity_attempts, activityStates: state.activity_states, subjects: content.subjects, learningContext: state.learning_context, legacyHistoryCounts: state.legacy_history_counts })}>{data => <ModuleDetailPage api={api} data={data} refresh={data.refresh} />}</SplitEndpointWorkspace>
 }
 
 type ActivityWorkspace = { activity: ModuleActivity; module: Module; attempts: ModuleActivityAttempt[]; submissions: ModuleActivitySubmission[] }
+type ActivityContent = Pick<ActivityWorkspace, 'activity' | 'module'>
+type ActivityState = Pick<ActivityWorkspace, 'attempts' | 'submissions'>
 function ActivityWorkspaceRoute({ api, currentUser, profile }: WorkspaceRouteProps) {
   const { activityId } = useParams()
   const [searchParams] = useSearchParams()
@@ -135,7 +156,7 @@ function ActivityWorkspaceRoute({ api, currentUser, profile }: WorkspaceRoutePro
     ? `schedule=${requestedSchedule}`
     : 'context=PERSONAL'
   const path = `/modules/activities/${Number(activityId)}/workspace/?${context}`
-  return <EndpointWorkspace<ActivityWorkspace> api={api} currentUser={currentUser} profile={profile} path={path} map={payload => ({ activities: [payload.activity], modules: [payload.module], activityAttempts: payload.attempts, submissions: payload.submissions })}>{data => <ActivityDetailPage api={api} data={data} refresh={data.refresh} />}</EndpointWorkspace>
+  return <SplitEndpointWorkspace<ActivityContent, ActivityState> api={api} currentUser={currentUser} profile={profile} contentPath={`${path}&view=content`} statePath={`${path}&view=state`} map={(content, state) => ({ activities: [content.activity], modules: [content.module], activityAttempts: state.attempts, submissions: state.submissions })}>{data => <ActivityDetailPage api={api} data={data} refresh={data.refresh} />}</SplitEndpointWorkspace>
 }
 
 type ActivityContextOption = { context_type: 'CLASS' | 'PERSONAL'; schedule: number | null; label: string }
@@ -152,7 +173,7 @@ function ActivityContextResolver({ api, activityId }: { api: WorkspaceRouteProps
   const query = useQuery({
     queryKey: queryKeys.resource(path),
     queryFn: ({ signal }) => api<ActivityContextOptions>(path, { signal }),
-    staleTime: 60_000,
+    staleTime: LIVE_STALE_MS,
   })
 
   if (query.isPending) return <Page><SkeletonList count={3} /></Page>

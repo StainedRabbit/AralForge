@@ -9,6 +9,7 @@ import { Icon } from '../../components/Icon'
 import { ManageStudentModulesDialog } from '../../components/admin/ManageStudentModulesDialog'
 import { usePaginatedResource, useScopedWorkspace } from '../../queries/useScopedWorkspace'
 import { queryKeys } from '../../queries/queryKeys'
+import { HOUR_MS } from '../../queries/persistentCache'
 import { fullRecordName } from '../../utils/student'
 import { countReplacementCharacters, replacementCharacterWarning } from '../../utils/textFile'
 import { toErrorMessage } from '../../utils/format'
@@ -61,7 +62,7 @@ export function AdminStudentsPage({ api, data }: Props) {
   const queryClient = useQueryClient()
   const directory = useInfiniteQuery({
     queryKey: ['student-directory', search, status],
-    staleTime: 120_000,
+    staleTime: HOUR_MS,
     refetchOnWindowFocus: true,
     initialPageParam: '',
     queryFn: ({ pageParam, signal }) => {

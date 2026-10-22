@@ -148,7 +148,7 @@ export function AdminGradebookPage({
       if (debouncedSourceQuery.trim()) params.set('search', debouncedSourceQuery.trim())
       return api<ApiPage<{ value: number; label: string; points: string | number }>>(`/grades/source-options/?${params.toString()}`, { signal })
     },
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
   const sourceOptions = (sourceOptionQuery.data?.results ?? []).map((option) => ({
     ...option,

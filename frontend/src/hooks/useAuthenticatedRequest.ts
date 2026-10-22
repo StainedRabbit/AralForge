@@ -1,14 +1,17 @@
 import { useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, getActiveAccessToken, getActiveSessionVersion, refreshToken, requestWithToken } from '../api'
 import type { RequestOptions, Session } from '../api'
 import type { AuthedRequest } from '../app/types'
 import { saveSession } from '../services/session'
+import { invalidateAfterWrite } from '../queries/persistentCache'
 
 export function useAuthenticatedRequest(
   session: Session,
   setSession: (session: Session) => void,
   onSessionExpired: () => void,
 ) {
+  const queryClient = useQueryClient()
   return useCallback<AuthedRequest>(
     async <T,>(path: string, options: RequestOptions = {}) => {
       const version = getActiveSessionVersion()
@@ -18,6 +21,9 @@ export function useAuthenticatedRequest(
         const result = await requestWithToken<T>(path, access, options)
         if (version !== getActiveSessionVersion()) {
           throw new DOMException('The session changed during this request.', 'AbortError')
+        }
+        if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) {
+          invalidateAfterWrite(queryClient, path)
         }
         return result
       } catch (caughtError) {
@@ -46,9 +52,12 @@ export function useAuthenticatedRequest(
         if (version !== getActiveSessionVersion()) {
           throw new DOMException('The session changed during this request.', 'AbortError')
         }
+        if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) {
+          invalidateAfterWrite(queryClient, path)
+        }
         return result
       }
     },
-    [onSessionExpired, session, setSession],
+    [onSessionExpired, queryClient, session, setSession],
   )
 }

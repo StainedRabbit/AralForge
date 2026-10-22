@@ -135,7 +135,7 @@ function GradeOverview({ api, query, setQuery, setTerm, term }: {
       return api<TeacherGradesOverviewPage>(`/grades/teacher-overview/?${search.toString()}`, { signal })
     },
     getNextPageParam: (lastPage) => pageOffset(lastPage.next),
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
   const cards = overview.data?.pages.flatMap((page) => page.results) ?? []
   const first = overview.data?.pages[0]
@@ -213,8 +213,8 @@ function SetupView({ api, dataset, query, setDataset, setQuery }: DatasetProps<S
 function ApplyTemplatePanel({ api }: { api: AuthedRequest }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
-  const subjects = useQuery({ queryKey: ['apply-template-subjects'], queryFn: ({ signal }) => api<ApiList<Subject>>('/subjects/subjects/?limit=20', { signal }), enabled: open, staleTime: 300_000 })
-  const templates = useQuery({ queryKey: ['apply-template-options'], queryFn: ({ signal }) => api<ApiList<GradingTemplate>>('/grades/templates/?limit=20', { signal }), enabled: open, staleTime: 300_000 })
+  const subjects = useQuery({ queryKey: ['apply-template-subjects'], queryFn: ({ signal }) => api<ApiList<Subject>>('/subjects/subjects/?limit=20', { signal }), enabled: open, staleTime: 60 * 60 * 1000 })
+  const templates = useQuery({ queryKey: ['apply-template-options'], queryFn: ({ signal }) => api<ApiList<GradingTemplate>>('/grades/templates/?limit=20', { signal }), enabled: open, staleTime: 60 * 60 * 1000 })
   const [subject, setSubject] = useState('')
   const [template, setTemplate] = useState('')
   const [message, setMessage] = useState('')

@@ -451,6 +451,19 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(row['student_number'], self.student.student_profile.student_number)
         self.assertEqual(row['grade_summary'], {'prelim': Decimal('87.50')})
 
+        from unittest.mock import patch
+        with patch('subjects.views.grade_summaries') as mocked_summaries:
+            directory = self.client.get(url, {'limit': 10, 'status': 'active', 'view': 'directory'})
+        mocked_summaries.assert_not_called()
+        grades = self.client.get(url, {'limit': 10, 'status': 'active', 'view': 'grades'})
+        self.assertEqual(directory.status_code, status.HTTP_200_OK)
+        self.assertEqual(grades.status_code, status.HTTP_200_OK)
+        self.assertNotIn('grade_summary', directory.data['results'][0])
+        self.assertEqual(grades.data['results'][0], {
+            'student': self.student.id, 'grade_summary': {'prelim': Decimal('87.50')},
+        })
+        self.assertNotIn('email', grades.data['results'][0])
+
     def test_roster_filters_do_not_filter_the_parent_schedule(self):
         schedule = self.create_schedule()
         self.student.first_name = 'Alex'

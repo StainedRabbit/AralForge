@@ -5,6 +5,7 @@ import { asArray } from '../../api'
 import type { AuthedRequest } from '../../app/types'
 import type { ApiList } from '../../types'
 import { queryKeys } from '../../queries/queryKeys'
+import { HOUR_MS, LIVE_STALE_MS, isPersistableQueryKey } from '../../queries/persistentCache'
 import { toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 import { SectionHeading } from '../ui'
@@ -103,7 +104,7 @@ export function AdminResourcePanel<TItem extends { id: number }>({
     queryFn: ({ signal }) => api<ApiList<TItem>>(serverPath, { signal }),
     enabled: serverSide,
     placeholderData: (previous) => previous,
-    staleTime: 60_000,
+    staleTime: isPersistableQueryKey(queryKeys.resource(serverPath)) ? HOUR_MS : LIVE_STALE_MS,
   })
   const serverItems = serverSide ? asArray(serverQuery.data ?? []) : items
   const serverCount = serverSide && serverQuery.data && !Array.isArray(serverQuery.data)
@@ -524,7 +525,7 @@ function RemoteSelectControl<TItem>({
     queryKey: queryKeys.resource(path),
     queryFn: ({ signal }) => api<ApiList<unknown>>(path, { signal }),
     enabled: debouncedSearch.length >= 2,
-    staleTime: 60_000,
+    staleTime: isPersistableQueryKey(queryKeys.resource(path)) ? HOUR_MS : LIVE_STALE_MS,
   })
   const options = asArray(optionsQuery.data ?? []).map((item) => field.remoteOptions!.map(item))
   const selectedValue = String(value ?? '')

@@ -6,6 +6,7 @@ import type { Session } from './api'
 import { Page, SkeletonList, StatusBanner } from './components/ui'
 import { EssentialStorageNotice } from './legal/EssentialStorageNotice'
 import { clearSession, loadSession, saveSession } from './services/session'
+import { clearPersistentCache } from './queries/persistentCache'
 import { updateBrowserThemeColor } from './theme'
 import './App.css'
 
@@ -47,6 +48,8 @@ function App() {
       .catch(error => {
         if (version !== operationVersion.current) return
         if (error instanceof ApiError && error.status === 401) {
+          void clearPersistentCache()
+          queryClient.clear()
           setSession(null)
           setSessionRestoreError(false)
           return
@@ -60,7 +63,7 @@ function App() {
           setRestoring(false)
         }
       })
-  }, [])
+  }, [queryClient])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { restoreSession() }, 0)
@@ -73,6 +76,7 @@ function App() {
   const handleLogin = useCallback((nextSession: Session) => {
     operationVersion.current += 1
     activateSession(nextSession)
+    void clearPersistentCache()
     queryClient.clear()
     setSessionRestoreError(false)
     setLogoutError(false)
@@ -86,6 +90,7 @@ function App() {
     operationVersion.current += 1
     invalidateActiveSession()
     clearSession()
+    void clearPersistentCache()
     queryClient.clear()
     setSessionRestoreError(false)
     setLogoutError(false)

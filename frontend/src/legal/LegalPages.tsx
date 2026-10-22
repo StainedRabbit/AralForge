@@ -132,6 +132,7 @@ function StorageNotice() {
           <li><code>aralforge:lesson-draft:*</code> and <code>aralforge.main-activity-draft.*</code> protect authorized editing work from accidental loss.</li>
           <li><code>aralforge:presentation-text-size</code> remembers a presentation display preference.</li>
           <li><code>aralforge:roster-import-acknowledged:*</code> prevents an administrator from being shown the same completed roster-import result repeatedly.</li>
+          <li>An IndexedDB page cache can hold course content, class rosters, attendance history, and student directory data for the verified account. Entries are used for up to one hour, removed on sign-out or account change, and discarded when the app next opens after expiry. Grades, scores, and access tokens are not saved in this cache.</li>
           <li><code>{STORAGE_NOTICE_KEY}</code> remembers the version of this notice acknowledged on the device.</li>
         </ul>
       </LegalSection>

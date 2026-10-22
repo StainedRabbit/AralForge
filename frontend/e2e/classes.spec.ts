@@ -1090,7 +1090,7 @@ test('compact header and local class search retain pagination, term cache, and e
   await page.getByLabel('School-year semester').selectOption('1')
   await expect(list.locator('.class-list__item')).toHaveCount(10)
   expect(snapshotCount('1')).toBe(1)
-  await page.clock.fastForward(120_001)
+  await page.clock.fastForward(3_600_001)
   await page.getByLabel('School-year semester').selectOption('2')
   await page.getByLabel('School-year semester').selectOption('1')
   await expect.poll(() => snapshotCount('1')).toBe(2)

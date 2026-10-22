@@ -8,6 +8,7 @@ import { RouteWorkspace } from '../components/RouteWorkspace'
 import type { WorkspaceResource } from '../queries/useScopedWorkspace'
 import { Page, SkeletonList, StatusBanner } from '../components/ui'
 import { queryKeys } from '../queries/queryKeys'
+import { HOUR_MS } from '../queries/persistentCache'
 const AdminAttendancePage = lazy(() => import('../pages/admin/AdminAttendancePage').then(module => ({ default: module.AdminAttendancePage })))
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage').then(module => ({ default: module.AdminDashboardPage })))
 const AdminGradebookRoute = lazy(() => import('../pages/admin/AdminGradebookRoute').then(module => ({ default: module.AdminGradebookRoute })))
@@ -86,7 +87,7 @@ function PresentationWorkspaceRoute({ api }: { api: AuthedRequest }) {
     queryKey: queryKeys.resource(path),
     queryFn: ({ signal }) => api<PresentationWorkspace>(path, { signal }),
     enabled: Number.isInteger(numericModuleId) && numericModuleId > 0,
-    staleTime: 60_000,
+    staleTime: HOUR_MS,
   })
 
   if (query.isPending) {

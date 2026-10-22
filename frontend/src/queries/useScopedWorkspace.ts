@@ -3,6 +3,7 @@ import { asArray } from '../api'
 import type { AuthedRequest, RouteData } from '../app/types'
 import type { ApiList, StudentProfile, User } from '../types'
 import { queryKeys } from './queryKeys'
+import { HOUR_MS, LIVE_STALE_MS, isPersistableQueryKey } from './persistentCache'
 import { toErrorMessage } from '../utils/format'
 
 export type WorkspaceResource = Exclude<keyof RouteData,
@@ -51,7 +52,7 @@ export function useScopedWorkspace(
         queryKey: queryKeys.resource(path),
         queryFn: ({ signal }: { signal: AbortSignal }) =>
           fetchAllPages(api, paths[resource], signal),
-        staleTime: 60_000,
+        staleTime: isPersistableQueryKey(queryKeys.resource(path)) ? HOUR_MS : LIVE_STALE_MS,
       }
     }),
   })
@@ -84,7 +85,7 @@ export function usePaginatedResource<T>(
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       fetchAllPages<T>(api, path!, signal),
     enabled: Boolean(path),
-    staleTime: 60_000,
+    staleTime: isPersistableQueryKey(queryKeys.resource(path ?? 'disabled')) ? HOUR_MS : LIVE_STALE_MS,
   })
 }
 
