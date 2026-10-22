@@ -265,8 +265,13 @@
   }
 
   .page-header {
+    align-items: stretch;
     gap: 14px;
     padding-block: 4px;
+  }
+
+  .classes-page .page-header {
+    align-items: stretch;
   }
 
   .page-header h1 {
