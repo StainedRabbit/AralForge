@@ -125,9 +125,15 @@ class SubjectScheduleSerializer(serializers.ModelSerializer):
         return attrs
 
     def get_instructor_ids(self, obj):
+        prefetched = getattr(obj, '_active_instructors', None)
+        if prefetched is not None:
+            return [assignment.instructor_id for assignment in prefetched]
         return list(obj.instructors.filter(is_active=True).values_list('instructor_id', flat=True))
 
     def get_adult_roster_verified(self, obj):
+        prefetched = getattr(obj, '_active_adult_roster_attestations', None)
+        if prefetched is not None:
+            return bool(prefetched)
         return obj.adult_roster_attestations.filter(revoked_at__isnull=True).exists()
 
 

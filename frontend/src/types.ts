@@ -449,9 +449,7 @@ export type MainActivityEditorWorkspace = {
 }
 
 export type MainActivityGradingWorkspace = {
-  users: User[]
   schedules: SubjectSchedule[]
-  enrollments: ScheduleStudent[]
   grade_categories: GradeCategory[]
   grade_items: GradeItem[]
   linked_class_count: number

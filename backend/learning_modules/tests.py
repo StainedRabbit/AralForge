@@ -4156,7 +4156,6 @@ class LessonMainActivityApiTests(APITestCase):
             semester=Semester.FIRST,
         )
         schedule = self.schedule
-        enrollment = ScheduleStudent.objects.get(schedule=schedule, student=self.student)
         category = GradeCategory.objects.create(
             subject=self.subject,
             grading_period=GradingPeriod.PRELIM,
@@ -4166,6 +4165,22 @@ class LessonMainActivityApiTests(APITestCase):
         )
         item = GradeItem.objects.create(
             schedule=schedule,
+            grade_category=category,
+            title=self.activity.title,
+            points_possible=self.activity.points_possible,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=self.activity,
+        )
+        second_schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=term,
+            days='TTH',
+            start_time='14:00',
+            end_time='15:00',
+            section='C',
+        )
+        second_item = GradeItem.objects.create(
+            schedule=second_schedule,
             grade_category=category,
             title=self.activity.title,
             points_possible=self.activity.points_possible,
@@ -4188,12 +4203,78 @@ class LessonMainActivityApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual({row['id'] for row in response.data['schedules']}, {schedule.id})
-        self.assertEqual({row['id'] for row in response.data['enrollments']}, {enrollment.id})
+        self.assertEqual(
+            {row['id'] for row in response.data['schedules']},
+            {schedule.id, second_schedule.id},
+        )
         self.assertEqual({row['id'] for row in response.data['grade_categories']}, {category.id})
-        self.assertEqual({row['id'] for row in response.data['grade_items']}, {item.id})
+        self.assertEqual(
+            {row['id'] for row in response.data['grade_items']},
+            {item.id, second_item.id},
+        )
+        self.assertNotIn('users', response.data)
+        self.assertNotIn('enrollments', response.data)
         self.assertNotIn('extensions', response.data)
         self.assertNotIn(outside_schedule.id, {row['id'] for row in response.data['schedules']})
+
+        verification = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/grading-workspace/',
+            {'view': 'links', 'schedule': [schedule.id]},
+        )
+        self.assertEqual(verification.status_code, 200, verification.data)
+        self.assertEqual(
+            {row['id'] for row in verification.data['grade_items']},
+            {item.id},
+        )
+
+        scoped_verification = self.client.get(
+            f'/api/modules/activities/{self.activity.id}/grading-workspace/',
+            {'view': 'links', 'schedule': [second_schedule.id, outside_schedule.id]},
+        )
+        self.assertEqual(scoped_verification.status_code, 200, scoped_verification.data)
+        self.assertEqual(
+            {row['id'] for row in scoped_verification.data['grade_items']},
+            {second_item.id},
+        )
+
+    def test_grading_workspace_queries_do_not_grow_with_roster_or_schedule_serialization(self):
+        term = self.schedule.school_year_semester
+        schedules = [self.schedule]
+        schedules.extend(
+            SubjectSchedule.objects.create(
+                subject=self.subject,
+                school_year_semester=term,
+                days='TTH',
+                start_time=f'{hour:02d}:00',
+                end_time=f'{hour + 1:02d}:00',
+                section=f'Q{hour}',
+            )
+            for hour in range(8, 15)
+        )
+        students = [
+            User.objects.create_user(
+                username=f'workspace-roster-{index}',
+                password='testpass123',
+                role=User.Role.STUDENT,
+            )
+            for index in range(20)
+        ]
+        ScheduleStudent.objects.bulk_create([
+            ScheduleStudent(schedule=schedule, student=student)
+            for schedule in schedules
+            for student in students
+        ])
+        self.client.force_authenticate(self.teacher)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                f'/api/modules/activities/{self.activity.id}/grading-workspace/',
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertLessEqual(len(queries.captured_queries), 12)
+        self.assertNotIn('users', response.data)
+        self.assertNotIn('enrollments', response.data)
 
     def test_start_is_idempotent_and_generic_student_create_is_disabled(self):
         self.client.force_authenticate(self.student)

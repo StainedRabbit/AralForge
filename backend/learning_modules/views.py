@@ -16,7 +16,13 @@ from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
 from config.pagination import AralForgeCursorPagination
 from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
-from subjects.models import ScheduleStudent, Subject, SubjectSchedule
+from subjects.models import (
+    AdultRosterAttestation,
+    ScheduleInstructor,
+    ScheduleStudent,
+    Subject,
+    SubjectSchedule,
+)
 from subjects.serializers import (
     ScheduleStudentSerializer,
     SubjectScheduleSerializer,
@@ -1446,6 +1452,30 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         if not request.user.is_admin_teacher:
             raise PermissionDenied('Only teachers can open activity grading settings.')
         activity = self.get_object()
+        if request.query_params.get('view') == 'links':
+            raw_schedule_ids = request.query_params.getlist('schedule')
+            try:
+                schedule_ids = {int(value) for value in raw_schedule_ids}
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({
+                    'schedule': 'Provide valid class identifiers for link verification.',
+                })
+            if not schedule_ids:
+                raise serializers.ValidationError({
+                    'schedule': 'Provide at least one class for link verification.',
+                })
+            links = GradeItem.objects.filter(
+                module_activity=activity,
+                schedule_id__in=schedule_ids,
+            ).select_related(
+                'schedule',
+                'grade_category',
+                'module_activity',
+            )
+            return response.Response({
+                'grade_items': GradeItemSerializer(links, many=True, context={'request': request}).data,
+            })
+
         subject_ids = module_subject_ids(activity.module)
         schedules = list(
             SubjectSchedule.objects.filter(
@@ -1453,26 +1483,26 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
                 | Q(grade_items__module_activity=activity),
             ).distinct().select_related(
                 'subject', 'school_year_semester', 'school_year_semester__school_year',
+            ).prefetch_related(
+                Prefetch(
+                    'instructors',
+                    queryset=ScheduleInstructor.objects.filter(is_active=True).only(
+                        'id', 'schedule_id', 'instructor_id',
+                    ),
+                    to_attr='_active_instructors',
+                ),
+                Prefetch(
+                    'adult_roster_attestations',
+                    queryset=AdultRosterAttestation.objects.filter(
+                        revoked_at__isnull=True,
+                    ).only('id', 'schedule_id'),
+                    to_attr='_active_adult_roster_attestations',
+                ),
             ),
         )
-        enrollments = list(
-            ScheduleStudent.objects.filter(
-                schedule__in=schedules,
-                is_active=True,
-            ).select_related(
-                'student',
-                'student__student_profile',
-                'schedule',
-                'schedule__subject',
-                'schedule__school_year_semester',
-                'schedule__school_year_semester__school_year',
-            ),
-        )
-        students = sorted(
-            {enrollment.student for enrollment in enrollments},
-            key=lambda student: (student.last_name, student.first_name, student.id),
-        )
-        categories = GradeCategory.objects.filter(subject_id__in=subject_ids).order_by(
+        categories = GradeCategory.objects.filter(subject_id__in=subject_ids).select_related(
+            'subject',
+        ).order_by(
             'subject_id', 'grading_period', 'category', 'name',
         )
         items = GradeItem.objects.filter(
@@ -1485,9 +1515,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
         )
         context = {'request': request}
         return response.Response({
-            'users': UserSerializer(students, many=True, context=context).data,
             'schedules': SubjectScheduleSerializer(schedules, many=True, context=context).data,
-            'enrollments': ScheduleStudentSerializer(enrollments, many=True, context=context).data,
             'grade_categories': GradeCategorySerializer(categories, many=True, context=context).data,
             'grade_items': GradeItemSerializer(items, many=True, context=context).data,
             'linked_class_count': len({item.schedule_id for item in items}),

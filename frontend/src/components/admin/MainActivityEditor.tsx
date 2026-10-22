@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
 import type {
   GradeCategory,
+  GradeItem,
   GradingPeriod,
   MainActivityEditorWorkspace,
   MainActivityGradingWorkspace,
@@ -791,10 +792,7 @@ type AssignmentDraft = {
   selected: boolean
   categoryId: string
 }
-type ActivityGradingData = Pick<
-  RouteData,
-  'users' | 'schedules' | 'enrollments' | 'gradeCategories' | 'gradeItems'
->
+type ActivityGradingData = Pick<RouteData, 'schedules' | 'gradeCategories' | 'gradeItems'>
 
 function ActivityGradingAssignments({
   activity,
@@ -806,8 +804,10 @@ function ActivityGradingAssignments({
   onLinkedClassCountChange: (count: number) => void
 }) {
   const workspacePath = `/modules/activities/${activity.id}/grading-workspace/`
+  const workspaceQueryKey = queryKeys.resource(workspacePath)
+  const queryClient = useQueryClient()
   const workspaceQuery = useQuery({
-    queryKey: queryKeys.resource(workspacePath),
+    queryKey: workspaceQueryKey,
     queryFn: () => api<MainActivityGradingWorkspace>(workspacePath),
     staleTime: 30_000,
     retry: false,
@@ -843,11 +843,30 @@ function ActivityGradingAssignments({
 
   const workspace = workspaceQuery.data
   const scopedData: ActivityGradingData = {
-    users: workspace.users,
     schedules: workspace.schedules,
-    enrollments: workspace.enrollments,
     gradeCategories: workspace.grade_categories,
     gradeItems: workspace.grade_items,
+  }
+
+  function updateWorkspaceLinks(scheduleIds: number[], items: GradeItem[]) {
+    const replacedSchedules = new Set(scheduleIds)
+    queryClient.setQueryData<MainActivityGradingWorkspace>(workspaceQueryKey, (current) => {
+      if (!current) return current
+      const gradeItems = [
+        ...current.grade_items.filter(
+          (item) => item.schedule === null || !replacedSchedules.has(item.schedule),
+        ),
+        ...items,
+      ]
+      const linkedClassCount = new Set(
+        gradeItems.flatMap((item) => item.schedule === null ? [] : [item.schedule]),
+      ).size
+      return {
+        ...current,
+        grade_items: gradeItems,
+        linked_class_count: linkedClassCount,
+      }
+    })
   }
 
   return (
@@ -855,12 +874,11 @@ function ActivityGradingAssignments({
       activity={activity}
       api={api}
       data={scopedData}
-      refresh={async () => {
-        const result = await workspaceQuery.refetch()
-        if (result.error || !result.data) {
-          throw result.error ?? new Error('Grading details are unavailable.')
-        }
-        return result.data
+      updateWorkspaceLinks={updateWorkspaceLinks}
+      verifyWorkspaceLinks={async (scheduleIds) => {
+        const params = new URLSearchParams({ view: 'links' })
+        scheduleIds.forEach((scheduleId) => params.append('schedule', String(scheduleId)))
+        return api<{ grade_items: GradeItem[] }>(`${workspacePath}?${params.toString()}`)
       }}
     />
   )
@@ -870,12 +888,14 @@ function ActivityGradingAssignmentsContent({
   activity,
   api,
   data,
-  refresh,
+  updateWorkspaceLinks,
+  verifyWorkspaceLinks,
 }: {
   activity: ModuleActivity
   api: AuthedRequest
   data: ActivityGradingData
-  refresh: () => Promise<MainActivityGradingWorkspace>
+  updateWorkspaceLinks: (scheduleIds: number[], items: GradeItem[]) => void
+  verifyWorkspaceLinks: (scheduleIds: number[]) => Promise<{ grade_items: GradeItem[] }>
 }) {
   const schedules = data.schedules
   const period = activity.grading_period
@@ -944,10 +964,16 @@ function ActivityGradingAssignmentsContent({
     }
     const payload: MainActivityBulkAssignmentRequest = {
       module_activity: activity.id,
-      assignments: selected.map((schedule) => ({
-        schedule: schedule.id,
-        grade_category: Number(drafts[schedule.id].categoryId),
-      })),
+      assignments: selected.flatMap((schedule) => {
+        const requestedCategory = Number(drafts[schedule.id].categoryId)
+        const links = existingItemsBySchedule.get(schedule.id) ?? []
+        if (links.length === 1 && links[0].grade_category === requestedCategory) return []
+        return [{ schedule: schedule.id, grade_category: requestedCategory }]
+      }),
+    }
+    if (!payload.assignments.length) {
+      setMessage('Selected classes already have the requested Quiz categories.')
+      return
     }
     setSaving(true)
     setMessage('')
@@ -956,22 +982,26 @@ function ActivityGradingAssignmentsContent({
         '/grades/items/assign-main-activity/',
         { method: 'POST', body: JSON.stringify(payload) },
       )
-      try {
-        await refresh()
-        setMessage(
-          `Assignments applied: ${result.created_count} linked, ${result.updated_count} updated. Unselected classes were unchanged.`,
-        )
-      } catch {
-        setPendingVerification({ payload, errorMessage: 'Assignments were accepted, but the class links could not be refreshed.' })
-        setMessage('Assignments were accepted, but the class links could not be refreshed. Retry verification to see the current links.')
-      }
+      updateWorkspaceLinks(
+        payload.assignments.map((assignment) => assignment.schedule),
+        result.items,
+      )
+      setMessage(
+        `Assignments applied: ${result.created_count} linked, ${result.updated_count} updated. Unselected classes were unchanged.`,
+      )
     } catch (error) {
       const errorMessage = toErrorMessage(error)
       setPendingVerification({ payload, errorMessage })
       try {
-        const workspace = await refresh()
+        const verification = await verifyWorkspaceLinks(
+          payload.assignments.map((assignment) => assignment.schedule),
+        )
+        updateWorkspaceLinks(
+          payload.assignments.map((assignment) => assignment.schedule),
+          verification.grade_items,
+        )
         setPendingVerification(null)
-        setMessage(assignmentVerificationMessage(workspace, payload, errorMessage))
+        setMessage(assignmentVerificationMessage(data, verification.grade_items, payload, errorMessage))
       } catch {
         setMessage(`${errorMessage} Unable to verify the class links. Retry verification before applying assignments again.`)
       }
@@ -984,8 +1014,19 @@ function ActivityGradingAssignmentsContent({
     if (!pendingVerification || saving) return
     setSaving(true)
     try {
-      const workspace = await refresh()
-      setMessage(assignmentVerificationMessage(workspace, pendingVerification.payload, pendingVerification.errorMessage))
+      const verification = await verifyWorkspaceLinks(
+        pendingVerification.payload.assignments.map((assignment) => assignment.schedule),
+      )
+      updateWorkspaceLinks(
+        pendingVerification.payload.assignments.map((assignment) => assignment.schedule),
+        verification.grade_items,
+      )
+      setMessage(assignmentVerificationMessage(
+        data,
+        verification.grade_items,
+        pendingVerification.payload,
+        pendingVerification.errorMessage,
+      ))
       setPendingVerification(null)
     } catch {
       setMessage(`${pendingVerification.errorMessage} Unable to verify the class links. Retry verification before applying assignments again.`)
@@ -1005,8 +1046,8 @@ function ActivityGradingAssignmentsContent({
     try {
       await api(`/grades/items/${existingItem.id}/`, { method: 'DELETE' })
       updateDraft(scheduleId, { selected: false })
+      updateWorkspaceLinks([scheduleId], [])
       setMessage(`Removed the link for ${schedule.subject_code} ${schedule.section || ''}.`)
-      await refresh()
     } catch (error) {
       setMessage(toErrorMessage(error))
     } finally {
@@ -1139,12 +1180,13 @@ function quizCategoriesFor(data: ActivityGradingData, scheduleId: number, period
 }
 
 function assignmentVerificationMessage(
-  workspace: MainActivityGradingWorkspace,
+  workspace: ActivityGradingData,
+  verifiedItems: GradeItem[],
   payload: MainActivityBulkAssignmentRequest,
   errorMessage: string,
 ) {
   const mismatches = payload.assignments.flatMap((assignment) => {
-    const links = workspace.grade_items.filter((item) =>
+    const links = verifiedItems.filter((item) =>
       item.module_activity === payload.module_activity &&
       item.schedule === assignment.schedule,
     )
@@ -1153,7 +1195,7 @@ function assignmentVerificationMessage(
     }
 
     const schedule = workspace.schedules.find((candidate) => candidate.id === assignment.schedule)
-    const expectedCategory = workspace.grade_categories.find(
+    const expectedCategory = workspace.gradeCategories.find(
       (category) => category.id === assignment.grade_category,
     )
     const className = schedule
@@ -1163,7 +1205,7 @@ function assignmentVerificationMessage(
     if (links.length > 1) {
       currentState = `has ${links.length} duplicate links`
     } else if (links.length === 1) {
-      const currentCategory = workspace.grade_categories.find(
+      const currentCategory = workspace.gradeCategories.find(
         (category) => category.id === links[0].grade_category,
       )
       currentState = `linked to ${currentCategory?.name ?? `category ${links[0].grade_category}`}`
