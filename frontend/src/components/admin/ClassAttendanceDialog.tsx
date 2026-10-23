@@ -591,7 +591,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
               <div><strong>{currentIndex + 1} of {students.length}</strong><span>{formatDate(activeSession.date)}</span></div>
               <div>
                 <span>{markedCount} marked</span>
-                {pendingMarkCount ? <span aria-live="polite">Saving {pendingMarkCount} mark{pendingMarkCount === 1 ? '' : 's'}...</span> : null}
+                <span aria-live="polite" className="attendance-roll-call__save-status">{pendingMarkCount ? `Saving ${pendingMarkCount} mark${pendingMarkCount === 1 ? '' : 's'}...` : ''}</span>
                 {lastChange ? <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => void undoLastMark()} type="button">Undo last</button> : null}
               </div>
             </div>

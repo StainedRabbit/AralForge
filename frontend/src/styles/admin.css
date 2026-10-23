@@ -3497,6 +3497,10 @@ a.teacher-recent-item:focus-visible {
   .attendance-student-card {
     align-items: flex-start;
     flex-direction: column;
+    justify-content: space-between;
+    min-height: 132px;
+    padding: 16px;
+    gap: 12px;
   }
 
   .attendance-roll-call__progress {
@@ -3506,6 +3510,34 @@ a.teacher-recent-item:focus-visible {
   .attendance-roll-call__progress > div:last-child {
     align-items: flex-end;
     flex-direction: column;
+  }
+
+  .attendance-roll-call__save-status {
+    min-height: 1.2em;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .attendance-status-actions {
+    gap: 8px;
+  }
+
+  .attendance-status-action {
+    min-height: 84px;
+    gap: 6px;
+    padding: 10px 8px;
+    font-size: 14px;
+  }
+
+  .attendance-status-action svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .attendance-status-action small {
+    width: 20px;
+    height: 20px;
   }
 
   .attendance-keyboard-hint {
