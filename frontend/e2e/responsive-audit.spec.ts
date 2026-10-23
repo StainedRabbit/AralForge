@@ -101,6 +101,9 @@ async function moduleFixture(page: Page, title: string) {
 async function checkHeader(page: Page, route: string) {
   await page.goto(route)
   await expect(page.locator('.page-header h1')).toBeVisible()
+  if (route === '/admin/gradebook') {
+    await expect(page.getByRole('heading', { name: 'Score Entry' })).toBeVisible()
+  }
   for (const width of [320, 390, 768, 900, 901]) {
     await page.setViewportSize({ width, height: 844 })
     const header = page.locator('.page-header').first()

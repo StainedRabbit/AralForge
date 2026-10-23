@@ -664,7 +664,11 @@ test('shows delete failures and removes a lesson after a successful delete', asy
   await page.goto('/admin/modules')
 
   await page.getByLabel('Subject').selectOption({ label: 'E2EL1 - Lesson Authoring' })
+  const topicSelect = page.locator('label').filter({ hasText: /^Topic/ }).locator('select')
+  await expect(topicSelect).toHaveValue(/\d+/)
   await page.getByRole('link', { name: 'New Lesson' }).click()
+  await expect(page).toHaveURL(/\/admin\/modules\/\d+\/topics\/\d+\/lessons\/new$/)
+  await expect(page.getByRole('heading', { name: 'Create Lesson' })).toBeVisible()
   await page.getByLabel('Lesson Title').fill(lessonTitle)
   await page.getByLabel('Order').fill('1')
   const createResponse = page.waitForResponse(
