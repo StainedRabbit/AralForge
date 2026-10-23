@@ -229,7 +229,7 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 student = enrollment.student
                 item['search_fields'] = [
                     student.first_name, student.middle_name, student.last_name,
-                    student.username, student.email, item['student_number'],
+                    student.username, item['student_number'],
                 ]
             results.append(item)
 
@@ -261,7 +261,6 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                 Q(student__first_name__icontains=search) | Q(student__middle_name__icontains=search)
                 | Q(student__last_name__icontains=search)
                 | Q(student__username__icontains=search)
-                | Q(student__email__icontains=search)
                 | Q(student__student_profile__student_number__icontains=search),
             )
 

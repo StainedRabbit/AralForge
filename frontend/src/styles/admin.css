@@ -1205,7 +1205,6 @@ a.teacher-recent-item:focus-visible {
 
 @media (max-width: 900px) {
   .class-roster-table { min-width: 0; }
-  .grade-modal-email { overflow-wrap: anywhere; max-width: 100%; }
 }
 
 .class-roster-table thead th {

@@ -503,6 +503,8 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(snapshot.data['count'], 3)
         self.assertEqual(snapshot.data['inactive_count'], 1)
         by_student = {row['student']: row for row in snapshot.data['results']}
+        self.assertEqual(by_student[self.student.id]['email'], 'alex@example.test')
+        self.assertNotIn('alex@example.test', by_student[self.student.id]['search_fields'])
         self.assertEqual(by_student[other.id]['search_fields'][-1], '')
         for query in ('aLeX', 'Marie', 'River', 'student-api', '@example', 'SEARCH-001', 'no-match'):
             with self.subTest(query=query):
@@ -510,6 +512,7 @@ class SubjectScheduleApiTests(APITestCase):
                             if any(query.lower() in field.lower() for field in row['search_fields'])}
                 actual = self.client.get(url, {'search': query})
                 self.assertEqual({row['student'] for row in actual.data['results']}, expected)
+        self.assertEqual(self.client.get(url, {'search': 'alex@example.test'}).data['count'], 0)
         self.client.force_authenticate(self.student)
         self.assertEqual(self.client.get(url, {'include_search_fields': '1'}).status_code, 403)
         self.assertEqual(self.client.get(url).status_code, 200)

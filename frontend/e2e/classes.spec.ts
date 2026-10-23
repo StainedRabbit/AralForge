@@ -332,7 +332,7 @@ test('prepares only the selected roster after first paint and searches full cach
       id: 1000 + index, student: 2000 + index, schedule: 1,
       student_name: `Roster Student ${number}`, student_full_name: `Roster Student ${number}`,
       student_number: `CACHE-${number}`, email: `cache-${number}@example.test`,
-      search_fields: ['Roster', '', `Student ${number}`, `cache-${number}`, `cache-${number}@example.test`, `CACHE-${number}`],
+      search_fields: ['Roster', '', `Student ${number}`, `cache-${number}`, `CACHE-${number}`],
       is_active: index < 104, grade_summary: { prelim: '87.50' },
       subject: 1, subject_code: 'E2E101', subject_name: 'Programming Fundamentals',
       school_year_semester: 1, term_name: 'First Semester', schedule_display: 'E2E101 A',
@@ -378,6 +378,8 @@ test('prepares only the selected roster after first paint and searches full cach
   const table = page.locator('.class-roster-table')
   const rows = table.locator('tbody tr')
   await expect(rows).toHaveCount(10)
+  await expect(table.getByRole('columnheader', { name: 'Email' })).toHaveCount(0)
+  await expect(rows.first()).not.toContainText('cache-001@example.test')
   await expect.poll(() => requests.filter((request) => request.background).length).toBe(2)
   await expect(table).toHaveAttribute('data-roster-search-ready', 'false')
   expect(requests.every((request) => request.schedule === selectedId)).toBe(true)
@@ -386,17 +388,22 @@ test('prepares only the selected roster after first paint and searches full cach
   await expect(rows).toHaveCount(1)
   await expect(rows).toContainText('Roster Student 104')
   await expect(table).toHaveAttribute('data-roster-search-ready', 'false')
+  await search.fill('@example.test')
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await search.fill('CACHE-104')
+  await expect(rows).toHaveCount(1)
   releaseSecond()
   await expect(table).toHaveAttribute('data-roster-search-ready', 'true')
   blockNetwork = true
-  await search.fill('cache-104')
+  await search.fill('CACHE-104')
   await expect(rows).toHaveCount(1)
   await expect(rows).toContainText('Roster Student 104')
   await expect(rows).toContainText('87.5')
   await search.fill('@example.test')
-  await expect(rows).toHaveCount(10)
-  await page.getByRole('button', { name: 'Load more', exact: true }).click()
-  await expect(rows).toHaveCount(20)
+  await expect(page.getByText('No roster matches found for this search.')).toBeVisible()
+  await search.fill('CACHE-104')
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toContainText('Roster Student 104')
   await search.clear()
   await expect(rows).toHaveCount(10)
   await page.getByRole('button', { name: '1 Inactive', exact: true }).click()
@@ -408,7 +415,7 @@ test('prepares only the selected roster after first paint and searches full cach
   blockNetwork = false
   await search.clear()
   await page.getByRole('button', { name: '104 Active', exact: true }).click()
-  await search.fill('cache-104')
+  await search.fill('CACHE-104')
   await page.getByRole('button', { name: 'More actions', exact: true }).click()
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('menuitem', { name: 'Export roster CSV' }).click()
@@ -416,6 +423,8 @@ test('prepares only the selected roster after first paint and searches full cach
   const exportedCsv = await readFile((await download.path())!, 'utf8')
   expect(exportedCsv).toContain('CACHE-104')
   expect(exportedCsv).not.toContain('CACHE-105')
+  expect(exportedCsv).not.toContain('Email')
+  expect(exportedCsv).not.toContain('@example.test')
   await page.route('**/api/subjects/schedule-students/1103/', async (route) => {
     students[103].is_active = false
     await route.fulfill({ json: students[103] })
@@ -1735,7 +1744,8 @@ test('fits compact mobile roster cards and paginates 51 students', async ({ page
   await page.setViewportSize({ width: 390, height: 844 })
   await cards.first().getByRole('button', { name: 'Grades', exact: true }).click()
   const details = page.getByRole('dialog', { name: 'Grade details' })
-  await expect(details).toContainText('Email: mobile@example.test')
+  await expect(details).not.toContainText('mobile@example.test')
+  await expect(details).not.toContainText('Email:')
   await expect(details).toContainText('Prelim')
   await details.getByRole('button', { name: 'Close', exact: true }).click()
   const pagination = page.locator('.class-roster-pagination')

@@ -1496,7 +1496,6 @@ function ClassRoster({
             <tr>
               <th>Student</th>
               <th>Student number</th>
-              <th>Email</th>
               <th>Prelim</th>
               <th>Midterm</th>
               <th>Prefinal</th>
@@ -1520,22 +1519,22 @@ function ClassRoster({
             ))}
             {!selectedSchedule ? (
               <tr>
-                <td colSpan={10}>Select a class to view and manage enrolled students.</td>
+                <td colSpan={9}>Select a class to view and manage enrolled students.</td>
               </tr>
             ) : null}
             {selectedSchedule && !rosterSnapshot && rosterPageQuery.isPending && !visibleRows.length ? (
               <tr>
-                <td colSpan={10}>Loading roster...</td>
+                <td colSpan={9}>Loading roster...</td>
               </tr>
             ) : null}
             {selectedSchedule && (rosterSnapshot || (!rosterPageQuery.isPending && !rosterPageQuery.isError)) && !isRosterSearchUpdating && !totalCount ? (
               <tr>
-                <td colSpan={10}>No active students in this class yet. Add students to build the roster.</td>
+                <td colSpan={9}>No active students in this class yet. Add students to build the roster.</td>
               </tr>
             ) : null}
             {selectedSchedule && (rosterSnapshot || (!rosterPageQuery.isPending && !rosterPageQuery.isError)) && !isRosterSearchUpdating && totalCount && !visibleRows.length ? (
               <tr>
-                <td colSpan={10}>
+                <td colSpan={9}>
                   {rosterQuery.trim()
                     ? 'No roster matches found for this search.'
                     : rosterStatus === 'inactive'
@@ -2069,7 +2068,6 @@ function RosterRow({
         </span>
       </td>
       <td className="roster-cell--number">{row.studentNumber}</td>
-      <td className="roster-cell--detail">{row.email}</td>
       <td className="roster-cell--detail"><GradeCell value={row.grades.prelim} /></td>
       <td className="roster-cell--detail"><GradeCell value={row.grades.midterm} /></td>
       <td className="roster-cell--detail"><GradeCell value={row.grades.prefinal} /></td>
@@ -2175,7 +2173,6 @@ function GradeDetailsModal({
         </div>
 
         <div className="grade-modal-meta">
-          <span className="grade-modal-email">Email: {row.email || 'None'}</span>
           <span className={row.enrollment.is_active ? 'roster-status roster-status--active' : 'roster-status'}>
             {row.enrollment.is_active ? 'Active enrollment' : 'Inactive enrollment'}
           </span>
@@ -3553,7 +3550,6 @@ function exportRosterCsv(
   const headers = [
     'Student',
     'Student number',
-    'Email',
     'Prelim',
     'Midterm',
     'Prefinal',
@@ -3564,7 +3560,6 @@ function exportRosterCsv(
   const csvRows = rows.map((row) => [
     row.studentFullName || row.studentName,
     row.studentNumber,
-    row.email,
     row.grades.prelim,
     row.grades.midterm,
     row.grades.prefinal,
