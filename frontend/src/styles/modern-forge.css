@@ -296,7 +296,16 @@ summary {
   padding-inline: 14px;
 }
 
+.sidebar .user-chip--no-avatar {
+  grid-template-columns: minmax(0, 1fr);
+  padding-inline: 14px;
+}
+
 .sidebar .user-chip--text-only .sidebar__user-info {
+  grid-column: 1;
+}
+
+.sidebar .user-chip--no-avatar .sidebar__user-info {
   grid-column: 1;
 }
 

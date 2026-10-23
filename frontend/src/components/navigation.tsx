@@ -158,7 +158,7 @@ export function Sidebar({
           expanded={expanded}
           onToggleCollapsed={toggleCollapsed}
         /></div>
-        <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ''}`} title={currentUser?.role === 'STUDENT' ? fullName(currentUser) : undefined}>
+        <div className={`user-chip${currentUser?.role === 'STUDENT' ? ' user-chip--text-only' : ' user-chip--no-avatar'}`} title={currentUser?.role === 'STUDENT' ? fullName(currentUser) : undefined}>
           {currentUser?.role === 'STUDENT' ? <span aria-hidden="true" className="sidebar__student-icon"><Icon name="profile" /></span> : null}
           <div className="sidebar__user-info">
             <div className="sidebar__user-identity">
