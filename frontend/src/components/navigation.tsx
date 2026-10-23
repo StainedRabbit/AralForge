@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import type { ThemePreference, User } from '../types'
-import { fullName, initials } from '../utils/student'
+import { fullName } from '../utils/student'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
 
@@ -181,20 +181,16 @@ export function Sidebar({
 }
 
 export function MobileHeader({
-  currentUser,
   badgePath = '/modules',
   homePath = '/',
   pendingCount,
   onOpenMore,
-  showAccountAvatar = true,
   sticky = true,
 }: {
-  currentUser: User | null
   badgePath?: string
   homePath?: string
   pendingCount: number
   onOpenMore: () => void
-  showAccountAvatar?: boolean
   sticky?: boolean
 }) {
   return (
@@ -212,7 +208,6 @@ export function MobileHeader({
           onClick={onOpenMore}
           type="button"
         >
-          {showAccountAvatar ? <span className="avatar">{initials(currentUser)}</span> : null}
           <Icon name="menu" />
         </button>
       </div>
@@ -274,7 +269,6 @@ export function MobileNavigation({
   onLogout,
   pendingCount,
   stickyHeader = true,
-  showAccountAvatar = true,
   workspaceLabel,
   themePreference,
   onThemeChange,
@@ -288,7 +282,6 @@ export function MobileNavigation({
   onLogout: () => void
   pendingCount: number
   stickyHeader?: boolean
-  showAccountAvatar?: boolean
   workspaceLabel?: string
 } & ThemeControls) {
   const [open, setOpen] = useState(false)
@@ -302,7 +295,7 @@ export function MobileNavigation({
 
   return (
     <>
-      <MobileHeader badgePath={badgePath} currentUser={currentUser} homePath={items[0]?.to ?? '/'} pendingCount={pendingCount} onOpenMore={() => setOpen(true)} showAccountAvatar={showAccountAvatar} sticky={stickyHeader} />
+      <MobileHeader badgePath={badgePath} homePath={items[0]?.to ?? '/'} pendingCount={pendingCount} onOpenMore={() => setOpen(true)} sticky={stickyHeader} />
       <MobileTabbar badgePath={badgePath} items={items} moreActive={moreActive} moreOpen={open} onOpenMore={() => setOpen(true)} pendingCount={pendingCount} />
       <MobileMoreSheet currentUser={currentUser} items={moreItems} onClose={() => setOpen(false)} onLogout={onLogout} open={open} workspaceLabel={workspaceLabel} themePreference={themePreference} onThemeChange={onThemeChange} themeSaving={themeSaving} themeError={themeError} />
     </>

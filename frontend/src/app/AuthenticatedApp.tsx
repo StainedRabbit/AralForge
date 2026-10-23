@@ -103,7 +103,7 @@ export function AuthenticatedApp({ session, setSession, onLogout, onSessionExpir
   return <div className="app-shell">
     <Sidebar currentUser={user} pendingCount={0} onLogout={onLogout} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} />
     <main className="app-main">
-      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} showAccountAvatar={false} stickyHeader={false} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} />
+      <MobileNavigation currentUser={user} pendingCount={0} onLogout={onLogout} stickyHeader={false} themePreference={themePreference} onThemeChange={changeTheme} themeSaving={savingTheme} themeError={themeError} />
       <Suspense fallback={<Page><SkeletonList count={4} /></Page>}>
         <Routes>
           <Route path="/" element={<DashboardPage api={api} currentUser={user} />} />
