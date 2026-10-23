@@ -579,7 +579,7 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
           </div> : activeSession && scannerOpen ? <Suspense fallback={<p role="status">Opening scanner...</p>}><AttendanceQrScanner onClose={closeScanner} onScan={scanStudentNumber} onUndo={lastQrScan === null ? null : undoLastQrScan} /></Suspense> : activeSession && showSummary ? <AttendanceCompletion
             onClose={() => void closeDialog()}
             onHistory={() => void openHistory()}
-            onReview={() => { setCurrentIndex(0); setReviewMode(true); setShowSummary(false); setMessage('Reviewing attendance from the first student.') }}
+            onReview={() => { setCurrentIndex(0); setReviewMode(true); setShowSummary(false); setMessage('') }}
             onUndo={lastChange ? () => void undoLastMark() : undefined}
             closeRequested={closeRequested}
             pendingMarkCount={pendingMarkCount}
