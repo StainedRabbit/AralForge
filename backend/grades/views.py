@@ -1187,10 +1187,59 @@ def score_sheet_payload(item):
     )
     scores_by_student = {score.student_id: score for score in scores}
     active_ids = {enrollment.student_id for enrollment in active_enrollments}
-    rows = [score_sheet_row(enrollment.student, True, scores_by_student.get(enrollment.student_id))
-            for enrollment in active_enrollments]
+    activity_attempts = {}
+    is_activity_item = (
+        item.source_type == GradeItemSourceType.MODULE_ACTIVITY
+        and item.module_activity_id is not None
+    )
+    if is_activity_item:
+        attempts = ModuleActivityAttempt.objects.filter(
+            activity_id=item.module_activity_id,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+        ).filter(
+            Q(
+                submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                context_type='CLASS',
+                schedule_id=item.schedule_id,
+            )
+            | Q(
+                submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+                paper_grade_item_id=item.id,
+            )
+        ).values_list('student_id', 'id', 'submission_method', 'score')
+        for student_id, attempt_id, submission_method, score in attempts:
+            current = activity_attempts.setdefault(student_id, {
+                'submission_status': 'PENDING',
+                'paper_attempt_id': None,
+                'paper_score': None,
+            })
+            if submission_method == ModuleActivityAttempt.SubmissionMethod.PAPER:
+                current.update({
+                    'submission_status': 'PAPER',
+                    'paper_attempt_id': attempt_id,
+                    'paper_score': format(score, 'f') if score is not None else None,
+                })
+            elif current['submission_status'] != 'PAPER':
+                current['submission_status'] = 'ONLINE'
+
+    rows = [
+        score_sheet_row(
+            enrollment.student,
+            True,
+            scores_by_student.get(enrollment.student_id),
+            activity_attempts.get(enrollment.student_id) if is_activity_item else None,
+            is_activity_item=is_activity_item,
+        )
+        for enrollment in active_enrollments
+    ]
     rows.extend(
-        score_sheet_row(score.student, False, score)
+        score_sheet_row(
+            score.student,
+            False,
+            score,
+            activity_attempts.get(score.student_id) if is_activity_item else None,
+            is_activity_item=is_activity_item,
+        )
         for score in scores
         if score.student_id not in active_ids
     )
@@ -1210,7 +1259,7 @@ def score_sheet_payload(item):
     }
 
 
-def score_sheet_row(student, is_active, score):
+def score_sheet_row(student, is_active, score, activity_attempt=None, *, is_activity_item=False):
     profile = getattr(student, 'student_profile', None)
     return {
         'student': student.id,
@@ -1222,6 +1271,11 @@ def score_sheet_row(student, is_active, score):
         'raw_score': format(score.raw_score, 'f') if score and score.raw_score is not None else None,
         'status': score.status if score else 'GRADED',
         'remarks': score.remarks if score else '',
+        'submission_status': (
+            activity_attempt['submission_status'] if activity_attempt else 'PENDING'
+        ) if is_activity_item else None,
+        'paper_attempt_id': activity_attempt['paper_attempt_id'] if activity_attempt else None,
+        'paper_score': activity_attempt['paper_score'] if activity_attempt else None,
     }
 
 

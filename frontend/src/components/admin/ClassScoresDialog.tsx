@@ -2,7 +2,7 @@ import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, us
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { AuthedRequest, RouteData } from '../../app/types'
-import type { GradeCategory, GradeItem, SubjectSchedule } from '../../types'
+import type { GradeCategory, GradeItem, PaperActivityScoreBatchResult, SubjectSchedule } from '../../types'
 import { formatDate, numeric, toErrorMessage } from '../../utils/format'
 import { Icon } from '../Icon'
 
@@ -10,11 +10,14 @@ const periods = ['PRELIM', 'MIDTERM', 'PREFINAL', 'FINAL'] as const
 const periodLabels = { FINAL: 'Final', MIDTERM: 'Midterm', PREFINAL: 'Prefinal', PRELIM: 'Prelim' }
 
 type ScoreStatus = 'GRADED' | 'EXCUSED'
+type ActivitySubmissionStatus = 'PENDING' | 'ONLINE' | 'PAPER'
 type SavedScore = { rawScore: string; remarks: string; status: ScoreStatus }
 type ScoreDraft = {
+  activitySubmissionStatus: ActivitySubmissionStatus | null
   isActive: boolean
   rawScore: string
   remarks: string
+  paperAttemptId: number | null
   saved: SavedScore | null
   scoreId: number | null
   status: ScoreStatus
@@ -30,6 +33,9 @@ type ScoreSheetResponse = {
     remarks: string
     score_id: number | null
     status: ScoreStatus
+    submission_status?: ActivitySubmissionStatus | null
+    paper_attempt_id?: number | null
+    paper_score?: string | null
     student: number
     student_full_name: string
     student_name: string
@@ -127,7 +133,9 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
       ? [activeItem, ...(sheetsQuery.data?.grade_items ?? []).filter((item) => item.id !== activeItem.id)]
       : sheetsQuery.data?.grade_items ?? []
     return items
-      .filter((item) => item.schedule === schedule.id && item.source_type === 'MANUAL')
+      .filter((item) => item.schedule === schedule.id && (
+        item.source_type === 'MANUAL' || item.source_type === 'MODULE_ACTIVITY'
+      ))
       .sort((left, right) =>
         (right.date ?? right.created_at.slice(0, 10)).localeCompare(left.date ?? left.created_at.slice(0, 10)) || right.id - left.id)
   }, [activeItem, sheetsQuery.data, schedule.id])
@@ -144,15 +152,21 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
       formatDate(itemDate),
       item.points_possible,
       `${numeric(item.points_possible)} points`,
+      item.source_type === 'MODULE_ACTIVITY' ? 'Main Activity' : 'Score sheet',
     ].filter(Boolean).join(' '), sheetQuery)
   }), [gradeCategories, scoreSheets, sheetQuery])
   const activeDrafts = drafts.filter((draft) => draft.isActive)
   const inactiveDrafts = drafts.filter((draft) => !draft.isActive)
   const currentDraft = activeDrafts[currentIndex] ?? null
   const currentStudentId = currentDraft?.student ?? null
-  const savedCount = activeDrafts.filter((draft) => draft.saved).length
+  const isMainActivity = activeItem?.source_type === 'MODULE_ACTIVITY'
+  const savedCount = activeDrafts.filter((draft) => isMainActivity
+    ? draft.activitySubmissionStatus === 'ONLINE' || draft.activitySubmissionStatus === 'PAPER'
+    : draft.saved).length
   const pendingCount = activeDrafts.length - savedCount
   const gradedCount = activeDrafts.filter((draft) => draft.saved?.status === 'GRADED').length
+  const onlineSubmissionCount = activeDrafts.filter((draft) => draft.activitySubmissionStatus === 'ONLINE').length
+  const paperSubmissionCount = activeDrafts.filter((draft) => draft.activitySubmissionStatus === 'PAPER').length
   const zeroCount = activeDrafts.filter((draft) =>
     draft.saved?.status === 'GRADED' && Number(draft.saved.rawScore) === 0).length
   const excusedCount = activeDrafts.filter((draft) => draft.saved?.status === 'EXCUSED').length
@@ -332,7 +346,13 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
       setEditDraft(null)
       setDeleteConfirmation(null)
       setTab('enter')
-      setMessage(pendingIndex >= 0 ? 'Continuing at the first pending student.' : 'Reviewing this completed score sheet.')
+      setMessage(item.source_type === 'MODULE_ACTIVITY'
+        ? pendingIndex >= 0
+          ? 'Continue with paper scores for students who have not submitted online.'
+          : 'All students already have a final submission. Review their results.'
+        : pendingIndex >= 0
+          ? 'Continuing at the first pending student.'
+          : 'Reviewing this completed score sheet.')
     } catch (error) {
       setMessage(toErrorMessage(error))
     } finally {
@@ -522,8 +542,65 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
     if (closeRequestedRef.current) finishClose()
   }
 
-  function saveCurrent(status: ScoreStatus, rawScore: string, remarks: string) {
+  async function saveCurrent(status: ScoreStatus, rawScore: string, remarks: string) {
     if (!activeItem || !currentDraft || saving || closeRequested) return
+    if (activeItem.source_type === 'MODULE_ACTIVITY') {
+      if (currentDraft.activitySubmissionStatus === 'ONLINE') return
+      const error = scoreValueError('GRADED', rawScore, '', maximum)
+      if (error) {
+        setMessage(error)
+        return
+      }
+      setSaving(true)
+      setMessage('')
+      try {
+        let paperAttemptId = currentDraft.paperAttemptId
+        if (currentDraft.activitySubmissionStatus === 'PAPER' && paperAttemptId != null) {
+          await api(`/modules/activity-attempts/${paperAttemptId}/paper-score/`, {
+            body: JSON.stringify({ score: rawScore }),
+            method: 'PUT',
+          })
+        } else {
+          const result = await api<PaperActivityScoreBatchResult>(
+            '/modules/activity-attempts/paper-scores/',
+            {
+              body: JSON.stringify({
+                grade_item: activeItem.id,
+                scores: [{ score: rawScore, student: currentDraft.student }],
+              }),
+              method: 'POST',
+            },
+          )
+          paperAttemptId = result.attempts[0]?.id ?? null
+        }
+        const nextDraft: ScoreDraft = {
+          ...currentDraft,
+          activitySubmissionStatus: 'PAPER',
+          paperAttemptId,
+          rawScore,
+          remarks: '',
+          saved: { rawScore, remarks: '', status: 'GRADED' },
+          status: 'GRADED',
+        }
+        const nextDrafts = drafts.map((draft) =>
+          draft.student === currentDraft.student ? nextDraft : draft)
+        const nextActiveDrafts = nextDrafts.filter((draft) => draft.isActive)
+        const nextIndex = findNextPending(nextActiveDrafts, currentIndex)
+        setDrafts(nextDrafts)
+        setLastChange(null)
+        setShowSummary(nextIndex < 0)
+        setMessage(nextIndex < 0
+          ? 'Paper score saved. No students are pending.'
+          : `${currentDraft.studentName}'s paper score saved.`)
+        if (nextIndex >= 0) setCurrentIndex(nextIndex)
+        await refresh()
+      } catch (error) {
+        setMessage(toErrorMessage(error))
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     const error = scoreValueError(status, rawScore, remarks, maximum)
     if (error) {
       if (status === 'EXCUSED') setExcuseError(error)
@@ -575,7 +652,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
   }
 
   async function undoLastScore() {
-    if (!activeItem || !lastChange || saving || pendingSaveCount || closeRequested) return
+    if (!activeItem || activeItem.source_type !== 'MANUAL' || !lastChange || saving || pendingSaveCount || closeRequested) return
     setSaving(true)
     setMessage('')
     try {
@@ -631,6 +708,20 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
 
   async function advance() {
     if (!currentDraft || closeRequested) return
+    if (activeItem?.source_type === 'MODULE_ACTIVITY') {
+      if (currentIndex >= activeDrafts.length - 1) {
+        setShowSummary(true)
+        setMessage(pendingCount
+          ? 'Students you skipped remain pending and can be reviewed again.'
+          : 'All students have a final submission.')
+      } else {
+        moveToStudent(currentIndex + 1)
+        if (currentDraft.activitySubmissionStatus === 'PENDING') {
+          setMessage(`${currentDraft.studentName} remains pending.`)
+        }
+      }
+      return
+    }
     if (!currentDraft.saved) {
       await saveCurrent('GRADED', '0', '')
       return
@@ -652,7 +743,7 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
     setExcuseOpen(true)
   }
 
-  const currentError = currentDraft
+  const currentError = currentDraft && currentDraft.activitySubmissionStatus !== 'ONLINE'
     ? scoreValueError('GRADED', currentDraft.rawScore, currentDraft.remarks, maximum)
     : ''
 
@@ -708,7 +799,30 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
               <div className="class-score-setup__footer"><span><Icon name="users" /> {setup?.active_student_count ?? 0} active students</span><button className="button button--primary" disabled={saving || !setup || !selectedCategory || !title.trim() || !sheetDate || numeric(pointsPossible) <= 0} onClick={() => void startNewSheet()} type="button"><Icon name="arrow-right" /><span>{saving ? 'Starting...' : 'Start scoring'}</span></button></div>
             </div>
           ) : showSummary ? (
-            <ScoreCompletion closeRequested={closeRequested} excused={excusedCount} graded={gradedCount} inactiveDrafts={inactiveDrafts} message={message} onClose={closeDialog} onDelete={() => setDeleteConfirmation({ kind: 'sheet' })} onEdit={startEditingSheet} onReview={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing scores from the first student.') }} onSheets={() => setTab('sheets')} onUndo={lastChange ? () => void undoLastScore() : undefined} pendingSaveCount={pendingSaveCount} saving={saving} total={activeDrafts.length} zeros={zeroCount} />
+            isMainActivity ? (
+              <MainActivityScoreCompletion
+                inactiveDrafts={inactiveDrafts}
+                message={message}
+                online={onlineSubmissionCount}
+                paper={paperSubmissionCount}
+                pending={pendingCount}
+                onClose={closeDialog}
+                onReviewAll={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing Main Activity submissions.') }}
+                onReviewPending={() => {
+                  const nextPending = activeDrafts.findIndex((draft) => draft.activitySubmissionStatus === 'PENDING')
+                  if (nextPending >= 0) {
+                    setCurrentIndex(nextPending)
+                    setShowSummary(false)
+                    setMessage('Continue with students who still need a final submission.')
+                  }
+                }}
+                onSheets={() => setTab('sheets')}
+                saving={saving}
+                total={activeDrafts.length}
+              />
+            ) : (
+              <ScoreCompletion closeRequested={closeRequested} excused={excusedCount} graded={gradedCount} inactiveDrafts={inactiveDrafts} message={message} onClose={closeDialog} onDelete={() => setDeleteConfirmation({ kind: 'sheet' })} onEdit={startEditingSheet} onReview={() => { setCurrentIndex(0); setShowSummary(false); setMessage('Reviewing scores from the first student.') }} onSheets={() => setTab('sheets')} onUndo={lastChange ? () => void undoLastScore() : undefined} pendingSaveCount={pendingSaveCount} saving={saving} total={activeDrafts.length} zeros={zeroCount} />
+            )
           ) : currentDraft ? (
             <div className="attendance-roll-call score-roll-call">
               {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
@@ -716,20 +830,26 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
                 <section className="score-workspace-header">
                   <div className="class-score-sheet-heading">
                     <div><p className="eyebrow">Now scoring</p><h2>{activeItem.title}</h2><span>{formatDate(activeItem.date ?? sheetDate)} <i aria-hidden="true">·</i> {activeCategory?.name ?? 'Uncategorized'} <i aria-hidden="true">·</i> {maximum} points</span></div>
-                    <div className="class-score-sheet-heading__actions">{lastChange ? <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => void undoLastScore()} type="button">Undo last</button> : null}<button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={startEditingSheet} type="button"><Icon name="edit" /><span>Edit activity</span></button><button className="button button--secondary button--compact button--danger" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setDeleteConfirmation({ kind: 'sheet' })} type="button"><Icon name="trash" /><span>Delete sheet</span></button><button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={clearEntry} type="button"><Icon name="plus" /><span>New score sheet</span></button></div>
+                    <div className="class-score-sheet-heading__actions">{!isMainActivity && lastChange ? <button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => void undoLastScore()} type="button">Undo last</button> : null}{!isMainActivity ? <><button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={startEditingSheet} type="button"><Icon name="edit" /><span>Edit activity</span></button><button className="button button--secondary button--compact button--danger" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setDeleteConfirmation({ kind: 'sheet' })} type="button"><Icon name="trash" /><span>Delete sheet</span></button><button className="button button--secondary button--compact" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={clearEntry} type="button"><Icon name="plus" /><span>New score sheet</span></button></> : null}</div>
                   </div>
                   <div className="score-progress" role="progressbar" aria-label="Score sheet progress" aria-valuemax={activeDrafts.length} aria-valuemin={0} aria-valuenow={savedCount}>
-                    <div><strong>{progressPercent}% complete</strong><span>{savedCount} of {activeDrafts.length} saved</span></div>
+                    <div><strong>{progressPercent}% complete</strong><span>{savedCount} of {activeDrafts.length} {isMainActivity ? 'have a final submission' : 'saved'}</span></div>
                     <span aria-hidden="true"><i style={{ width: `${progressPercent}%` }} /></span>
                   </div>
                   {pendingSaveCount ? <p aria-live="polite" className="admin-message">Saving {pendingSaveCount} score{pendingSaveCount === 1 ? '' : 's'}...</p> : null}
-                  <div aria-label="Current score totals" className="score-stat-strip" role="group"><ScoreStat label="Saved" value={savedCount} tone="saved" /><ScoreStat label="Pending" value={pendingCount} tone="pending" /><ScoreStat label="Zero" value={zeroCount} tone="zero" /><ScoreStat label="Excused" value={excusedCount} tone="excused" /></div>
+                  {isMainActivity ? (
+                    <div aria-label="Main Activity submission totals" className="score-stat-strip" role="group"><ScoreStat label="Online" value={onlineSubmissionCount} tone="saved" /><ScoreStat label="Paper" value={paperSubmissionCount} tone="saved" /><ScoreStat label="Pending" value={pendingCount} tone="pending" /></div>
+                  ) : (
+                    <div aria-label="Current score totals" className="score-stat-strip" role="group"><ScoreStat label="Saved" value={savedCount} tone="saved" /><ScoreStat label="Pending" value={pendingCount} tone="pending" /><ScoreStat label="Zero" value={zeroCount} tone="zero" /><ScoreStat label="Excused" value={excusedCount} tone="excused" /></div>
+                  )}
                 </section>
                 <StudentSearch currentStudentId={currentDraft.student} disabled={saving || closeRequested} onSelect={jumpToStudent} students={activeDrafts} />
                 <div className="attendance-student-card score-student-card">
                   <div className="attendance-student-card__identity"><p className="eyebrow">Student {currentIndex + 1} of {activeDrafts.length}</p><h2 className={`attendance-student-card__name attendance-student-card__name--${studentNameLength(currentDraft.studentName)}`}>{currentDraft.studentName}</h2>{currentDraft.studentNumber ? <p>{currentDraft.studentNumber}</p> : null}</div>
-                  {currentDraft.saved?.status === 'EXCUSED' ? <span className="attendance-status attendance-status--excused">Excused</span> : currentDraft.saved ? <span className="attendance-status score-status--saved">{currentDraft.saved.rawScore} / {maximum}</span> : <span className="attendance-status attendance-status--unmarked">Pending</span>}
+                  {isMainActivity && currentDraft.activitySubmissionStatus === 'ONLINE' ? <span className="status-badge status-badge--online">Submitted online · {currentDraft.rawScore || '—'} / {maximum}</span> : isMainActivity && currentDraft.activitySubmissionStatus === 'PAPER' ? <span className="status-badge status-badge--paper">Paper submission · {currentDraft.rawScore} / {maximum}</span> : currentDraft.saved?.status === 'EXCUSED' ? <span className="attendance-status attendance-status--excused">Excused</span> : currentDraft.saved ? <span className="attendance-status score-status--saved">{currentDraft.saved.rawScore} / {maximum}</span> : <span className="attendance-status attendance-status--unmarked">Pending</span>}
                 </div>
+
+                {isMainActivity && currentDraft.activitySubmissionStatus === 'ONLINE' ? <p className="admin-message">This student submitted online. Their online score is retained; a paper score cannot be added.</p> : null}
 
                 {excuseOpen ? (
                   <div className="attendance-excuse-form">
@@ -739,15 +859,15 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
                   </div>
                 ) : (
                   <form className="score-entry-form" onSubmit={(event) => { event.preventDefault(); void saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks) }}>
-                    <label className="admin-field score-entry-form__score"><span>Score</span><span className="score-value-input"><input aria-describedby={currentError ? `score-error-${currentDraft.student}` : undefined} aria-invalid={Boolean(currentError && currentDraft.rawScore)} aria-label={`Score for ${currentDraft.studentName}`} disabled={saving || closeRequested} max={maximum} min="0" onChange={(event) => updateCurrent({ rawScore: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks) } }} placeholder="0" ref={scoreInputRef} required step="0.01" type="number" value={currentDraft.rawScore} /><strong>/ {maximum}</strong></span></label>
-                    <label className="admin-field score-entry-form__remarks"><span>Remarks <small>Optional</small></span><input aria-label={`Remarks for ${currentDraft.studentName}`} disabled={saving || closeRequested} maxLength={160} onChange={(event) => updateCurrent({ remarks: event.target.value })} placeholder="Add a short note" value={currentDraft.remarks} /></label>
+                    <label className="admin-field score-entry-form__score"><span>{isMainActivity ? 'Paper score' : 'Score'}</span><span className="score-value-input"><input aria-describedby={currentError ? `score-error-${currentDraft.student}` : undefined} aria-invalid={Boolean(currentError && currentDraft.rawScore)} aria-label={`${isMainActivity ? 'Paper score' : 'Score'} for ${currentDraft.studentName}`} disabled={saving || closeRequested || currentDraft.activitySubmissionStatus === 'ONLINE'} max={maximum} min="0" onChange={(event) => updateCurrent({ rawScore: event.target.value })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks) } }} placeholder="0" ref={scoreInputRef} required step="0.01" type="number" value={currentDraft.rawScore} /><strong>/ {maximum}</strong></span></label>
+                    {!isMainActivity ? <label className="admin-field score-entry-form__remarks"><span>Remarks <small>Optional</small></span><input aria-label={`Remarks for ${currentDraft.studentName}`} disabled={saving || closeRequested} maxLength={160} onChange={(event) => updateCurrent({ remarks: event.target.value })} placeholder="Add a short note" value={currentDraft.remarks} /></label> : null}
                     {currentError && currentDraft.rawScore ? <small className="class-score-field-error score-entry-form__error" id={`score-error-${currentDraft.student}`}>{currentError}</small> : null}
                   </form>
                 )}
 
-                <p className="attendance-keyboard-hint">Keyboard: Enter Record score · ← Previous · → Next or Skip as 0 · U Undo</p>
+                <p className="attendance-keyboard-hint">{isMainActivity ? 'Keyboard: Enter Record paper score · ← Previous · → Next (skipped students stay pending)' : 'Keyboard: Enter Record score · ← Previous · → Next or Skip as 0 · U Undo'}</p>
                 {inactiveDrafts.length ? <InactiveHistory drafts={inactiveDrafts} /> : null}
-                {!excuseOpen ? <div className="score-runner-actions"><button aria-label="Previous student" className="button button--secondary" disabled={saving || closeRequested || currentIndex === 0} onClick={() => moveToStudent(currentIndex - 1)} type="button"><Icon name="arrow-left" /><span>Previous</span></button><button className="button button--secondary" disabled={saving || closeRequested} onClick={openExcuse} type="button"><Icon name="warning" /><span>Excused</span></button>{currentDraft.saved ? <button className="button button--secondary button--danger" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setDeleteConfirmation({ kind: 'score', student: currentDraft.student, studentName: currentDraft.studentName })} type="button"><Icon name="trash" /><span>Clear score</span></button> : null}<button className="button button--primary" disabled={saving || closeRequested || Boolean(currentError)} onClick={() => saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks)} type="button"><Icon name="save" /><span>{currentDraft.saved ? 'Update score' : 'Record score'}</span></button><button aria-label={currentDraft.saved ? 'Next student' : 'Skip as 0'} className="button button--secondary" disabled={saving || closeRequested} onClick={() => void advance()} type="button"><span>{currentDraft.saved ? 'Next' : 'Skip as 0'}</span><Icon name="arrow-right" /></button></div> : null}
+                {!excuseOpen ? <div className="score-runner-actions"><button aria-label="Previous student" className="button button--secondary" disabled={saving || closeRequested || currentIndex === 0} onClick={() => moveToStudent(currentIndex - 1)} type="button"><Icon name="arrow-left" /><span>Previous</span></button>{!isMainActivity ? <button className="button button--secondary" disabled={saving || closeRequested} onClick={openExcuse} type="button"><Icon name="warning" /><span>Excused</span></button> : null}{!isMainActivity && currentDraft.saved ? <button className="button button--secondary button--danger" disabled={saving || Boolean(pendingSaveCount) || closeRequested} onClick={() => setDeleteConfirmation({ kind: 'score', student: currentDraft.student, studentName: currentDraft.studentName })} type="button"><Icon name="trash" /><span>Clear score</span></button> : null}<button className="button button--primary" disabled={saving || closeRequested || currentDraft.activitySubmissionStatus === 'ONLINE' || Boolean(currentError)} onClick={() => void saveCurrent('GRADED', currentDraft.rawScore, currentDraft.remarks)} type="button"><Icon name={currentDraft.saved ? 'edit' : 'save'} /><span>{isMainActivity ? currentDraft.activitySubmissionStatus === 'PAPER' ? 'Update paper score' : 'Record paper score' : currentDraft.saved ? 'Update score' : 'Record score'}</span></button><button aria-label={isMainActivity && currentDraft.activitySubmissionStatus === 'PENDING' ? 'Skip student and leave pending' : currentDraft.saved ? 'Next student' : 'Skip as 0'} className="button button--secondary" disabled={saving || closeRequested} onClick={() => void advance()} type="button"><span>{isMainActivity ? currentDraft.activitySubmissionStatus === 'PENDING' ? 'Skip (stay pending)' : 'Next' : currentDraft.saved ? 'Next' : 'Skip as 0'}</span><Icon name="arrow-right" /></button></div> : null}
               </div>
             </div>
           ) : <p className="admin-empty-line">No active students are available for this score sheet.</p>}
@@ -760,9 +880,9 @@ export function ClassScoresDialog({ api, data, onClose, refresh, retrySetup, sch
             <div className="class-score-sheet-list">
             {filteredScoreSheets.map((item) => {
               const category = gradeCategories.find((candidate) => candidate.id === item.grade_category)
-              return <button disabled={saving || Boolean(pendingSaveCount) || closeRequested} key={item.id} onClick={() => void openSheet(item)} type="button"><span className="class-score-sheet-list__main"><strong>{item.title}</strong><span><small>{category?.name ?? 'Unknown category'}</small><small>{category ? periodLabels[category.grading_period as keyof typeof periodLabels] : 'Unknown period'}</small><small>{numeric(item.points_possible)} points</small></span></span><span className="class-score-sheet-list__date"><Icon name="calendar" />{item.date ? formatDate(item.date) : 'No date'}</span><Icon name="arrow-right" /></button>
+              return <button disabled={saving || Boolean(pendingSaveCount) || closeRequested} key={item.id} onClick={() => void openSheet(item)} type="button"><span className="class-score-sheet-list__main"><strong>{item.title}</strong><span>{item.source_type === 'MODULE_ACTIVITY' ? <small>Main Activity</small> : null}<small>{category?.name ?? 'Unknown category'}</small><small>{category ? periodLabels[category.grading_period as keyof typeof periodLabels] : 'Unknown period'}</small><small>{numeric(item.points_possible)} points</small></span></span><span className="class-score-sheet-list__date"><Icon name="calendar" />{item.date ? formatDate(item.date) : 'No date'}</span><Icon name="arrow-right" /></button>
             })}
-            {!scoreSheets.length ? <p className="admin-empty-line">No manual score sheets for this class yet.</p> : null}
+            {!scoreSheets.length ? <p className="admin-empty-line">No score sheets or linked Main Activities for this class yet.</p> : null}
             {scoreSheets.length && !filteredScoreSheets.length ? <div className="class-score-search-empty"><Icon name="search" /><strong>No score sheets found</strong><span>Try a different title, category, period, date, or point value.</span><button className="button button--secondary button--compact" onClick={() => setSheetQuery('')} type="button">Clear search</button></div> : null}
             </div>
           </div>}
@@ -857,6 +977,28 @@ function ScoreCompletion({ closeRequested, excused, graded, inactiveDrafts, mess
   </div></div>
 }
 
+function MainActivityScoreCompletion({ inactiveDrafts, message, online, onClose, onReviewAll, onReviewPending, onSheets, paper, pending, saving, total }: {
+  inactiveDrafts: ScoreDraft[]
+  message: string
+  online: number
+  onClose: () => void
+  onReviewAll: () => void
+  onReviewPending: () => void
+  onSheets: () => void
+  paper: number
+  pending: number
+  saving: boolean
+  total: number
+}) {
+  return <div className="attendance-roll-call score-roll-call"><div className="attendance-completion">
+    <div className="attendance-completion__heading"><span className="attendance-completion__icon"><Icon name="check" /></span><div><p className="eyebrow">Main Activity reviewed</p><h2>{total - pending} of {total} students have a final submission</h2><p>Online submissions stay as submitted. Skipped students remain pending.</p></div></div>
+    {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
+    <div aria-label="Main Activity submission totals" className="attendance-breakdown__stats" role="group"><ScoreTotal label="Online" value={online} /><ScoreTotal label="Paper" value={paper} /><ScoreTotal label="Pending" value={pending} /></div>
+    {inactiveDrafts.length ? <InactiveHistory drafts={inactiveDrafts} /> : null}
+    <div className="class-modal-actions"><button className="button button--secondary" disabled={saving} onClick={onSheets} type="button">Score sheets</button><button className="button button--secondary" disabled={saving || pending === 0} onClick={onReviewPending} type="button">Review pending</button><button className="button button--secondary" disabled={saving} onClick={onReviewAll} type="button">Review all</button><button className="button button--primary" disabled={saving} onClick={onClose} type="button">Close</button></div>
+  </div></div>
+}
+
 function ScoreDeleteConfirmation({ confirmation, onCancel, onConfirm, savedCount, saving, sheetTitle }: {
   confirmation: DeleteConfirmation
   onCancel: () => void
@@ -880,7 +1022,7 @@ function ScoreTotal({ label, value }: { label: string; value: number }) {
 }
 
 function InactiveHistory({ drafts }: { drafts: ScoreDraft[] }) {
-  return <details className="class-score-history"><summary>Inactive student history ({drafts.length})</summary><div className="table-wrap class-score-table-wrap"><table className="admin-table class-score-table mobile-card-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Remarks</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.student}><td data-label="Student"><strong>{draft.studentName}</strong><span>{draft.studentNumber}</span></td><td data-label="Score">{draft.saved?.status === 'GRADED' ? draft.saved.rawScore : '—'}</td><td data-label="Status">{draft.saved?.status === 'EXCUSED' ? 'Excused' : draft.saved ? 'Graded' : 'Pending'}</td><td data-label="Remarks">{draft.saved?.remarks || '—'}</td></tr>)}</tbody></table></div></details>
+  return <details className="class-score-history"><summary>Inactive student history ({drafts.length})</summary><div className="table-wrap class-score-table-wrap"><table className="admin-table class-score-table mobile-card-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Remarks</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.student}><td data-label="Student"><strong>{draft.studentName}</strong><span>{draft.studentNumber}</span></td><td data-label="Score">{draft.saved?.status === 'GRADED' ? draft.saved.rawScore : '—'}</td><td data-label="Status">{scoreDraftStatus(draft)}</td><td data-label="Remarks">{draft.saved?.remarks || '—'}</td></tr>)}</tbody></table></div></details>
 }
 
 function scoreValueError(status: ScoreStatus, rawScore: string, remarks: string, maximum: number) {
@@ -892,6 +1034,9 @@ function scoreValueError(status: ScoreStatus, rawScore: string, remarks: string,
 }
 
 function scoreDraftStatus(draft: ScoreDraft) {
+  if (draft.activitySubmissionStatus === 'ONLINE') return 'Online'
+  if (draft.activitySubmissionStatus === 'PAPER') return 'Paper'
+  if (draft.activitySubmissionStatus === 'PENDING') return 'Pending'
   if (!draft.saved) return 'Pending'
   return draft.saved.status === 'EXCUSED' ? 'Excused' : 'Graded'
 }
@@ -914,8 +1059,15 @@ function normalizeSearch(value: string) {
 
 function apiRowToDraft(row: ScoreSheetResponse['rows'][number]): ScoreDraft {
   const displayName = row.student_full_name || row.student_name
-  const saved = row.score_id == null ? null : { rawScore: row.raw_score ?? '', remarks: row.remarks, status: row.status }
-  return { isActive: row.is_active, rawScore: saved?.rawScore ?? '', remarks: saved?.remarks ?? '', saved, scoreId: row.score_id, status: saved?.status ?? 'GRADED', student: row.student, studentName: displayName, studentNumber: row.student_number }
+  const activitySubmissionStatus = row.submission_status ?? null
+  const activityHasFinalSubmission = activitySubmissionStatus === 'ONLINE' || activitySubmissionStatus === 'PAPER'
+  const rawScore = activitySubmissionStatus === 'PAPER'
+    ? row.paper_score ?? row.raw_score ?? ''
+    : row.raw_score ?? ''
+  const saved = activitySubmissionStatus
+    ? activityHasFinalSubmission ? { rawScore, remarks: '', status: 'GRADED' as const } : null
+    : row.score_id == null ? null : { rawScore: row.raw_score ?? '', remarks: row.remarks, status: row.status }
+  return { activitySubmissionStatus, isActive: row.is_active, rawScore: saved?.rawScore ?? '', remarks: saved?.remarks ?? '', saved, paperAttemptId: row.paper_attempt_id ?? null, scoreId: row.score_id, status: saved?.status ?? 'GRADED', student: row.student, studentName: displayName, studentNumber: row.student_number }
 }
 
 function applySavedScore(draft: ScoreDraft, response: SavedScoreResponse): ScoreDraft {

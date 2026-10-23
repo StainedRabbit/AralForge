@@ -1284,9 +1284,132 @@ test('scores dialog opens immediately, retries setup, and loads sheets on demand
   await expect(dialog.getByLabel('Title')).toBeVisible()
   await expect(dialog).toContainText('2 active students')
   await dialog.getByRole('tab', { name: 'Score sheets' }).click()
-  await expect(dialog.getByText('No manual score sheets for this class yet.')).toBeVisible()
+  await expect(dialog.getByText('No score sheets or linked Main Activities for this class yet.')).toBeVisible()
   expect(sheetRequests).toBe(1)
   await dialog.getByRole('button', { name: 'Close scores' }).click()
+})
+
+test('class score sheets show Main Activities and allow paper scores without changing online submissions', async ({ page }) => {
+  await openClasses(page)
+  await selectClass(page, 'E2E101')
+
+  let quizCategoryId = 0
+  let quizSubjectId = 0
+  let scheduleId = 0
+  await page.route(/\/workspace\//, async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('section') !== 'scores') {
+      await route.continue()
+      return
+    }
+    if (url.searchParams.get('view') === 'setup') {
+      const response = await route.fetch()
+      const payload = await response.json() as { grade_categories: Array<{ id: number; subject: number; category: string }> }
+      const category = payload.grade_categories.find((candidate) => candidate.category === 'QUIZ')
+      if (!category) throw new Error('The class fixture must have a Quiz category.')
+      quizCategoryId = category.id
+      quizSubjectId = category.subject
+      await route.fulfill({ response, json: payload })
+      return
+    }
+    if (url.searchParams.get('view') === 'sheets') {
+      scheduleId = Number(url.pathname.match(/subject-schedules\/(\d+)\/workspace/)?.[1])
+      const response = await route.fetch()
+      const payload = await response.json() as { grade_items: unknown[] }
+      payload.grade_items.push({
+        id: 900001,
+        schedule: scheduleId,
+        grade_category: quizCategoryId,
+        subject: quizSubjectId,
+        title: 'Mock Main Activity',
+        date: '2026-10-14',
+        points_possible: '10.00',
+        order: 99,
+        is_required: true,
+        source_type: 'MODULE_ACTIVITY',
+        module_activity: 900002,
+        attendance_session: null,
+        source_title: 'Mock Main Activity',
+        source_points_possible: '10.00',
+        created_at: '2026-10-14T08:00:00Z',
+        updated_at: '2026-10-14T08:00:00Z',
+      })
+      await route.fulfill({ response, json: payload })
+      return
+    }
+    await route.continue()
+  })
+  await page.route('**/api/grades/items/900001/roster/', async route => {
+    await route.fulfill({
+      json: {
+        item: {
+          id: 900001,
+          schedule: scheduleId,
+          grade_category: quizCategoryId,
+          subject: quizSubjectId,
+          title: 'Mock Main Activity',
+          date: '2026-10-14',
+          points_possible: '10.00',
+          order: 99,
+          is_required: true,
+          source_type: 'MODULE_ACTIVITY',
+          module_activity: 900002,
+          attendance_session: null,
+          source_title: 'Mock Main Activity',
+          source_points_possible: '10.00',
+          created_at: '2026-10-14T08:00:00Z',
+          updated_at: '2026-10-14T08:00:00Z',
+        },
+        rows: [
+          { student: 900101, student_full_name: 'Alex Rivera', student_name: 'Alex Rivera', student_number: 'E2E-001', is_active: true, score_id: null, raw_score: null, status: 'GRADED', remarks: '', submission_status: 'PENDING', paper_attempt_id: null, paper_score: null },
+          { student: 900102, student_full_name: 'Jamie Santos', student_name: 'Jamie Santos', student_number: 'E2E-002', is_active: true, score_id: 900103, raw_score: '8.00', status: 'GRADED', remarks: '', submission_status: 'ONLINE', paper_attempt_id: null, paper_score: null },
+        ],
+        counts: { active_count: 2, excused_count: 0, graded_count: 1, student_count: 2, zero_count: 0 },
+      },
+    })
+  })
+  let submittedPaperScore: { grade_item: number; scores: Array<{ score: string; student: number }> } | null = null
+  await page.route('**/api/modules/activity-attempts/paper-scores/', async route => {
+    submittedPaperScore = route.request().postDataJSON() as typeof submittedPaperScore
+    await route.fulfill({ json: { attempts: [{ id: 900104 }], created_count: 1, updated_count: 0 } })
+  })
+  let correctedPaperScore = ''
+  await page.route('**/api/modules/activity-attempts/900104/paper-score/', async route => {
+    correctedPaperScore = (route.request().postDataJSON() as { score: string }).score
+    await route.fulfill({ json: { id: 900104, score: correctedPaperScore, student: 900101 } })
+  })
+
+  await page.getByRole('button', { name: 'Scores', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Class scores' })
+  const scoreSheetsTab = dialog.getByRole('tab', { name: 'Score sheets' })
+  await expect(scoreSheetsTab).toBeEnabled()
+  await scoreSheetsTab.click()
+  const mainActivityButton = dialog.getByRole('button', { name: /Mock Main Activity/ })
+  await expect(mainActivityButton).toBeVisible()
+  await expect(mainActivityButton).toContainText('Main Activity')
+  await mainActivityButton.click()
+
+  await expect(dialog.getByRole('heading', { name: 'Alex Rivera' })).toBeVisible()
+  await expect(dialog.getByLabel('Paper score for Alex Rivera')).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Skip student and leave pending' }).click()
+  await expect(dialog.getByRole('heading', { name: 'Jamie Santos' })).toBeVisible()
+  await expect(dialog.getByLabel('Paper score for Jamie Santos')).toBeDisabled()
+  await expect(dialog.getByText(/Submitted online/)).toBeVisible()
+  const studentSearch = dialog.getByRole('combobox', { name: 'Find a student' })
+  await studentSearch.fill('Alex Rivera')
+  await expect(dialog.getByRole('option')).toContainText('Pending')
+  await dialog.getByRole('option').click()
+  await dialog.getByLabel('Paper score for Alex Rivera').fill('0')
+  await dialog.getByRole('button', { name: 'Record paper score' }).click()
+  await expect(dialog.getByRole('heading', { name: '2 of 2 students have a final submission' })).toBeVisible()
+  expect(submittedPaperScore).toEqual({ grade_item: 900001, scores: [{ score: '0', student: 900101 }] })
+  await dialog.getByRole('button', { name: 'Review all' }).click()
+  await expect(dialog.getByLabel('Paper score for Alex Rivera')).toHaveValue('0')
+  await dialog.getByLabel('Paper score for Alex Rivera').fill('4')
+  await dialog.getByRole('button', { name: 'Update paper score' }).click()
+  await expect(dialog.getByRole('heading', { name: '2 of 2 students have a final submission' })).toBeVisible()
+  expect(correctedPaperScore).toBe('4')
+  expect(scheduleId).toBeGreaterThan(0)
 })
 
 test('creates, edits, clears, and deletes a class score sheet', async ({ page }) => {

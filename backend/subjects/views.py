@@ -359,9 +359,15 @@ class SubjectScheduleViewSet(viewsets.ModelViewSet):
                     'active_student_count': schedule.students.filter(is_active=True).count(),
                 })
 
-            items = GradeItem.objects.filter(
-                schedule=schedule, source_type='MANUAL',
-            ).select_related('grade_category__subject')
+            items = GradeItem.objects.filter(schedule=schedule).filter(
+                Q(source_type='MANUAL')
+                | Q(
+                    source_type='MODULE_ACTIVITY',
+                    module_activity__activity_type='INTERACTIVE',
+                    module_activity__lesson__isnull=False,
+                    module_activity__is_published=True,
+                )
+            ).select_related('grade_category__subject', 'module_activity')
             return Response({
                 'grade_items': GradeItemSerializer(items, many=True, context=context).data,
             })

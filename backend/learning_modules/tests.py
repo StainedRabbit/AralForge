@@ -1374,6 +1374,45 @@ class PaperMainActivityEntryApiTests(APITestCase):
             ],
         }
 
+    def test_activity_roster_reports_online_paper_and_pending_students(self):
+        pending_student = User.objects.create_user(
+            username='paper-pending', password='testpass123', role=User.Role.STUDENT,
+        )
+        ScheduleStudent.objects.create(schedule=self.schedule, student=pending_student)
+        online_attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.other_student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+            score=Decimal('7.00'),
+            max_score=Decimal('12.00'),
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.teacher)
+        recorded = self.client.post(
+            '/api/modules/activity-attempts/paper-scores/',
+            self.paper_payload([{'student': self.student.id, 'score': '0.00'}]),
+            format='json',
+        )
+        self.assertEqual(recorded.status_code, 200, recorded.data)
+
+        response = self.client.get(f'/api/grades/items/{self.item.id}/roster/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = {row['student']: row for row in response.data['rows']}
+        paper_row = rows[self.student.id]
+        self.assertEqual(paper_row['submission_status'], 'PAPER')
+        self.assertEqual(paper_row['paper_attempt_id'], recorded.data['attempts'][0]['id'])
+        self.assertEqual(Decimal(paper_row['paper_score']), Decimal('0.00'))
+        online_row = rows[self.other_student.id]
+        self.assertEqual(online_row['submission_status'], 'ONLINE')
+        self.assertIsNone(online_row['paper_attempt_id'])
+        self.assertEqual(online_row['raw_score'], '7.00')
+        self.assertEqual(rows[pending_student.id]['submission_status'], 'PENDING')
+
     def test_teacher_records_batch_and_corrects_score_without_answers(self):
         abandoned = ModuleActivityAttempt.objects.create(
             activity=self.activity,

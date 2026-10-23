@@ -516,7 +516,8 @@ class SubjectScheduleApiTests(APITestCase):
 
     def test_class_workspace_loads_only_the_requested_section(self):
         from attendance.models import AttendanceRecord, AttendanceSession
-        from grades.models import GradeCategory, GradeCategoryChoices, GradeItem, StudentGradeItemScore
+        from grades.models import GradeCategory, GradeCategoryChoices, GradeItem, GradeItemSourceType, StudentGradeItemScore
+        from learning_modules.models import Module, ModuleActivity, ModuleLesson, ModuleTopic
 
         schedule = self.create_schedule()
         ScheduleStudent.objects.create(schedule=schedule, student=self.student)
@@ -541,6 +542,45 @@ class SubjectScheduleApiTests(APITestCase):
             grade_category=category,
             title='Quiz 1',
             points_possible=10,
+        )
+        module = Module.objects.create(
+            title='Workspace module', slug='workspace-module', subject=self.subject,
+        )
+        topic = ModuleTopic.objects.create(module=module, title='Workspace topic')
+        lesson = ModuleLesson.objects.create(topic=topic, title='Workspace lesson')
+        activity = ModuleActivity.objects.create(
+            module=module,
+            lesson=lesson,
+            title='Workspace Main Activity',
+            instructions='Complete the activity.',
+            activity_type=ModuleActivity.ActivityType.INTERACTIVE,
+            points_possible=10,
+            is_published=True,
+        )
+        activity_item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=category,
+            title=activity.title,
+            points_possible=10,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=activity,
+        )
+        standalone_activity = ModuleActivity.objects.create(
+            module=module,
+            topic=topic,
+            title='Standalone written activity',
+            instructions='Write a response.',
+            activity_type=ModuleActivity.ActivityType.TEXT,
+            points_possible=10,
+            is_published=True,
+        )
+        standalone_item = GradeItem.objects.create(
+            schedule=schedule,
+            grade_category=category,
+            title=standalone_activity.title,
+            points_possible=10,
+            source_type=GradeItemSourceType.MODULE_ACTIVITY,
+            module_activity=standalone_activity,
         )
         StudentGradeItemScore.objects.create(grade_item=item, student=self.student, raw_score=9)
         self.client.force_authenticate(self.teacher)
@@ -571,7 +611,10 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertEqual(len(history.data['attendance_sessions']), 1)
         self.assertEqual(len(history.data['attendance_records']), 1)
         self.assertEqual(scores.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(scores.data['grade_items']), 1)
+        self.assertEqual(
+            {row['id'] for row in scores.data['grade_items']},
+            {item.id, activity_item.id, standalone_item.id},
+        )
         self.assertEqual(scores.data['grade_item_scores'], [])
         self.assertEqual(score_setup.status_code, status.HTTP_200_OK)
         self.assertEqual(score_setup.data['active_student_count'], 1)
@@ -579,7 +622,11 @@ class SubjectScheduleApiTests(APITestCase):
         self.assertNotIn('enrollments', score_setup.data)
         self.assertNotIn('grade_items', score_setup.data)
         self.assertEqual(score_sheets.status_code, status.HTTP_200_OK)
-        self.assertEqual([row['id'] for row in score_sheets.data['grade_items']], [item.id])
+        self.assertEqual({row['id'] for row in score_sheets.data['grade_items']}, {item.id, activity_item.id})
+        self.assertEqual(
+            next(row for row in score_sheets.data['grade_items'] if row['id'] == activity_item.id)['source_type'],
+            'MODULE_ACTIVITY',
+        )
         self.assertNotIn('enrollments', score_sheets.data)
         self.assertEqual(grades.status_code, status.HTTP_200_OK)
         self.assertEqual(len(grades.data['grade_item_scores']), 1)
@@ -587,6 +634,7 @@ class SubjectScheduleApiTests(APITestCase):
 
     def test_score_sheets_workspace_stays_to_one_item_query(self):
         from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
+        from learning_modules.models import Module, ModuleActivity, ModuleLesson, ModuleTopic
 
         schedule = self.create_schedule()
         other_schedule = SubjectSchedule.objects.create(
@@ -610,6 +658,22 @@ class SubjectScheduleApiTests(APITestCase):
             schedule=schedule, grade_category=category,
             title='Module score', points_possible=10, source_type='MODULE_ACTIVITY',
         )
+        module = Module.objects.create(title='Linked module', slug='linked-module', subject=self.subject)
+        topic = ModuleTopic.objects.create(module=module, title='Linked topic')
+        lesson = ModuleLesson.objects.create(topic=topic, title='Linked lesson')
+        activity = ModuleActivity.objects.create(
+            module=module,
+            lesson=lesson,
+            title='Linked Main Activity',
+            instructions='Complete the activity.',
+            points_possible=10,
+            is_published=True,
+        )
+        GradeItem.objects.create(
+            schedule=schedule, grade_category=category,
+            title=activity.title, points_possible=10,
+            source_type='MODULE_ACTIVITY', module_activity=activity,
+        )
         self.client.force_authenticate(self.teacher)
         url = reverse('subjects:subject-schedule-workspace', args=[schedule.id])
 
@@ -617,7 +681,7 @@ class SubjectScheduleApiTests(APITestCase):
             response = self.client.get(url, {'section': 'scores', 'view': 'sheets'})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['grade_items']), 15)
+        self.assertEqual(len(response.data['grade_items']), 16)
         sql = [query['sql'].lower() for query in queries.captured_queries]
         self.assertEqual(sum('from "grades_gradeitem"' in query for query in sql), 1)
 
