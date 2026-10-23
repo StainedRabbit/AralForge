@@ -543,7 +543,8 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
           <button aria-selected={tab === 'history'} className={tab === 'history' ? 'active' : ''} disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={() => void openHistory()} role="tab" type="button">History</button>
         </div>
 
-        {tab === 'take' ? <div className="attendance-roll-call">
+        <div className="class-attendance-dialog__content">
+          {tab === 'take' ? <div className="attendance-roll-call">
           {message ? <p aria-live="polite" className="admin-message">{message}</p> : null}
           {takeLoading ? <p aria-live="polite" className="admin-message" role="status">Loading class roster...</p> : null}
           {!takeLoading && takeError ? <div className="admin-message" role="alert"><p>{takeError}</p><button className="button button--secondary button--compact" onClick={retryTake} type="button">Retry</button></div> : null}
@@ -637,9 +638,10 @@ export function ClassAttendanceDialog({ api, data, initialTab, onClose, refresh,
               <button className="button button--secondary" disabled={saving || excuseOpen} onClick={advanceWithoutMark} type="button"><span>{currentDraft?.status ? 'Next' : 'Skip for now'}</span><Icon name="arrow-right" /></button>
             </div>
           </div> : null}
-        </div> : historyQuery.isPending ? <p aria-live="polite" className="admin-message" role="status">Loading attendance history...</p>
+          </div> : historyQuery.isPending ? <p aria-live="polite" className="admin-message" role="status">Loading attendance history...</p>
           : historyQuery.isError ? <div className="admin-message" role="alert"><p>{toErrorMessage(historyQuery.error)}</p><button className="button button--secondary button--compact" onClick={() => void historyQuery.refetch()} type="button">Retry</button></div>
             : <ClassAttendanceHistory api={api} data={attendanceData} refresh={refresh} schedule={schedule} />}
+        </div>
       </div>
     </div>
   )

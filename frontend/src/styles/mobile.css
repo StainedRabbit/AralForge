@@ -947,6 +947,19 @@
     border-radius: 0;
   }
 
+  .class-attendance-dialog {
+    grid-template-rows: max-content max-content minmax(0, 1fr);
+    align-content: start;
+    overflow: hidden;
+  }
+
+  .class-attendance-dialog__content {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
   .resource-drawer__actions,
   .class-modal-actions,
   .lesson-focus-modal__footer {
