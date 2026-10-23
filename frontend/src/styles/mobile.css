@@ -1005,6 +1005,24 @@
 }
 
 @media (max-width: 640px) {
+  .attendance-completion__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .attendance-completion__actions .button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 8px;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .attendance-completion__actions .button--primary {
+    grid-column: 1 / -1;
+  }
+
   .student-module-library__toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -1049,6 +1067,16 @@
   .student-module-context-dialog__panel {
     width: 100%;
     padding: 20px;
+  }
+}
+
+@media (max-width: 380px) {
+  .attendance-completion__actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .attendance-completion__actions .button--primary {
+    grid-column: auto;
   }
 }
 

@@ -670,7 +670,7 @@ function AttendanceCompletion({ closeRequested, onClose, onHistory, onReview, on
       <AttendanceTotal label="Excused" value={summary.excused} />
     </div>
     {pendingMarkCount ? <p aria-live="polite" className="admin-message">Saving {pendingMarkCount} mark{pendingMarkCount === 1 ? '' : 's'}...</p> : null}
-    <div className="class-modal-actions">
+    <div className="class-modal-actions attendance-completion__actions">
       {onUndo ? <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onUndo} type="button">Undo last</button> : null}
       <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onReview} type="button"><Icon name="arrow-left" /><span>Review from first</span></button>
       <button className="button button--secondary" disabled={saving || Boolean(pendingMarkCount) || closeRequested} onClick={onHistory} type="button"><Icon name="search" /><span>History</span></button>
