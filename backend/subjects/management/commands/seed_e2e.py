@@ -307,6 +307,8 @@ class Command(BaseCommand):
             title='Paper **Queue** *Quiz* `v1` [Guide](/modules)',
             instructions='Complete the printed Quiz for manual checking.',
             points_possible=10,
+            max_attempts=2,
+            passing_score=10,
             grading_period=GradingPeriod.PRELIM,
             is_published=True,
         )
@@ -329,6 +331,13 @@ class Command(BaseCommand):
             text='Incorrect response',
             is_correct=False,
             order=2,
+        )
+        ModuleAccess.objects.create(
+            access_type=ModuleAccess.AccessType.ADVANCE_STUDY,
+            activated_by=teacher,
+            expires_at=timezone.now() + timedelta(days=30),
+            module=workflow_module,
+            student=students[0],
         )
         review_activity = ModuleActivity.objects.create(
             module=workflow_module,

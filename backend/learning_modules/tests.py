@@ -3657,6 +3657,131 @@ class LessonMainActivityApiTests(APITestCase):
             6,
         )
 
+    def test_multiple_choice_grading_uses_choice_ids_when_presentation_order_changes(self):
+        question = self.create_question(
+            ModuleActivityQuestion.QuestionType.MULTIPLE_CHOICE,
+            1,
+            explanation='The correct response is identified by its choice, not its position.',
+        )
+        correct_choice = ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='Correct response',
+            is_correct=True,
+            order=0,
+        )
+        first_wrong_choice = ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='First incorrect response',
+            is_correct=False,
+            order=1,
+        )
+        ModuleActivityQuestionChoice.objects.create(
+            question=question,
+            text='Second incorrect response',
+            is_correct=False,
+            order=2,
+        )
+        self.client.force_authenticate(self.student)
+
+        with patch(
+            'learning_modules.services.activity_snapshots.random.Random.shuffle',
+            lambda _generator, values: values.reverse(),
+        ):
+            correct_attempt_response = self.start_attempt()
+            correct_attempt = correct_attempt_response.data['attempt']
+            snapshot_question = correct_attempt['question_snapshot'][0]
+            snapshot_correct_choice = next(
+                choice
+                for choice in snapshot_question['choices']
+                if choice['id'] == correct_choice.id
+            )
+
+            self.assertEqual(correct_attempt_response.status_code, 201)
+            self.assertNotEqual(
+                snapshot_correct_choice['presentation_order'],
+                snapshot_correct_choice['order'],
+            )
+            self.assertTrue(all(
+                'is_correct' not in choice
+                for choice in snapshot_question['choices']
+            ))
+
+            correct_draft_response = self.client.patch(
+                self.context_url(
+                    f'/api/modules/activity-attempts/{correct_attempt["id"]}/draft/'
+                ),
+                {
+                    'base_revision': correct_attempt['draft_revision'],
+                    'answers': {str(question.id): {
+                        'selected_choice': correct_choice.id,
+                        'text_answer': '',
+                        'choice_order': [],
+                        'matching_answer': {},
+                    }},
+                },
+                format='json',
+            )
+            self.assertEqual(correct_draft_response.status_code, 200, correct_draft_response.data)
+            correct_submit_response = self.client.post(
+                self.context_url(
+                    f'/api/modules/activity-attempts/{correct_attempt["id"]}/submit/'
+                ),
+                {'draft_revision': correct_draft_response.data['draft_revision']},
+                format='json',
+            )
+
+            self.assertEqual(correct_submit_response.status_code, 200)
+            self.assertEqual(
+                Decimal(correct_submit_response.data['attempt']['score']),
+                Decimal('1.00'),
+            )
+            self.assertEqual(
+                correct_submit_response.data['attempt']['draft_answers'][str(question.id)]['selected_choice'],
+                correct_choice.id,
+            )
+
+            wrong_attempt_response = self.start_attempt()
+            wrong_attempt = wrong_attempt_response.data['attempt']
+            wrong_draft_response = self.client.patch(
+                self.context_url(
+                    f'/api/modules/activity-attempts/{wrong_attempt["id"]}/draft/'
+                ),
+                {
+                    'base_revision': wrong_attempt['draft_revision'],
+                    'answers': {str(question.id): {
+                        'selected_choice': first_wrong_choice.id,
+                        'text_answer': '',
+                        'choice_order': [],
+                        'matching_answer': {},
+                    }},
+                },
+                format='json',
+            )
+            self.assertEqual(wrong_draft_response.status_code, 200, wrong_draft_response.data)
+            wrong_submit_response = self.client.post(
+                self.context_url(
+                    f'/api/modules/activity-attempts/{wrong_attempt["id"]}/submit/'
+                ),
+                {'draft_revision': wrong_draft_response.data['draft_revision']},
+                format='json',
+            )
+
+        self.assertEqual(wrong_submit_response.status_code, 200)
+        self.assertEqual(
+            Decimal(wrong_submit_response.data['attempt']['score']),
+            Decimal('0.00'),
+        )
+        saved_answer = wrong_submit_response.data['attempt']['draft_answers'][str(question.id)]
+        self.assertEqual(saved_answer['selected_choice'], first_wrong_choice.id)
+        self.assertFalse(saved_answer['is_correct'])
+        reviewed_question = wrong_submit_response.data['attempt']['question_snapshot'][0]
+        reviewed_correct_choice = next(
+            choice
+            for choice in reviewed_question['choices']
+            if choice['id'] == correct_choice.id
+        )
+        self.assertTrue(reviewed_correct_choice['is_correct'])
+
     def test_student_cannot_edit_submitted_attempt_answer(self):
         question = self.create_question(
             ModuleActivityQuestion.QuestionType.FILL_BLANK,
