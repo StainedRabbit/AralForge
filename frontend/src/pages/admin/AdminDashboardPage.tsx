@@ -19,6 +19,16 @@ type BackupJob = {
   error: string
 }
 
+type AttemptResetSummary = {
+  semester: { id: number; name: string }
+  attempt_limit: number
+  eligible_context_count: number
+  paper_excluded_context_count: number
+  already_reset_context_count: number
+  history_preserved: boolean
+  granted_context_count?: number
+}
+
 type AttentionItem = {
   id: number
   student_name: string
@@ -71,6 +81,12 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
   const [backupId, setBackupId] = useState(() => localStorage.getItem('aralforge-backup-job') ?? '')
   const [backupError, setBackupError] = useState('')
   const [startingBackup, setStartingBackup] = useState(false)
+  const [backupDownloaded, setBackupDownloaded] = useState(false)
+  const [resetPreview, setResetPreview] = useState<AttemptResetSummary | null>(null)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetApplying, setResetApplying] = useState(false)
+  const [resetError, setResetError] = useState('')
+  const [resetMessage, setResetMessage] = useState('')
   const backupQuery = useQuery({
     queryKey: ['full-backup', backupId],
     queryFn: ({ signal }) => api<BackupJob>(`/jobs/${backupId}/`, { signal }),
@@ -98,6 +114,7 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
 
   async function startBackup() {
     setBackupError('')
+    setBackupDownloaded(false)
     setStartingBackup(true)
     try {
       const job = await api<BackupJob>('/jobs/backups/', { method: 'POST' })
@@ -114,6 +131,7 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
   async function downloadBackup() {
     if (!backupId) return
     setBackupError('')
+    setBackupDownloaded(false)
     try {
       const blob = await api<Blob>(`/jobs/${backupId}/backup-download/`)
       const url = URL.createObjectURL(blob)
@@ -122,8 +140,49 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
       anchor.download = `aralforge-backup-${backupId}.zip`
       anchor.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setBackupDownloaded(true)
     } catch (error) {
       setBackupError(toErrorMessage(error))
+    }
+  }
+
+  async function previewAttemptReset() {
+    setResetError('')
+    setResetMessage('')
+    setResetLoading(true)
+    try {
+      setResetPreview(await api<AttemptResetSummary>('/modules/attempt-resets/main-activity/'))
+    } catch (error) {
+      setResetError(toErrorMessage(error))
+      setResetPreview(null)
+    } finally {
+      setResetLoading(false)
+    }
+  }
+
+  async function applyAttemptReset() {
+    if (!resetPreview || !backupDownloaded) return
+    const message = [
+      `Grant ${resetPreview.attempt_limit} fresh quiz attempts to ${resetPreview.eligible_context_count} student quiz contexts in ${resetPreview.semester.name}?`,
+      'This applies to all currently enrolled students and eligible published Main Activity quizzes in that semester.',
+      'Existing attempt records, scores, and submitted statuses will be preserved.',
+    ].join('\n\n')
+    if (!window.confirm(message)) return
+
+    setResetError('')
+    setResetMessage('')
+    setResetApplying(true)
+    try {
+      const result = await api<AttemptResetSummary>(
+        '/modules/attempt-resets/main-activity/',
+        { method: 'POST', body: JSON.stringify({ confirm: true, backup_job_id: backupId }) },
+      )
+      setResetPreview(result)
+      setResetMessage(`Granted ${result.attempt_limit} fresh attempts in ${result.granted_context_count ?? 0} student quiz contexts. Existing history was preserved.`)
+    } catch (error) {
+      setResetError(toErrorMessage(error))
+    } finally {
+      setResetApplying(false)
     }
   }
 
@@ -142,23 +201,45 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
       />
 
       {currentUser.role === 'ADMIN' ? (
-        <section className="section-block">
-          <SectionHeading subtitle="Download a PostgreSQL backup and uploaded media as one ZIP. Backups expire after 24 hours." title="Full backup" />
-          <div className="toolbar">
-            <button className="button button--secondary" disabled={startingBackup || ['PENDING', 'RUNNING'].includes(currentBackup?.status ?? '')} onClick={() => void startBackup()} type="button">
-              <Icon name="download" /><span>{startingBackup ? 'Starting backup...' : 'Download full backup'}</span>
-            </button>
-            {currentBackup && ['PENDING', 'RUNNING'].includes(currentBackup.status) ? (
-              <span role="status">Preparing backup: {currentBackup.progress} of {currentBackup.total || 'media files'} complete.</span>
-            ) : null}
-            {currentBackup?.status === 'SUCCEEDED' ? (
-              <button className="button button--primary" onClick={() => void downloadBackup()} type="button">
-                <Icon name="download" /><span>Download ready backup</span>
+        <>
+          <section className="section-block">
+            <SectionHeading subtitle="Download a PostgreSQL backup and uploaded media as one ZIP. Backups expire after 24 hours." title="Full backup" />
+            <div className="toolbar">
+              <button className="button button--secondary" disabled={startingBackup || ['PENDING', 'RUNNING'].includes(currentBackup?.status ?? '')} onClick={() => void startBackup()} type="button">
+                <Icon name="download" /><span>{startingBackup ? 'Starting backup...' : 'Create full backup'}</span>
               </button>
-            ) : null}
-          </div>
-          {backupError || currentBackup?.status === 'FAILED' ? <StatusBanner tone="warning" title="Backup unavailable" message={backupError || currentBackup?.error || 'The backup could not be completed.'} /> : null}
-        </section>
+              {currentBackup && ['PENDING', 'RUNNING'].includes(currentBackup.status) ? (
+                <span role="status">Preparing backup: {currentBackup.progress} of {currentBackup.total || 'media files'} complete.</span>
+              ) : null}
+              {currentBackup?.status === 'SUCCEEDED' ? (
+                <button className="button button--primary" onClick={() => void downloadBackup()} type="button">
+                  <Icon name="download" /><span>{backupDownloaded ? 'Download backup again' : 'Download ready backup'}</span>
+                </button>
+              ) : null}
+            </div>
+            {backupDownloaded ? <p role="status">Backup downloaded. You can now preview and apply the quiz attempt reset.</p> : null}
+            {backupError || currentBackup?.status === 'FAILED' ? <StatusBanner tone="warning" title="Backup unavailable" message={backupError || currentBackup?.error || 'The backup could not be completed.'} /> : null}
+          </section>
+
+          <section className="section-block">
+            <SectionHeading subtitle="Restore three fresh attempts for eligible students in the active semester." title="Main Activity quiz attempts" />
+            <p>Only currently enrolled students and published online Main Activity quizzes are included. Paper-final contexts are excluded. Existing attempt history, scores, and submitted statuses stay unchanged.</p>
+            <div className="toolbar">
+              <button className="button button--secondary" disabled={resetLoading || resetApplying || !backupDownloaded} onClick={() => void previewAttemptReset()} type="button">
+                <Icon name="search" /><span>{resetLoading ? 'Checking scope...' : 'Preview attempt reset'}</span>
+              </button>
+              {resetPreview && resetPreview.eligible_context_count > 0 ? (
+                <button className="button button--primary" disabled={resetApplying || !backupDownloaded} onClick={() => void applyAttemptReset()} type="button">
+                  <Icon name="check" /><span>{resetApplying ? 'Applying reset...' : 'Grant three attempts'}</span>
+                </button>
+              ) : null}
+            </div>
+            {!backupDownloaded ? <p>Download a fresh full backup above before applying this change.</p> : null}
+            {resetPreview ? <p role="status">{resetPreview.semester.name}: {resetPreview.eligible_context_count} eligible student quiz contexts; {resetPreview.paper_excluded_context_count} paper-final contexts excluded; {resetPreview.already_reset_context_count} already reset.</p> : null}
+            {resetMessage ? <StatusBanner tone="success" title="Quiz attempts restored" message={resetMessage} /> : null}
+            {resetError ? <StatusBanner tone="warning" title="Attempt reset unavailable" message={resetError} /> : null}
+          </section>
+        </>
       ) : null}
 
       <section className="stat-grid">

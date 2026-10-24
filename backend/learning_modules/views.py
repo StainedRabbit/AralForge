@@ -1,6 +1,8 @@
-from decimal import Decimal, InvalidOperation
+from datetime import timedelta
 import json
+from decimal import Decimal, InvalidOperation
 
+from django.core.files.storage import default_storage
 from django.http import FileResponse, HttpResponse
 from django.db import transaction
 from django.db.models import Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery
@@ -9,10 +11,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.serializers import UserSerializer
-from accounts.permissions import IsAdminTeacher, IsAdminTeacherOrReadOnly
+from accounts.permissions import IsAdmin, IsAdminTeacher, IsAdminTeacherOrReadOnly
+from jobs.models import BackgroundJob
 from config.pagination import AralForgeCursorPagination
 from grades.models import GradeCategory, GradeCategoryChoices, GradeItem
 from grades.serializers import GradeCategorySerializer, GradeItemSerializer
@@ -81,6 +85,11 @@ from .serializers import (
     PresentationModuleTopicSerializer,
 )
 from .services.activity_grading import submit_activity_attempt
+from .services.attempt_resets import (
+    active_semester_attempt_reset_scope,
+    attempt_reset_preview,
+    grant_active_semester_attempt_resets,
+)
 from .services.activity_snapshots import (
     ensure_attempt_snapshot,
     normalize_draft_answers,
@@ -2401,3 +2410,56 @@ class ModuleLessonProgressViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         student = serializer.validated_data.get('student', self.request.user)
         serializer.save(student=student)
+
+
+class MainActivityAttemptResetConfirmationSerializer(serializers.Serializer):
+    confirm = serializers.BooleanField()
+    backup_job_id = serializers.UUIDField()
+
+
+class MainActivityAttemptResetView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        try:
+            return response.Response(
+                attempt_reset_preview(active_semester_attempt_reset_scope())
+            )
+        except ValueError as error:
+            return response.Response(
+                {'detail': str(error)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def post(self, request):
+        confirmation = MainActivityAttemptResetConfirmationSerializer(data=request.data)
+        if not confirmation.is_valid():
+            return response.Response(
+                confirmation.errors,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not confirmation.validated_data['confirm']:
+            return response.Response(
+                {'detail': 'Explicit confirmation is required to grant attempts.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        backup = BackgroundJob.objects.filter(
+            pk=confirmation.validated_data['backup_job_id'],
+            job_type=BackgroundJob.Type.BACKUP,
+            status=BackgroundJob.Status.SUCCEEDED,
+            finished_at__gt=timezone.now() - timedelta(hours=24),
+        ).first()
+        storage_name = backup.result.get('storage_name') if backup else None
+        if not storage_name or not default_storage.exists(storage_name):
+            return response.Response(
+                {'detail': 'Download a fresh completed full backup before applying the reset.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            summary = grant_active_semester_attempt_resets()
+        except ValueError as error:
+            return response.Response(
+                {'detail': str(error)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return response.Response(summary)

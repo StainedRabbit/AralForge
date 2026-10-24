@@ -251,11 +251,14 @@ Railway project and environment. After collecting the sample, restore
 To grant three fresh online attempts to each currently enrolled student for every published Main Activity quiz in the active semester, while preserving historical scores and submission statuses:
 
 1. Deploy the validated application and database migration through staging, then promote that exact commit to production.
-2. In the production API service environment, run `python manage.py grant_main_activity_attempts --dry-run` and confirm the semester and eligible-context counts.
-3. Take a production database backup, then run `python manage.py grant_main_activity_attempts --yes` once.
-4. Confirm students see three attempts available and verify existing scores and submitted statuses remain unchanged.
+2. As an admin, open the teacher console's **Overview**, create a fresh full backup, and download it.
+3. Under **Main Activity quiz attempts**, click **Preview attempt reset** and confirm the active semester and eligible-context counts.
+4. Click **Grant three attempts** and confirm the operation. The server checks that the completed full-backup artifact still exists before applying the reset.
+5. Confirm students see three attempts available and verify existing scores and submitted statuses remain unchanged.
 
-Run the command only in the production service environment; production database credentials do not belong in a local `.env` file. It skips contexts with a final paper submission and contexts already reset, so repeating the command will not grant duplicate attempts. Do not use `reset_main_activity_attempts`, which deletes attempt records and their related answer history.
+The command-line path remains available: run `python manage.py grant_main_activity_attempts --dry-run`, take a production database backup, then run `python manage.py grant_main_activity_attempts --yes` once in the production API service environment.
+
+Run the command only in the production service environment; production database credentials do not belong in a local `.env` file. Both the dashboard action and command skip contexts with a final paper submission and contexts already reset, so repeating either will not grant duplicate attempts. Do not use `reset_main_activity_attempts`, which deletes attempt records and their related answer history.
 
 ## Sensitive-history cleanup
 
