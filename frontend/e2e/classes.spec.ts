@@ -792,7 +792,7 @@ test('persists class selection and keeps class links scoped', async ({ page, bro
     await touchContext.close()
   }
   await page.setViewportSize({ width: 390, height: 200 })
-  await attendanceDialog.locator('.attendance-modal__panel').evaluate((panel) => { panel.scrollTop = panel.scrollHeight })
+  await attendanceDialog.locator('.class-attendance-dialog__content').evaluate((content) => { content.scrollTop = content.scrollHeight })
   await expect(sLetter).toHaveAttribute('aria-current', 'true')
   await page.setViewportSize({ width: 390, height: 844 })
   const riveraHistoryRow = attendanceDialog.getByRole('row').filter({ hasText: 'Alex Rivera' })

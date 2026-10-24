@@ -18,9 +18,13 @@ async function signInAsTeacher(page: Page) {
 }
 
 async function signOut(page: Page) {
+  const signedOut = page.waitForResponse((response) =>
+    response.request().method() === 'POST' && response.url().endsWith('/api/auth/logout/'),
+  )
   await page.locator('button[title="Sign out"]:visible').click()
   const confirmation = page.locator('.logout-confirmation')
   await confirmation.getByRole('button', { name: 'Sign out', exact: true }).click()
+  expect((await signedOut).status()).toBe(204)
   await expect(page.getByRole('heading', { name: 'Sign in to AralForge' })).toBeVisible()
 }
 
