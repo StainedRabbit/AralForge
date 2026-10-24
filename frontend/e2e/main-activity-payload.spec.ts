@@ -212,13 +212,13 @@ test('reset attempt quota shows three fresh attempts and keeps prior history vis
   const target = await signInAndFindTarget(page)
 
   await page.route('**/api/modules/modules/*/workspace/**', async route => {
-    const response = await route.fetch()
     const url = new URL(route.request().url())
     if (url.searchParams.get('view') !== 'state') {
-      await route.fulfill({ response })
+      await route.continue()
       return
     }
 
+    const response = await route.fetch()
     const workspace = await response.json()
     workspace.activity_states = workspace.activity_states.map((state: Record<string, unknown>) => ({
       ...state,
@@ -234,7 +234,7 @@ test('reset attempt quota shows three fresh attempts and keeps prior history vis
       can_start_attempt: true,
       review_unlocked: true,
     }))
-    await route.fulfill({ response, body: JSON.stringify(workspace) })
+    await route.fulfill({ status: response.status(), json: workspace })
   })
 
   await page.goto(`/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&context=PERSONAL`)
