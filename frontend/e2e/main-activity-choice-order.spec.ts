@@ -6,6 +6,7 @@ type ChoiceOrderTarget = {
   module: number
   schedule: number
   topic: number
+  accessCleanup: { grantId: number; remove: boolean } | null
 }
 
 async function signInAsTeacher(page: Page) {
@@ -36,6 +37,23 @@ async function signInAsStudent(page: Page) {
   await page.waitForURL((url) => url.pathname === '/')
 }
 
+async function cleanUpChoiceOrderAccess(page: Page, cleanup: ChoiceOrderTarget['accessCleanup']) {
+  if (!cleanup) return
+  const result = await page.evaluate(async ({ grantId, remove }) => {
+    const headers = {
+      Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}`,
+      'Content-Type': 'application/json',
+    }
+    const response = await fetch(`http://127.0.0.1:8001/api/modules/access/${grantId}/`, {
+      headers,
+      ...(remove ? {} : { body: JSON.stringify({ is_active: false }) }),
+      method: remove ? 'DELETE' : 'PATCH',
+    })
+    return { ok: response.ok, status: response.status }
+  }, cleanup)
+  expect(result.ok, `Could not restore Main Activity fixture access (HTTP ${result.status}).`).toBe(true)
+}
+
 async function findAndResetChoiceOrderTarget(page: Page): Promise<ChoiceOrderTarget> {
   return page.evaluate(async () => {
     const headers = { Authorization: `Bearer ${window.__ARALFORGE_E2E_ACCESS_TOKEN__}` }
@@ -55,13 +73,15 @@ async function findAndResetChoiceOrderTarget(page: Page): Promise<ChoiceOrderTar
       }
       return rows
     }
-    const [modules, topics, lessons, activities, schedules, attempts] = await Promise.all([
+    const [modules, topics, lessons, activities, schedules, attempts, students, accesses] = await Promise.all([
       loadRows('/modules/modules/?limit=100'),
       loadRows('/modules/topics/?limit=100'),
       loadRows('/modules/lessons/?limit=100'),
       loadRows('/modules/activities/?limit=100'),
       loadRows('/subjects/subject-schedules/?limit=100&status=all'),
       loadRows('/modules/activity-attempts/?limit=100'),
+      loadRows('/accounts/students/?search=E2E-001&limit=100'),
+      loadRows('/modules/access/?limit=100'),
     ])
     const module = modules.find((candidate) => candidate.title === 'E2E Quiz Workflow')
     if (!module || typeof module.id !== 'number' || typeof module.subject !== 'number') {
@@ -80,6 +100,39 @@ async function findAndResetChoiceOrderTarget(page: Page): Promise<ChoiceOrderTar
       throw new Error('The Main Activity choice-order fixture is incomplete.')
     }
 
+    const student = students.find((candidate) =>
+      candidate.student_number === 'E2E-001' && typeof candidate.user === 'number',
+    )
+    if (!student || typeof student.user !== 'number') {
+      throw new Error('Could not find the Main Activity choice-order fixture student.')
+    }
+    const studentAccesses = accesses.filter((candidate) =>
+      candidate.module === module.id && candidate.student === student.user,
+    )
+    let accessCleanup: ChoiceOrderTarget['accessCleanup'] = null
+    if (!studentAccesses.some((candidate) => candidate.is_available === true)) {
+      const enrolledGrant = studentAccesses.find((candidate) => candidate.access_type === 'ENROLLED')
+      const url = enrolledGrant
+        ? `http://127.0.0.1:8001/api/modules/access/${enrolledGrant.id}/`
+        : 'http://127.0.0.1:8001/api/modules/access/'
+      const response = await fetch(url, {
+        body: JSON.stringify(enrolledGrant
+          ? { is_active: true }
+          : { is_active: true, module: module.id, student: student.user }),
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        method: enrolledGrant ? 'PATCH' : 'POST',
+      })
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(`Could not activate the Main Activity choice-order fixture (${response.status}): ${detail}`)
+      }
+      const grant = await response.json()
+      if (grant.is_available !== true || typeof grant.id !== 'number') {
+        throw new Error('The Main Activity choice-order fixture access did not become active.')
+      }
+      accessCleanup = { grantId: grant.id, remove: !enrolledGrant }
+    }
+
     for (const attempt of attempts.filter((candidate) => candidate.activity === activity.id)) {
       const deleted = await fetch(
         `http://127.0.0.1:8001/api/modules/activity-attempts/${attempt.id}/`,
@@ -94,6 +147,7 @@ async function findAndResetChoiceOrderTarget(page: Page): Promise<ChoiceOrderTar
       module: module.id,
       schedule: schedule.id,
       topic: topic.id,
+      accessCleanup,
     }
   })
 }
@@ -102,67 +156,77 @@ test('a shuffled correct choice keeps its identity through autosave, reload, and
   await signInAsTeacher(page)
   const target = await findAndResetChoiceOrderTarget(page)
   await signOut(page)
-  await signInAsStudent(page)
+  let studentSignedIn = false
+  try {
+    await signInAsStudent(page)
+    studentSignedIn = true
 
-  let correctChoiceId = 0
-  let questionId = 0
-  let authoredOrder = -1
-  await page.route('**/api/modules/activities/*/start-attempt/**', async (route) => {
-    const response = await route.fetch()
-    const payload = await response.json()
-    const question = payload.attempt.question_snapshot.find(
-      (item: { question_type: string }) => item.question_type === 'multiple_choice',
+    let correctChoiceId = 0
+    let questionId = 0
+    let authoredOrder = -1
+    await page.route('**/api/modules/activities/*/start-attempt/**', async (route) => {
+      const response = await route.fetch()
+      const payload = await response.json()
+      const question = payload.attempt.question_snapshot.find(
+        (item: { question_type: string }) => item.question_type === 'multiple_choice',
+      )
+      const correctChoice = question?.choices.find(
+        (choice: { text: string }) => choice.text === 'Correct response',
+      )
+      if (!question || !correctChoice) {
+        throw new Error('The started attempt did not contain the expected multiple-choice fixture.')
+      }
+      expect(question.choices.every((choice: Record<string, unknown>) => !('is_correct' in choice))).toBe(true)
+      questionId = question.id
+      correctChoiceId = correctChoice.id
+      authoredOrder = correctChoice.order
+      const displayOrder = [
+        correctChoice,
+        ...question.choices.filter((choice: { id: number }) => choice.id !== correctChoice.id),
+      ]
+      displayOrder.forEach((choice, index) => { choice.presentation_order = index })
+      await route.fulfill({ response, json: payload })
+    })
+
+    await page.goto(
+      `/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&schedule=${target.schedule}`,
     )
-    const correctChoice = question?.choices.find(
-      (choice: { text: string }) => choice.text === 'Correct response',
+    await page.getByRole('button', { name: 'Start Quiz' }).click()
+
+    const choices = page.locator('#main-activity .choice-list .choice-option')
+    await expect(choices).toHaveCount(2)
+    await expect(choices.nth(0)).toContainText('Correct response')
+    await expect(choices.nth(1)).toContainText('Incorrect response')
+    expect(correctChoiceId).toBeGreaterThan(0)
+    expect(questionId).toBeGreaterThan(0)
+    expect(authoredOrder).toBe(1)
+
+    const correctRadio = page.getByRole('radio', { name: 'Correct response', exact: true })
+    const autosave = page.waitForRequest((request) =>
+      request.method() === 'PATCH' && /\/activity-attempts\/\d+\/draft\//.test(request.url()),
     )
-    if (!question || !correctChoice) {
-      throw new Error('The started attempt did not contain the expected multiple-choice fixture.')
+    await correctRadio.check()
+    const savedRequest = await autosave
+    const savedPayload = savedRequest.postDataJSON()
+    expect(savedPayload.answers[String(questionId)].selected_choice).toBe(correctChoiceId)
+    await expect(page.locator('.activity-draft-status')).toContainText('Answers saved')
+
+    await page.reload()
+    await expect(page.getByRole('radio', { name: 'Correct response', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: 'Review and submit' }).click()
+    await page.getByRole('button', { name: 'Confirm submission' }).click()
+
+    await expect(page.getByText('Quiz submitted.')).toBeVisible()
+    await expect(page.getByText('Review Answers is unlocked.')).toBeVisible()
+    const review = page.locator('#main-activity .answer-review')
+    await expect(review.locator('p').nth(0)).toHaveText('Correct response')
+    await expect(review.locator('p').nth(1)).toHaveText('Correct response')
+    await expect(page.getByRole('region', { name: 'Current attempt history' })).toContainText('10/10')
+  } finally {
+    if (target.accessCleanup) {
+      if (studentSignedIn) await signOut(page)
+      await signInAsTeacher(page)
+      await cleanUpChoiceOrderAccess(page, target.accessCleanup)
     }
-    expect(question.choices.every((choice: Record<string, unknown>) => !('is_correct' in choice))).toBe(true)
-    questionId = question.id
-    correctChoiceId = correctChoice.id
-    authoredOrder = correctChoice.order
-    const displayOrder = [
-      correctChoice,
-      ...question.choices.filter((choice: { id: number }) => choice.id !== correctChoice.id),
-    ]
-    displayOrder.forEach((choice, index) => { choice.presentation_order = index })
-    await route.fulfill({ response, json: payload })
-  })
-
-  await page.goto(
-    `/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&schedule=${target.schedule}`,
-  )
-  await page.getByRole('button', { name: 'Start Quiz' }).click()
-
-  const choices = page.locator('#main-activity .choice-list .choice-option')
-  await expect(choices).toHaveCount(2)
-  await expect(choices.nth(0)).toContainText('Correct response')
-  await expect(choices.nth(1)).toContainText('Incorrect response')
-  expect(correctChoiceId).toBeGreaterThan(0)
-  expect(questionId).toBeGreaterThan(0)
-  expect(authoredOrder).toBe(1)
-
-  const correctRadio = page.getByRole('radio', { name: 'Correct response', exact: true })
-  const autosave = page.waitForRequest((request) =>
-    request.method() === 'PATCH' && /\/activity-attempts\/\d+\/draft\//.test(request.url()),
-  )
-  await correctRadio.check()
-  const savedRequest = await autosave
-  const savedPayload = savedRequest.postDataJSON()
-  expect(savedPayload.answers[String(questionId)].selected_choice).toBe(correctChoiceId)
-  await expect(page.locator('.activity-draft-status')).toContainText('Answers saved')
-
-  await page.reload()
-  await expect(page.getByRole('radio', { name: 'Correct response', exact: true })).toBeChecked()
-  await page.getByRole('button', { name: 'Review and submit' }).click()
-  await page.getByRole('button', { name: 'Confirm submission' }).click()
-
-  await expect(page.getByText('Quiz submitted.')).toBeVisible()
-  await expect(page.getByText('Review Answers is unlocked.')).toBeVisible()
-  const review = page.locator('#main-activity .answer-review')
-  await expect(review.locator('p').nth(0)).toHaveText('Correct response')
-  await expect(review.locator('p').nth(1)).toHaveText('Correct response')
-  await expect(page.getByRole('region', { name: 'Current attempt history' })).toContainText('10/10')
+  }
 })
