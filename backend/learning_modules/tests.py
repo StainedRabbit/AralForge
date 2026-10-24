@@ -1,11 +1,13 @@
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 from unittest.mock import patch
 from unittest import skipUnless
 from pathlib import Path
 from decimal import Decimal
 
 from django.core.files.base import ContentFile
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, connections
 from django.test import TestCase, TransactionTestCase
@@ -38,6 +40,7 @@ from .models import (
     ModuleActivity,
     ModuleActivityAnswer,
     ModuleActivityAttempt,
+    ModuleActivityAttemptReset,
     ModuleActivityMatchingPair,
     ModuleActivityQuestion,
     ModuleActivityQuestionChoice,
@@ -3322,6 +3325,132 @@ class LessonMainActivityApiTests(APITestCase):
             {},
             format='json',
         )
+
+    def test_reset_grants_three_new_attempts_without_changing_history_or_scores(self):
+        old_attempts = [
+            ModuleActivityAttempt.objects.create(
+                activity=self.activity,
+                student=self.student,
+                context_type=LearningContextType.CLASS,
+                schedule=self.schedule,
+                attempt_number=number,
+                status=ModuleActivityAttempt.Status.SUBMITTED,
+                score=Decimal(score),
+                max_score=Decimal('10.00'),
+                submitted_at=timezone.now(),
+            )
+            for number, score in ((1, '9.00'), (2, '8.00'))
+        ]
+        ModuleActivityAttemptReset.objects.create(
+            activity=self.activity,
+            student=self.student,
+            schedule=self.schedule,
+            attempt_id_cutoff=old_attempts[-1].id,
+            attempt_limit=3,
+        )
+        self.client.force_authenticate(self.student)
+
+        first = self.start_attempt()
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(first.data['state']['attempt_limit'], 3)
+        self.assertEqual(first.data['state']['attempts_remaining'], 2)
+        self.assertEqual(first.data['state']['cycle_attempt_count'], 1)
+        self.assertEqual(first.data['state']['submitted_count'], 2)
+        self.assertTrue(first.data['state']['review_unlocked'])
+
+        current = ModuleActivityAttempt.objects.get(pk=first.data['attempt']['id'])
+        for _ in range(2):
+            current.status = ModuleActivityAttempt.Status.SUBMITTED
+            current.score = Decimal('1.00')
+            current.submitted_at = timezone.now()
+            current.save(update_fields=['status', 'score', 'submitted_at'])
+            next_response = self.start_attempt()
+            self.assertEqual(next_response.status_code, 201, next_response.data)
+            current = ModuleActivityAttempt.objects.get(pk=next_response.data['attempt']['id'])
+
+        current.status = ModuleActivityAttempt.Status.SUBMITTED
+        current.score = Decimal('1.00')
+        current.submitted_at = timezone.now()
+        current.save(update_fields=['status', 'score', 'submitted_at'])
+
+        exhausted = self.start_attempt()
+        self.assertEqual(exhausted.status_code, 400, exhausted.data)
+        state = self.client.get(
+            self.context_url(f'/api/modules/modules/{self.module.id}/workspace/?view=state')
+        ).data['activity_states'][0]
+        self.assertEqual(state['attempt_limit'], 3)
+        self.assertEqual(state['attempt_count'], 5)
+        self.assertEqual(state['submitted_count'], 5)
+        self.assertEqual(state['cycle_attempt_count'], 3)
+        self.assertEqual(state['cycle_submitted_count'], 3)
+        self.assertEqual(state['attempts_remaining'], 0)
+        self.assertEqual(state['best_attempt_id'], old_attempts[0].id)
+
+        for old in old_attempts:
+            old.refresh_from_db()
+            self.assertEqual(old.status, ModuleActivityAttempt.Status.SUBMITTED)
+            self.assertEqual(old.score, Decimal('9.00') if old.attempt_number == 1 else Decimal('8.00'))
+
+    def test_grant_command_previews_then_preserves_existing_attempt_records(self):
+        attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            attempt_number=1,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('7.50'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        preview = StringIO()
+        call_command('grant_main_activity_attempts', '--dry-run', stdout=preview)
+        self.assertIn('Eligible student, quiz, and class contexts: 1', preview.getvalue())
+        self.assertFalse(ModuleActivityAttemptReset.objects.exists())
+
+        call_command('grant_main_activity_attempts', '--yes', stdout=StringIO())
+        reset = ModuleActivityAttemptReset.objects.get(
+            activity=self.activity,
+            student=self.student,
+            schedule=self.schedule,
+        )
+        attempt.refresh_from_db()
+        self.assertEqual(reset.attempt_limit, 3)
+        self.assertEqual(reset.attempt_id_cutoff, attempt.id)
+        self.assertEqual(attempt.status, ModuleActivityAttempt.Status.SUBMITTED)
+        self.assertEqual(attempt.score, Decimal('7.50'))
+
+        call_command('grant_main_activity_attempts', '--yes', stdout=StringIO())
+        self.assertEqual(
+            ModuleActivityAttemptReset.objects.filter(
+                activity=self.activity,
+                student=self.student,
+                schedule=self.schedule,
+            ).count(),
+            1,
+        )
+
+    def test_grant_command_skips_paper_final_contexts(self):
+        paper_attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+            attempt_number=1,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('7.50'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        output = StringIO()
+        call_command('grant_main_activity_attempts', '--dry-run', stdout=output)
+        self.assertIn('Paper-final contexts excluded: 1', output.getvalue())
+        call_command('grant_main_activity_attempts', '--yes', stdout=StringIO())
+        self.assertFalse(ModuleActivityAttemptReset.objects.exists())
+        paper_attempt.refresh_from_db()
+        self.assertEqual(paper_attempt.status, ModuleActivityAttempt.Status.SUBMITTED)
+        self.assertEqual(paper_attempt.score, Decimal('7.50'))
 
     def test_teacher_must_use_atomic_save_for_lesson_main_activity_question(self):
         self.client.force_authenticate(self.teacher)

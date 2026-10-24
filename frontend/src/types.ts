@@ -460,6 +460,10 @@ export type MainActivityState = {
   attempt_limit: number
   attempt_count: number
   submitted_count: number
+  cycle_attempt_count?: number
+  cycle_submitted_count?: number
+  reset_applied?: boolean
+  active_attempt_is_in_cycle?: boolean
   attempts_remaining: number
   active_attempt_id: number | null
   best_attempt_id: number | null

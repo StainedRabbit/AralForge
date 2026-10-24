@@ -82,6 +82,8 @@ export function LessonMainActivityPanel({
     (attempt) => attempt.status === 'SUBMITTED' || attempt.is_submitted,
   )
   const attemptsRemaining = activityState?.attempts_remaining ?? 0
+  const cycleSubmittedCount = activityState?.cycle_submitted_count ?? submittedAttempts.length
+  const attemptLimit = activityState?.attempt_limit ?? activity?.max_attempts ?? 0
   const reviewAttempt =
     [...submittedAttempts].sort(
       (first, second) => second.attempt_number - first.attempt_number,
@@ -105,10 +107,15 @@ export function LessonMainActivityPanel({
   const passed = Boolean(activityState?.passed)
   const attemptsCompletedWithoutPassing = Boolean(
     activity?.passing_score !== null && !passed &&
-      activityState && activityState.submitted_count >= activityState.attempt_limit,
+      activityState && cycleSubmittedCount >= attemptLimit,
   )
   const legacyHistoryCount = activity ? data.legacyHistoryCounts[activity.id] ?? 0 : 0
   const canStartNewAttempt = Boolean(activityState?.can_start_attempt)
+  const shouldOfferNewAttempt = canStartNewAttempt && Boolean(
+    activityState?.reset_applied
+      ? attempts.length > 0 && !activityState.active_attempt_id
+      : activeAttemptSummary?.is_submitted && !reviewUnlocked,
+  )
   const initialDrafts = useMemo(
     () => displayAttempt ? buildActivityDrafts(displayAttempt, questions, data) : {},
     [data, displayAttempt, questions],
@@ -311,7 +318,9 @@ export function LessonMainActivityPanel({
           </span>
           {activeAttemptSummary && !activeAttemptSummary.is_submitted ? (
             <span className="status-pill">
-              Attempt {activeAttemptSummary.attempt_number} of {activity.max_attempts} · In progress
+              {activityState?.reset_applied && !activityState.active_attempt_is_in_cycle
+                ? 'Pre-reset attempt in progress'
+                : `Attempt ${activityState?.cycle_attempt_count ?? activeAttemptSummary.attempt_number} of ${attemptLimit} · In progress`}
             </span>
           ) : null}
           {reviewUnlocked ? (
@@ -331,7 +340,7 @@ export function LessonMainActivityPanel({
               {passed ? 'Passed' : attemptsCompletedWithoutPassing ? 'Attempts completed · Not passed' : 'Needs improvement'}
             </span>
           ) : null}
-          {activeAttemptSummary?.is_submitted && !reviewUnlocked ? (
+          {shouldOfferNewAttempt ? (
             <button
               className="button button--secondary button--compact"
               disabled={saving || !canStartNewAttempt}
@@ -357,7 +366,9 @@ export function LessonMainActivityPanel({
           <div className="activity-attempt-history__heading">
             <div>
               <p className="eyebrow">Current record</p>
-              <h3>{submittedAttempts.length} of {activity.max_attempts} attempts submitted</h3>
+              <h3>{activityState?.reset_applied
+                ? `${cycleSubmittedCount} of ${attemptLimit} fresh attempts submitted`
+                : `${submittedAttempts.length} of ${attemptLimit} attempts submitted`}</h3>
             </div>
             <span className="status-pill">{attemptsRemaining} remaining</span>
           </div>
@@ -458,7 +469,7 @@ export function LessonMainActivityPanel({
         </div>
       ) : null}
 
-      {!activeAttemptSummary && canStartAttempt ? (
+      {!attempts.length && canStartAttempt ? (
         <button className="button button--primary" disabled={saving} onClick={() => void startNewAttempt()} type="button">
           <Icon name="send" />
           <span>{saving ? 'Starting...' : 'Start Quiz'}</span>

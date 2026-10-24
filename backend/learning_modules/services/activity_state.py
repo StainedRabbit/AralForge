@@ -1,7 +1,11 @@
 from decimal import Decimal
 
 from grades.models import SubjectGradingPolicy, transmute_score
-from learning_modules.models import ModuleActivityAttempt
+from learning_modules.models import (
+    LearningContextType,
+    ModuleActivityAttempt,
+    ModuleActivityAttemptReset,
+)
 
 
 def attempt_is_submitted(attempt):
@@ -21,7 +25,31 @@ def attempt_passed(attempt):
     )
 
 
-def evaluate_main_activity_state(activity, attempts):
+def latest_activity_attempt_reset(activity, student, context_type, schedule):
+    if context_type != LearningContextType.CLASS or not schedule:
+        return None
+    return ModuleActivityAttemptReset.objects.filter(
+        activity=activity,
+        student=student,
+        schedule=schedule,
+    ).order_by('-created_at', '-id').first()
+
+
+def latest_activity_attempt_resets(activities, student, context_type, schedule):
+    if context_type != LearningContextType.CLASS or not schedule or not activities:
+        return {}
+    resets = ModuleActivityAttemptReset.objects.filter(
+        activity__in=activities,
+        student=student,
+        schedule=schedule,
+    ).order_by('activity_id', '-created_at', '-id')
+    latest = {}
+    for reset in resets:
+        latest.setdefault(reset.activity_id, reset)
+    return latest
+
+
+def evaluate_main_activity_state(activity, attempts, attempt_reset=None):
     attempts = list(attempts)
     visible_attempts = [
         attempt for attempt in attempts
@@ -61,8 +89,22 @@ def evaluate_main_activity_state(activity, attempts):
         requirement_met = bool(submitted)
     else:
         requirement_met = bool(passed_attempts) or exhausted
+    if attempt_reset:
+        current_cycle_attempts = [
+            attempt for attempt in visible_attempts
+            if attempt.id > attempt_reset.attempt_id_cutoff
+            and attempt.submission_method == ModuleActivityAttempt.SubmissionMethod.ONLINE
+        ]
+        current_cycle_submitted = [
+            attempt for attempt in current_cycle_attempts if attempt_is_submitted(attempt)
+        ]
+        attempt_limit = attempt_reset.attempt_limit
+    else:
+        current_cycle_attempts = visible_attempts
+        current_cycle_submitted = submitted
+        attempt_limit = activity.max_attempts
     attempts_remaining = 0 if paper_terminal else max(
-        activity.max_attempts - len(visible_attempts),
+        attempt_limit - len(current_cycle_attempts),
         0,
     )
     best_percentage = None
@@ -83,9 +125,19 @@ def evaluate_main_activity_state(activity, attempts):
 
     return {
         'activity': activity.id,
-        'attempt_limit': activity.max_attempts,
+        'attempt_limit': attempt_limit,
         'attempt_count': len(visible_attempts),
         'submitted_count': len(submitted),
+        'cycle_attempt_count': len(current_cycle_attempts),
+        'cycle_submitted_count': len(current_cycle_submitted),
+        'reset_applied': attempt_reset is not None,
+        'active_attempt_is_in_cycle': (
+            active is not None
+            and (
+                attempt_reset is None
+                or active.id > attempt_reset.attempt_id_cutoff
+            )
+        ),
         'attempts_remaining': attempts_remaining,
         'active_attempt_id': active.id if active else None,
         'best_attempt_id': best.id if best else None,
@@ -100,7 +152,7 @@ def evaluate_main_activity_state(activity, attempts):
     }
 
 
-def activity_states_for_attempts(activities, attempts):
+def activity_states_for_attempts(activities, attempts, attempt_resets=None):
     attempts_by_activity = {}
     for attempt in attempts:
         attempts_by_activity.setdefault(attempt.activity_id, []).append(attempt)
@@ -108,6 +160,7 @@ def activity_states_for_attempts(activities, attempts):
         evaluate_main_activity_state(
             activity,
             attempts_by_activity.get(activity.id, []),
+            (attempt_resets or {}).get(activity.id),
         )
         for activity in activities
     ]

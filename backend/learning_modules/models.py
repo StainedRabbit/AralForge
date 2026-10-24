@@ -925,6 +925,44 @@ class ModuleActivityAttempt(models.Model):
         super().save(*args, **kwargs)
 
 
+class ModuleActivityAttemptReset(models.Model):
+    """A new online-attempt window that leaves the student's history intact."""
+
+    activity = models.ForeignKey(
+        ModuleActivity,
+        on_delete=models.CASCADE,
+        related_name='attempt_resets',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='module_activity_attempt_resets',
+    )
+    schedule = models.ForeignKey(
+        'subjects.SubjectSchedule',
+        on_delete=models.PROTECT,
+        related_name='module_activity_attempt_resets',
+    )
+    attempt_id_cutoff = models.PositiveBigIntegerField(default=0)
+    attempt_limit = models.PositiveSmallIntegerField(default=3)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['activity', 'student', 'schedule'],
+                name='unique_activity_attempt_reset_context',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['activity', 'student', 'schedule', '-created_at'],
+                name='activity_attempt_reset_idx',
+            ),
+        ]
+
+
 class ModuleActivityAnswer(models.Model):
     attempt = models.ForeignKey(
         ModuleActivityAttempt,

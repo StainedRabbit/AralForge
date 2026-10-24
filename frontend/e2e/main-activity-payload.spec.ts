@@ -207,3 +207,41 @@ test('unlocked attempt history hydrates the selected submitted attempt', async (
   await expect(page.getByLabel('Answer for Question 2')).toHaveValue('Question two')
   await expect(page.getByLabel('Answer for Question 2')).toBeDisabled()
 })
+
+test('reset attempt quota shows three fresh attempts and keeps prior history visible', async ({ page }) => {
+  const target = await signInAndFindTarget(page)
+
+  await page.route('**/api/modules/modules/*/workspace/**', async route => {
+    const response = await route.fetch()
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('view') !== 'state') {
+      await route.fulfill({ response })
+      return
+    }
+
+    const workspace = await response.json()
+    workspace.activity_states = workspace.activity_states.map((state: Record<string, unknown>) => ({
+      ...state,
+      attempt_limit: 3,
+      attempt_count: 2,
+      submitted_count: 2,
+      cycle_attempt_count: 0,
+      cycle_submitted_count: 0,
+      reset_applied: true,
+      active_attempt_is_in_cycle: false,
+      attempts_remaining: 3,
+      active_attempt_id: null,
+      can_start_attempt: true,
+      review_unlocked: true,
+    }))
+    await route.fulfill({ response, body: JSON.stringify(workspace) })
+  })
+
+  await page.goto(`/modules/${target.module}?topic=${target.topic}&lesson=${target.lesson}&context=PERSONAL`)
+
+  const history = page.getByRole('region', { name: 'Current attempt history' })
+  await expect(history.getByRole('heading', { name: '0 of 3 fresh attempts submitted' })).toBeVisible()
+  await expect(history.getByText('3 remaining')).toBeVisible()
+  await expect(history.getByRole('button')).toHaveCount(2)
+  await expect(page.getByRole('button', { name: 'New Attempt' })).toBeVisible()
+})

@@ -776,7 +776,9 @@ function StudentLessonReader({
     ? mainActivityState?.paper_terminal
       ? 'Paper submitted'
       : mainActivityReviewUnlocked
-      ? mainActivity.passing_score !== null && !mainActivityPassed
+      ? mainActivityState?.reset_applied && attemptsRemaining > 0
+        ? 'Review unlocked · Retry available'
+        : mainActivity.passing_score !== null && !mainActivityPassed
         ? 'Attempts completed'
         : 'Review unlocked'
       : openMainActivityAttempt

@@ -246,6 +246,17 @@ Railway project and environment. After collecting the sample, restore
 5. Keep the previous application commit, database backup/PITR point, and independent media backup.
 6. For an application rollback, redeploy the prior commit and leave forward-compatible schema in place. Restore database or media only for confirmed data corruption; never delete storage objects during an application-only rollback.
 
+## Restore Main Activity attempt availability
+
+To grant three fresh online attempts to each currently enrolled student for every published Main Activity quiz in the active semester, while preserving historical scores and submission statuses:
+
+1. Deploy the validated application and database migration through staging, then promote that exact commit to production.
+2. In the production API service environment, run `python manage.py grant_main_activity_attempts --dry-run` and confirm the semester and eligible-context counts.
+3. Take a production database backup, then run `python manage.py grant_main_activity_attempts --yes` once.
+4. Confirm students see three attempts available and verify existing scores and submitted statuses remain unchanged.
+
+Run the command only in the production service environment; production database credentials do not belong in a local `.env` file. It skips contexts with a final paper submission and contexts already reset, so repeating the command will not grant duplicate attempts. Do not use `reset_main_activity_attempts`, which deletes attempt records and their related answer history.
+
 ## Sensitive-history cleanup
 
 The committed `backend/sqlite_export_for_postgres.json` contained account and school records. History was rewritten locally with `git-filter-repo`. Before the next shared push:

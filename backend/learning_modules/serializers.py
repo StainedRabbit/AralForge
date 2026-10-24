@@ -32,7 +32,10 @@ from .models import (
     user_has_module_class_access,
 )
 from .services.learning_context import learning_context_query, resolve_learning_context
-from .services.activity_state import evaluate_main_activity_state
+from .services.activity_state import (
+    evaluate_main_activity_state,
+    latest_activity_attempt_reset,
+)
 
 
 def activity_review_unlocked_for_user(
@@ -1025,16 +1028,34 @@ class ModuleActivityAttemptSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         'A paper submission has already been recorded for this activity.'
                     )
-                existing_count = ModuleActivityAttempt.objects.filter(
+                attempts = ModuleActivityAttempt.objects.filter(
                     activity=activity,
                     student=student,
                     **context,
-                ).count()
-                if existing_count >= activity.max_attempts:
+                )
+                attempt_reset = latest_activity_attempt_reset(
+                    activity,
+                    student,
+                    context_type,
+                    schedule,
+                )
+                if attempt_reset:
+                    current_cycle = attempts.filter(
+                        id__gt=attempt_reset.attempt_id_cutoff,
+                        submission_method=ModuleActivityAttempt.SubmissionMethod.ONLINE,
+                    ).exclude(status=ModuleActivityAttempt.Status.SUPERSEDED)
+                    current_count = current_cycle.count()
+                    attempt_limit = attempt_reset.attempt_limit
+                else:
+                    current_count = attempts.count()
+                    attempt_limit = activity.max_attempts
+                if current_count >= attempt_limit:
                     raise serializers.ValidationError(
                         'You have reached the maximum number of attempts.'
                     )
-                attrs['attempt_number'] = existing_count + 1
+                attrs['attempt_number'] = (
+                    attempts.aggregate(maximum=models.Max('attempt_number'))['maximum'] or 0
+                ) + 1
 
         if self.instance:
             if 'schedule' in attrs and attrs['schedule'] != self.instance.schedule:

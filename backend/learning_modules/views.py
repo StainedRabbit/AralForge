@@ -88,6 +88,8 @@ from .services.activity_snapshots import (
 from .services.activity_state import (
     activity_states_for_attempts,
     evaluate_main_activity_state,
+    latest_activity_attempt_reset,
+    latest_activity_attempt_resets,
 )
 from .services.learning_context import (
     active_matching_enrollments,
@@ -167,12 +169,22 @@ def serialize_attempt_with_state(attempt, request, *, created=False):
         context_type=attempt.context_type,
         schedule=attempt.schedule,
     ).select_related('activity')
+    attempt_reset = latest_activity_attempt_reset(
+        attempt.activity,
+        attempt.student,
+        attempt.context_type,
+        attempt.schedule_id,
+    )
     return {
         'attempt': ModuleActivityAttemptSerializer(
             attempt,
             context={'request': request},
         ).data,
-        'state': evaluate_main_activity_state(attempt.activity, context_attempts),
+        'state': evaluate_main_activity_state(
+            attempt.activity,
+            context_attempts,
+            attempt_reset,
+        ),
         'created': created,
     }
 
@@ -538,6 +550,7 @@ class ModuleViewSet(viewsets.ModelViewSet):
         state_data = {}
         if include_state:
             legacy_history_counts = {}
+            attempt_resets = {}
             if not request.user.is_admin_teacher:
                 context_filter = learning_context_query(context_type, schedule)
                 lesson_progress = ModuleLessonProgress.objects.filter(
@@ -546,6 +559,12 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 attempts = list(ModuleActivityAttempt.objects.filter(
                     activity__in=activities, student=request.user, **context_filter,
                 ).defer('question_snapshot', 'draft_answers'))
+                attempt_resets = latest_activity_attempt_resets(
+                    activities,
+                    request.user,
+                    context_type,
+                    schedule,
+                )
                 legacy_rows = ModuleActivityAttempt.objects.filter(
                     activity__in=activities, student=request.user,
                     context_type=LearningContextType.LEGACY,
@@ -560,7 +579,7 @@ class ModuleViewSet(viewsets.ModelViewSet):
                 'lesson_progress': ModuleLessonProgressSerializer(lesson_progress, many=True, context=context).data,
                 'activity_attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
                 'activity_states': (
-                    activity_states_for_attempts(activities, attempts)
+                    activity_states_for_attempts(activities, attempts, attempt_resets)
                     if not request.user.is_admin_teacher else []
                 ),
                 'learning_context': {
@@ -1565,6 +1584,12 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             student=request.user,
             **context_filter,
         )
+        attempt_reset = latest_activity_attempt_reset(
+            activity,
+            request.user,
+            context_type,
+            schedule,
+        )
         paper = attempts.filter(
             submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
             status=ModuleActivityAttempt.Status.SUBMITTED,
@@ -1573,7 +1598,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             return response.Response(
                 {
                     'detail': 'A paper submission is already the final record for this activity.',
-                    'state': evaluate_main_activity_state(activity, attempts),
+                    'state': evaluate_main_activity_state(activity, attempts, attempt_reset),
                 },
                 status=status.HTTP_409_CONFLICT,
             )
@@ -1586,7 +1611,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
             return response.Response(
                 serialize_attempt_with_state(existing, request, created=False),
             )
-        state = evaluate_main_activity_state(activity, attempts)
+        state = evaluate_main_activity_state(activity, attempts, attempt_reset)
         if not state['can_start_attempt']:
             raise serializers.ValidationError({
                 'detail': 'You have reached the maximum number of attempts.',
@@ -1649,6 +1674,12 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
                 )
                 submissions = submissions.filter(student=request.user)
             attempts = list(attempts)
+            attempt_reset = latest_activity_attempt_reset(
+                activity,
+                request.user,
+                context_type,
+                schedule,
+            ) if not request.user.is_admin_teacher else None
             state_data = {
                 'attempts': ModuleActivityAttemptSummarySerializer(attempts, many=True, context=context).data,
                 'submissions': ModuleActivitySubmissionSerializer(submissions, many=True, context=context).data,
@@ -1657,7 +1688,7 @@ class ModuleActivityViewSet(viewsets.ModelViewSet):
                 'schedule': schedule.id if not request.user.is_admin_teacher and schedule else None,
                 },
                 'activity_state': (
-                    evaluate_main_activity_state(activity, attempts)
+                    evaluate_main_activity_state(activity, attempts, attempt_reset)
                     if not request.user.is_admin_teacher else None
                 ),
                 'legacy_history_count': ModuleActivityAttempt.objects.filter(
