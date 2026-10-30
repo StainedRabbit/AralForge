@@ -309,12 +309,6 @@ export function AdminClassesPage({
     query,
     effectiveTermId,
   )
-  const selectedScheduleMatchesFilters = selectedSchedule
-    ? filterSchedules([selectedSchedule], query, effectiveTermId).length > 0
-    : false
-  const finderSchedules = selectedScheduleMatchesFilters
-    ? uniqueSchedules([selectedSchedule!, ...visibleSchedules])
-    : visibleSchedules
   const classCount = localMatches?.length ?? scheduleListQuery.data?.pages[0]?.count ?? 0
   const termOptions = toOptions(data.terms, (term) => term.id, (term) => term.name)
 
@@ -430,7 +424,7 @@ export function AdminClassesPage({
                 void scheduleListQuery.refetch()
               }
             }}
-            schedules={finderSchedules}
+            schedules={visibleSchedules}
             selectedSchedule={selectedSchedule}
             selectedTermId={effectiveTermId}
             setQuery={updateQuery}
