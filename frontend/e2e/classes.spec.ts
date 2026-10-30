@@ -1190,9 +1190,17 @@ test('loads the Select Class list ten classes at a time inside its panel', async
   await expect(pagination).toContainText('Showing 10 of 12 classes')
   expect(classRequests[0]).toMatchObject({ limit: 10, offset: 0, search: '' })
 
+  const initialClassOrder = await classItems.allTextContents()
+  await classItems.filter({ hasText: 'PCLS05' }).click()
+  await expect(page).toHaveURL(/schedule=9005/)
+  await expect(classList.locator('.class-list__item.active')).toContainText('PCLS05')
+  await expect(classItems).toHaveText(initialClassOrder)
+
   await page.goto('/admin/classes?schedule=9012')
-  await expect(classList.locator('.class-list__item.active')).toContainText('PCLS12')
-  await expect(classItems).toHaveCount(11)
+  await expect(classItems).toHaveCount(10)
+  await expect(classItems).toHaveText(initialClassOrder)
+  await expect(classList.locator('.class-list__item.active')).toHaveCount(0)
+  await expect(pagination).toContainText('Showing 10 of 12 classes')
 
   const desktopScrollMetrics = await classList.evaluate((element) => {
     const finderPanel = element.closest<HTMLElement>('.classes-setup__panel--finder')
@@ -1221,6 +1229,8 @@ test('loads the Select Class list ten classes at a time inside its panel', async
   })
   await expect(pagination).toContainText('Showing 12 of 12 classes')
   await expect(classItems).toHaveCount(12)
+  await expect(classList.locator('.class-list__item.active')).toContainText('PCLS12')
+  await expect(classItems.last()).toContainText('PCLS12')
   expect(Array.from(new Set(
     classRequests.filter((request) => request.search === '').map((request) => request.offset),
   ))).toEqual([0, 10])
@@ -1233,7 +1243,7 @@ test('loads the Select Class list ten classes at a time inside its panel', async
 
   failNextClassPage = true
   await classSearch.fill('PCLS')
-  await expect(pagination).toContainText('Showing 11 of 12 classes')
+  await expect(pagination).toContainText('Showing 10 of 12 classes')
   await classList.evaluate((element) => {
     element.scrollTop = element.scrollHeight
   })
