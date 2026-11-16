@@ -3391,6 +3391,132 @@ class LessonMainActivityApiTests(APITestCase):
             self.assertEqual(old.status, ModuleActivityAttempt.Status.SUBMITTED)
             self.assertEqual(old.score, Decimal('9.00') if old.attempt_number == 1 else Decimal('8.00'))
 
+    def test_admin_can_reset_one_students_active_semester_contexts_repeatedly(self):
+        admin = User.objects.create_user(
+            username='attempt-reset-admin',
+            password='testpass123',
+            role=User.Role.ADMIN,
+        )
+        other_student = User.objects.create_user(
+            username='other-activity-student',
+            password='testpass123',
+            role=User.Role.STUDENT,
+        )
+        other_schedule = SubjectSchedule.objects.create(
+            subject=self.subject,
+            school_year_semester=self.schedule.school_year_semester,
+            days='TTH',
+            start_time='14:00',
+            end_time='15:00',
+            section='B',
+        )
+        ScheduleStudent.objects.create(schedule=other_schedule, student=self.student)
+        ScheduleStudent.objects.create(schedule=other_schedule, student=other_student)
+        old_attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=other_schedule,
+            attempt_number=1,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('7.50'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        other_attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=other_student,
+            context_type=LearningContextType.CLASS,
+            schedule=other_schedule,
+            attempt_number=1,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('4.00'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=self.schedule,
+            submission_method=ModuleActivityAttempt.SubmissionMethod.PAPER,
+            attempt_number=1,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('8.00'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        backup = BackgroundJob.objects.create(
+            job_type=BackgroundJob.Type.BACKUP,
+            owner=admin,
+            status=BackgroundJob.Status.SUCCEEDED,
+            result={'storage_name': 'attempt-reset-backup.zip'},
+            finished_at=timezone.now(),
+        )
+        path = f'/api/modules/attempt-resets/students/{self.student.id}/'
+
+        self.client.force_authenticate(self.teacher)
+        self.assertEqual(self.client.get(path).status_code, 403)
+
+        self.client.force_authenticate(admin)
+        preview = self.client.get(path)
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertEqual(preview.data['eligible_context_count'], 1)
+        self.assertEqual(preview.data['paper_excluded_context_count'], 1)
+        self.assertEqual(preview.data['already_reset_context_count'], 0)
+
+        payload = {'confirm': True, 'backup_job_id': str(backup.pk)}
+        with patch('learning_modules.views.default_storage.exists', return_value=False):
+            no_backup = self.client.post(path, payload, format='json')
+        self.assertEqual(no_backup.status_code, 409)
+        self.assertFalse(ModuleActivityAttemptReset.objects.exists())
+
+        with patch('learning_modules.views.default_storage.exists', return_value=True):
+            first_reset = self.client.post(path, payload, format='json')
+        self.assertEqual(first_reset.status_code, 200, first_reset.data)
+        self.assertEqual(first_reset.data['reset_context_count'], 1)
+        reset = ModuleActivityAttemptReset.objects.get(
+            activity=self.activity,
+            student=self.student,
+            schedule=other_schedule,
+        )
+        self.assertEqual(reset.attempt_id_cutoff, old_attempt.id)
+        self.assertEqual(reset.attempt_limit, 3)
+        old_attempt.refresh_from_db()
+        self.assertEqual(old_attempt.status, ModuleActivityAttempt.Status.SUBMITTED)
+        self.assertEqual(old_attempt.score, Decimal('7.50'))
+        other_attempt.refresh_from_db()
+        self.assertEqual(other_attempt.score, Decimal('4.00'))
+        self.assertFalse(ModuleActivityAttemptReset.objects.filter(student=other_student).exists())
+        self.assertFalse(ModuleActivityAttemptReset.objects.filter(schedule=self.schedule).exists())
+
+        new_attempt = ModuleActivityAttempt.objects.create(
+            activity=self.activity,
+            student=self.student,
+            context_type=LearningContextType.CLASS,
+            schedule=other_schedule,
+            attempt_number=2,
+            status=ModuleActivityAttempt.Status.SUBMITTED,
+            score=Decimal('9.00'),
+            max_score=Decimal('10.00'),
+            submitted_at=timezone.now(),
+        )
+        with patch('learning_modules.views.default_storage.exists', return_value=True):
+            second_reset = self.client.post(path, payload, format='json')
+        self.assertEqual(second_reset.status_code, 200, second_reset.data)
+        self.assertEqual(second_reset.data['already_reset_context_count'], 1)
+        self.assertEqual(second_reset.data['reset_context_count'], 1)
+        reset.refresh_from_db()
+        self.assertEqual(reset.attempt_id_cutoff, new_attempt.id)
+        self.assertEqual(
+            ModuleActivityAttemptReset.objects.filter(
+                activity=self.activity,
+                student=self.student,
+                schedule=other_schedule,
+            ).count(),
+            1,
+        )
+
     def test_grant_command_previews_then_preserves_existing_attempt_records(self):
         attempt = ModuleActivityAttempt.objects.create(
             activity=self.activity,

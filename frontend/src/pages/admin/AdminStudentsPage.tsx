@@ -10,6 +10,7 @@ import { ManageStudentModulesDialog } from '../../components/admin/ManageStudent
 import { usePaginatedResource, useScopedWorkspace } from '../../queries/useScopedWorkspace'
 import { queryKeys } from '../../queries/queryKeys'
 import { HOUR_MS } from '../../queries/persistentCache'
+import { BACKUP_JOB_STORAGE_KEY, DOWNLOADED_BACKUP_JOB_STORAGE_KEY } from '../../utils/backup'
 import { fullRecordName } from '../../utils/student'
 import { countReplacementCharacters, replacementCharacterWarning } from '../../utils/textFile'
 import { toErrorMessage } from '../../utils/format'
@@ -198,9 +199,12 @@ function StudentDetail({ api, data, initial, onSaved }: { api: AuthedRequest; da
     queryClient.setQueryData(queryKeys.resource(path), savedProfile ?? { ...profile, user_detail: savedUser ?? user })
     await onSaved()
   }
+  const tabs = data.currentUser?.role === 'ADMIN'
+    ? ['Details', 'Enrollments', 'Modules', 'Attempts']
+    : ['Details', 'Enrollments', 'Modules']
   return <>
     <div className="students-identity"><div className="students-avatar"><Icon name="users" /></div><div><StudentName profile={profile} /><p>{profile.student_number}</p></div></div>
-    <StudentTabs label="Student detail sections" tabs={['Details', 'Enrollments', 'Modules']} value={tab} onChange={(next) => { if (next !== tab && !canLeave()) return false; setTab(next) }} />
+    <StudentTabs label="Student detail sections" tabs={tabs} value={tab} onChange={(next) => { if (next !== tab && !canLeave()) return false; setTab(next) }} />
     {detail.isPending ? <p role="status">Loading student details...</p> : detail.isError ? <Feedback error={detail.error} retry={() => void detail.refetch()} /> : !user ? <p role="alert">Account details are unavailable.</p> : tab === 'Details' ? <div className="students-details">
       <StudentForm key={`account-${user.id}`} title="Account details" fields={accountFields} initial={accountDraft(user)} api={api} endpoint={`/accounts/users/${user.id}/`} method="PATCH"
         onSaved={(value) => saved(value as User)} success="Account details saved." />
@@ -209,7 +213,8 @@ function StudentDetail({ api, data, initial, onSaved }: { api: AuthedRequest; da
         onSaved={(value) => saved(undefined, value as StudentProfile)} success="Student profile saved." />
       {data.currentUser?.role === 'ADMIN' ? <StudentPasswordReset key={profile.student_number} api={api} profile={profile} onSaved={async () => { await onSaved(); await detail.refetch() }} /> : null}
     </div> : tab === 'Enrollments' ? <StudentEnrollments api={api} studentId={profile.user} onSaved={onSaved} />
-      : <StudentResources api={api} data={data}>{(resources) => <StudentModules api={api} data={resources} profile={profile} onSaved={onSaved} />}</StudentResources>}
+      : tab === 'Modules' ? <StudentResources api={api} data={data}>{(resources) => <StudentModules api={api} data={resources} profile={profile} onSaved={onSaved} />}</StudentResources>
+        : <StudentAttemptReset api={api} studentId={profile.user} studentName={fullRecordName(user) || profile.student_number} />}
   </>
 }
 
@@ -261,6 +266,138 @@ function StudentModules({ api, data, profile, onSaved }: { api: AuthedRequest; d
   useEffect(() => () => report(id, null), [id, report])
   return <ManageStudentModulesDialog api={api} data={data} embedded onClose={() => {}} studentId={profile.user}
     studentName={fullRecordName(profile.user_detail ?? null)} onFormStateChange={stateChanged} onSaved={onSaved} />
+}
+
+type StudentAttemptResetSummary = {
+  semester: { id: number; name: string }
+  attempt_limit: number
+  eligible_context_count: number
+  paper_excluded_context_count: number
+  already_reset_context_count: number
+  history_preserved: boolean
+  reset_context_count?: number
+}
+
+type BackupJob = {
+  id: string
+  job_type: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  finished_at: string | null
+}
+
+const BACKUP_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+function StudentAttemptReset({ api, studentId, studentName }: {
+  api: AuthedRequest
+  studentId: number
+  studentName: string
+}) {
+  const queryClient = useQueryClient()
+  const [backupId] = useState(() => localStorage.getItem(BACKUP_JOB_STORAGE_KEY) ?? '')
+  const [downloadedBackupId, setDownloadedBackupId] = useState(() => localStorage.getItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY) ?? '')
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [backupNow, setBackupNow] = useState<number | null>(null)
+  const resetPath = `/modules/attempt-resets/students/${studentId}/`
+  const preview = useQuery({
+    queryKey: ['student-attempt-reset', studentId],
+    queryFn: ({ signal }) => api<StudentAttemptResetSummary>(resetPath, { signal }),
+    staleTime: 0,
+  })
+  const backup = useQuery({
+    queryKey: ['full-backup', backupId],
+    queryFn: ({ signal }) => api<BackupJob>(`/jobs/${backupId}/`, { signal }),
+    enabled: Boolean(backupId),
+    staleTime: 0,
+    refetchInterval: (query) => ['PENDING', 'RUNNING'].includes(query.state.data?.status ?? '') ? 2000 : false,
+  })
+  useEffect(() => {
+    if (!backupId) return
+    const refreshNow = () => setBackupNow(Date.now())
+    const initialRefresh = window.setTimeout(refreshNow, 0)
+    const interval = window.setInterval(refreshNow, 60_000)
+    return () => {
+      window.clearTimeout(initialRefresh)
+      window.clearInterval(interval)
+    }
+  }, [backupId])
+  useFormGuard(false, applying)
+  const finishedAt = backup.data?.finished_at ? Date.parse(backup.data.finished_at) : Number.NaN
+  const backupReady = downloadedBackupId === backupId
+    && backup.data?.job_type === 'BACKUP'
+    && backup.data.status === 'SUCCEEDED'
+    && Number.isFinite(finishedAt)
+    && backupNow !== null
+    && backupNow - finishedAt < BACKUP_MAX_AGE_MS
+
+  async function applyReset() {
+    const summary = preview.data
+    if (!summary || !backupReady || !summary.eligible_context_count) return
+    const confirmation = [
+      `Grant ${summary.attempt_limit} fresh quiz attempts to ${studentName}?`,
+      `This applies to ${summary.eligible_context_count} eligible quiz contexts in ${summary.semester.name}.`,
+      summary.paper_excluded_context_count
+        ? `${summary.paper_excluded_context_count} paper-final context(s) will stay unchanged.`
+        : '',
+      'Existing attempts, answers, scores, and history will be preserved.',
+    ].filter(Boolean).join('\n\n')
+    if (!window.confirm(confirmation)) return
+
+    setError('')
+    setMessage('')
+    setApplying(true)
+    try {
+      const result = await api<StudentAttemptResetSummary>(resetPath, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true, backup_job_id: backupId }),
+      })
+      queryClient.setQueryData(['student-attempt-reset', studentId], result)
+      await queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === 'resource'
+          && String(query.queryKey[1]).startsWith('/modules/'),
+      })
+      setMessage(`Granted fresh attempts in ${result.reset_context_count ?? 0} quiz contexts. Existing history and scores were preserved.`)
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409 && cause.message.toLowerCase().includes('backup')) {
+        localStorage.removeItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY)
+        setDownloadedBackupId('')
+      }
+      setError(toErrorMessage(cause))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return <section className="student-attempt-reset" aria-label="Reset student quiz attempts">
+    <h3>Main Activity quiz attempts</h3>
+    <p>Restore three fresh attempts for this student’s eligible published quizzes in the active semester. Previous submissions, answers, and scores remain in their history.</p>
+    {preview.isPending ? <p role="status">Checking active-semester quiz contexts...</p> : null}
+    {preview.isError ? <div className="student-attempt-reset__feedback" role="alert">
+      <p>{toErrorMessage(preview.error)}</p>
+      <button className="button button--secondary" type="button" onClick={() => void preview.refetch()}>Retry</button>
+    </div> : null}
+    {preview.data ? <>
+      <div className="student-attempt-reset__summary" role="status">
+        <strong>{preview.data.semester.name}</strong>
+        <span>{preview.data.eligible_context_count} eligible quiz contexts</span>
+        {preview.data.already_reset_context_count ? <span>{preview.data.already_reset_context_count} previously reset; another reset is allowed</span> : null}
+        {preview.data.paper_excluded_context_count ? <span>{preview.data.paper_excluded_context_count} paper-final contexts excluded</span> : null}
+      </div>
+      {preview.data.eligible_context_count === 0 ? <p>No eligible active-semester quiz contexts are available for this student.</p> : null}
+    </> : null}
+    {!backupReady ? <p className="student-attempt-reset__backup">
+      {backup.isPending && backupId
+        ? 'Checking the saved full backup...'
+        : 'Create and download a fresh full backup from the admin overview before resetting attempts.'}
+    </p> : <p className="student-attempt-reset__backup" role="status">A recent downloaded full backup is ready.</p>}
+    {backup.isError ? <p className="student-attempt-reset__error" role="alert">The saved backup could not be checked. Refresh this section after creating a fresh backup.</p> : null}
+    {error ? <p className="student-attempt-reset__error" role="alert">{error}</p> : null}
+    {message ? <p className="student-attempt-reset__success" role="status">{message}</p> : null}
+    <button className="button button--primary" type="button" disabled={applying || !backupReady || !preview.data?.eligible_context_count} onClick={() => void applyReset()}>
+      {applying ? 'Resetting attempts...' : 'Reset attempts'}
+    </button>
+  </section>
 }
 
 type Draft = Record<string, string | boolean>

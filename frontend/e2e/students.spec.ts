@@ -82,6 +82,115 @@ test('admin can confirm a password reset in Student details', async ({ page, bro
   await studentPage.close()
 })
 
+test('admin can restore one student’s active-semester quiz attempts with a downloaded backup', async ({ page }) => {
+  await openStudents(page, 'e2e-admin')
+  const backupId = randomUUID()
+  await page.evaluate(({ backupId }) => {
+    localStorage.setItem('aralforge-backup-job', backupId)
+    localStorage.setItem('aralforge-backup-downloaded-job', backupId)
+  }, { backupId })
+  await page.route(`**/api/jobs/${backupId}/`, async (route) => {
+    await route.fulfill({ json: {
+      id: backupId,
+      job_type: 'BACKUP',
+      status: 'SUCCEEDED',
+      finished_at: new Date().toISOString(),
+    } })
+  })
+
+  await page.route('**/api/modules/attempt-resets/students/*/', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: {
+        semester: { id: 9, name: 'First Semester 2026-2027' },
+        attempt_limit: 3,
+        eligible_context_count: 2,
+        paper_excluded_context_count: 1,
+        already_reset_context_count: 1,
+        history_preserved: true,
+      } })
+      return
+    }
+    const body = route.request().postDataJSON()
+    expect(body).toEqual({ confirm: true, backup_job_id: backupId })
+    await route.fulfill({ json: {
+      semester: { id: 9, name: 'First Semester 2026-2027' },
+      attempt_limit: 3,
+      eligible_context_count: 2,
+      paper_excluded_context_count: 1,
+      already_reset_context_count: 2,
+      history_preserved: true,
+      reset_context_count: 2,
+    } })
+  })
+
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByRole('tab', { name: 'Attempts', exact: true }).click()
+  await expect(dialog.getByText('2 eligible quiz contexts')).toBeVisible()
+  await expect(dialog.getByText('1 previously reset; another reset is allowed')).toBeVisible()
+  await expect(dialog.getByText('1 paper-final contexts excluded')).toBeVisible()
+  await expect(dialog.getByText('A recent downloaded full backup is ready.')).toBeVisible()
+  page.on('dialog', (confirmation) => confirmation.accept())
+
+  await dialog.getByRole('button', { name: 'Reset attempts', exact: true }).click()
+  await expect(dialog.locator('.student-attempt-reset__success')).toContainText('Granted fresh attempts in 2 quiz contexts.')
+  await expect(dialog.locator('.student-attempt-reset__success')).toContainText('Existing history and scores were preserved.')
+})
+
+test('an unavailable backup disables the per-student reset after the server rejects it', async ({ page }) => {
+  await openStudents(page, 'e2e-admin')
+  const backupId = randomUUID()
+  await page.evaluate(({ backupId }) => {
+    localStorage.setItem('aralforge-backup-job', backupId)
+    localStorage.setItem('aralforge-backup-downloaded-job', backupId)
+  }, { backupId })
+  await page.route(`**/api/jobs/${backupId}/`, async (route) => {
+    await route.fulfill({ json: {
+      id: backupId,
+      job_type: 'BACKUP',
+      status: 'SUCCEEDED',
+      finished_at: new Date().toISOString(),
+    } })
+  })
+  await page.route('**/api/modules/attempt-resets/students/*/', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: {
+        semester: { id: 9, name: 'First Semester 2026-2027' },
+        attempt_limit: 3,
+        eligible_context_count: 1,
+        paper_excluded_context_count: 0,
+        already_reset_context_count: 0,
+        history_preserved: true,
+      } })
+      return
+    }
+    await route.fulfill({ status: 409, json: { detail: 'Download a fresh completed full backup before applying the reset.' } })
+  })
+
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByRole('tab', { name: 'Attempts', exact: true }).click()
+  await expect(dialog.getByText('A recent downloaded full backup is ready.')).toBeVisible()
+  page.on('dialog', (confirmation) => confirmation.accept())
+  await dialog.getByRole('button', { name: 'Reset attempts', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Download a fresh completed full backup')
+  await expect(dialog.getByRole('button', { name: 'Reset attempts', exact: true })).toBeDisabled()
+  await expect(dialog.getByText('Create and download a fresh full backup from the admin overview before resetting attempts.')).toBeVisible()
+})
+
+test('student attempt reset stays disabled until a recent backup is downloaded', async ({ page }) => {
+  await openStudents(page, 'e2e-admin')
+  await page.evaluate(() => {
+    localStorage.removeItem('aralforge-backup-job')
+    localStorage.removeItem('aralforge-backup-downloaded-job')
+  })
+  await page.getByRole('button', { name: 'View E2E-001', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Student details' })
+  await dialog.getByRole('tab', { name: 'Attempts', exact: true }).click()
+  await expect(dialog.getByText('Create and download a fresh full backup from the admin overview before resetting attempts.')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Reset attempts', exact: true })).toBeDisabled()
+})
+
 test('add student preserves validation inputs and shows credentials', async ({ page }) => {
   await openStudents(page)
   const studentNumber = `E2E-NEW-${randomUUID().slice(0, 8)}`

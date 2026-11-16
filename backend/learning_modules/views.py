@@ -89,6 +89,9 @@ from .services.attempt_resets import (
     active_semester_attempt_reset_scope,
     attempt_reset_preview,
     grant_active_semester_attempt_resets,
+    grant_student_active_semester_attempt_resets,
+    student_active_semester_attempt_reset_scope,
+    student_attempt_reset_preview,
 )
 from .services.activity_snapshots import (
     ensure_attempt_snapshot,
@@ -2417,6 +2420,17 @@ class MainActivityAttemptResetConfirmationSerializer(serializers.Serializer):
     backup_job_id = serializers.UUIDField()
 
 
+def attempt_reset_backup_available(backup_job_id):
+    backup = BackgroundJob.objects.filter(
+        pk=backup_job_id,
+        job_type=BackgroundJob.Type.BACKUP,
+        status=BackgroundJob.Status.SUCCEEDED,
+        finished_at__gt=timezone.now() - timedelta(hours=24),
+    ).first()
+    storage_name = backup.result.get('storage_name') if backup else None
+    return bool(storage_name and default_storage.exists(storage_name))
+
+
 class MainActivityAttemptResetView(APIView):
     permission_classes = [IsAdmin]
 
@@ -2443,20 +2457,69 @@ class MainActivityAttemptResetView(APIView):
                 {'detail': 'Explicit confirmation is required to grant attempts.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        backup = BackgroundJob.objects.filter(
-            pk=confirmation.validated_data['backup_job_id'],
-            job_type=BackgroundJob.Type.BACKUP,
-            status=BackgroundJob.Status.SUCCEEDED,
-            finished_at__gt=timezone.now() - timedelta(hours=24),
-        ).first()
-        storage_name = backup.result.get('storage_name') if backup else None
-        if not storage_name or not default_storage.exists(storage_name):
+        if not attempt_reset_backup_available(
+            confirmation.validated_data['backup_job_id']
+        ):
             return response.Response(
                 {'detail': 'Download a fresh completed full backup before applying the reset.'},
                 status=status.HTTP_409_CONFLICT,
             )
         try:
             summary = grant_active_semester_attempt_resets()
+        except ValueError as error:
+            return response.Response(
+                {'detail': str(error)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return response.Response(summary)
+
+
+class StudentMainActivityAttemptResetView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get_student(self, student_id):
+        return get_object_or_404(
+            User,
+            pk=student_id,
+            role=User.Role.STUDENT,
+        )
+
+    def get(self, request, student_id):
+        student = self.get_student(student_id)
+        try:
+            return response.Response(
+                student_attempt_reset_preview(
+                    student_active_semester_attempt_reset_scope(student)
+                )
+            )
+        except ValueError as error:
+            return response.Response(
+                {'detail': str(error)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def post(self, request, student_id):
+        student = self.get_student(student_id)
+        confirmation = MainActivityAttemptResetConfirmationSerializer(data=request.data)
+        if not confirmation.is_valid():
+            return response.Response(
+                confirmation.errors,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not confirmation.validated_data['confirm']:
+            return response.Response(
+                {'detail': 'Explicit confirmation is required to grant attempts.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not attempt_reset_backup_available(
+            confirmation.validated_data['backup_job_id']
+        ):
+            return response.Response(
+                {'detail': 'Download a fresh completed full backup before applying the reset.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            summary = grant_student_active_semester_attempt_resets(student)
         except ValueError as error:
             return response.Response(
                 {'detail': str(error)},

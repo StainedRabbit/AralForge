@@ -19,6 +19,7 @@ from .views import (
     ModuleTopicProgressViewSet,
     ModuleTopicViewSet,
     ModuleViewSet,
+    StudentMainActivityAttemptResetView,
 )
 
 app_name = 'learning_modules'
@@ -43,5 +44,10 @@ router.register('lesson-progress', ModuleLessonProgressViewSet, basename='module
 
 urlpatterns = [
     path('attempt-resets/main-activity/', MainActivityAttemptResetView.as_view(), name='main-activity-attempt-reset'),
+    path(
+        'attempt-resets/students/<int:student_id>/',
+        StudentMainActivityAttemptResetView.as_view(),
+        name='student-main-activity-attempt-reset',
+    ),
     path('', include(router.urls)),
 ]

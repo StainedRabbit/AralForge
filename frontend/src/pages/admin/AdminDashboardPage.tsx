@@ -6,6 +6,7 @@ import { Icon, type IconName } from '../../components/Icon'
 import { EmptyState, Page, PageHeader, SectionHeading, SkeletonList, StatCard, StatusBanner } from '../../components/ui'
 import { queryKeys } from '../../queries/queryKeys'
 import type { User } from '../../types'
+import { BACKUP_JOB_STORAGE_KEY, DOWNLOADED_BACKUP_JOB_STORAGE_KEY } from '../../utils/backup'
 import { formatDateTime, formatTime, toErrorMessage } from '../../utils/format'
 import { fullName } from '../../utils/student'
 
@@ -78,10 +79,13 @@ type TeacherDashboard = {
 
 export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; currentUser: User }) {
   const queryClient = useQueryClient()
-  const [backupId, setBackupId] = useState(() => localStorage.getItem('aralforge-backup-job') ?? '')
+  const [backupId, setBackupId] = useState(() => localStorage.getItem(BACKUP_JOB_STORAGE_KEY) ?? '')
   const [backupError, setBackupError] = useState('')
   const [startingBackup, setStartingBackup] = useState(false)
-  const [backupDownloaded, setBackupDownloaded] = useState(false)
+  const [backupDownloaded, setBackupDownloaded] = useState(() => Boolean(
+    localStorage.getItem(BACKUP_JOB_STORAGE_KEY)
+      && localStorage.getItem(BACKUP_JOB_STORAGE_KEY) === localStorage.getItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY),
+  ))
   const [resetPreview, setResetPreview] = useState<AttemptResetSummary | null>(null)
   const [resetLoading, setResetLoading] = useState(false)
   const [resetApplying, setResetApplying] = useState(false)
@@ -115,11 +119,12 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
   async function startBackup() {
     setBackupError('')
     setBackupDownloaded(false)
+    localStorage.removeItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY)
     setStartingBackup(true)
     try {
       const job = await api<BackupJob>('/jobs/backups/', { method: 'POST' })
       setBackupId(job.id)
-      localStorage.setItem('aralforge-backup-job', job.id)
+      localStorage.setItem(BACKUP_JOB_STORAGE_KEY, job.id)
       await queryClient.invalidateQueries({ queryKey: ['full-backup', job.id] })
     } catch (error) {
       setBackupError(toErrorMessage(error))
@@ -132,6 +137,7 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
     if (!backupId) return
     setBackupError('')
     setBackupDownloaded(false)
+    localStorage.removeItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY)
     try {
       const blob = await api<Blob>(`/jobs/${backupId}/backup-download/`)
       const url = URL.createObjectURL(blob)
@@ -140,6 +146,7 @@ export function AdminDashboardPage({ api, currentUser }: { api: AuthedRequest; c
       anchor.download = `aralforge-backup-${backupId}.zip`
       anchor.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      localStorage.setItem(DOWNLOADED_BACKUP_JOB_STORAGE_KEY, backupId)
       setBackupDownloaded(true)
     } catch (error) {
       setBackupError(toErrorMessage(error))
