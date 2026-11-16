@@ -203,6 +203,10 @@ export function MainActivityEditor({
     questionDrafts: initialDrafts,
   }))
   const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
+  const [recoveryError, setRecoveryError] = useState('')
+  const saveInFlight = useRef(false)
+  const latestDraftSignature = useRef(draftSignature)
+  useEffect(() => { latestDraftSignature.current = draftSignature }, [draftSignature])
   const dirty = draftSignature !== savedSignature.current
 
   useEffect(() => {
@@ -215,24 +219,31 @@ export function MainActivityEditor({
   }, [dirty, saveState])
 
   useEffect(() => {
+    let feedbackTimer: number | undefined
     if (dirty) {
-      window.localStorage.setItem(recoveryKey, JSON.stringify({
-        ...JSON.parse(draftSignature),
-        baseRevision: savedRevision,
-      }))
+      try {
+        window.localStorage.setItem(recoveryKey, JSON.stringify({
+          ...JSON.parse(draftSignature),
+          baseRevision: savedRevision,
+        }))
+        feedbackTimer = window.setTimeout(() => setRecoveryError(''), 0)
+      } catch {
+        feedbackTimer = window.setTimeout(() => setRecoveryError('Browser storage is unavailable or full. Download your local draft before closing this page.'), 0)
+      }
     }
+    return () => window.clearTimeout(feedbackTimer)
   }, [dirty, draftSignature, recoveryKey, savedRevision])
 
   useEffect(() => {
     if (
-      !dirty || saving || activity?.is_published || !gradingPeriod ||
+      !dirty || saving || saveState === 'error' || revisionConflict || activity?.is_published || !gradingPeriod ||
       (isPublished && readinessWarnings.length > 0)
     ) return
     const timer = window.setTimeout(() => void saveActivity(undefined, true), 1200)
     return () => window.clearTimeout(timer)
     // saveActivity intentionally uses the complete signature captured by this render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activity?.is_published, draftSignature, dirty, gradingPeriod, isPublished, readinessWarnings.length, saving])
+  }, [activity?.is_published, draftSignature, dirty, gradingPeriod, isPublished, readinessWarnings.length, saving, saveState, revisionConflict])
 
   function moveQuestion(id: string, direction: -1 | 1) {
     setQuestionDrafts((current) => {
@@ -433,6 +444,7 @@ export function MainActivityEditor({
   }
 
   async function saveActivity(nextTab?: EditorTab, silent = false) {
+    if (saveInFlight.current) return
     if (!module || !topic) {
       setMessage('Lesson module context is missing.')
       return
@@ -447,6 +459,7 @@ export function MainActivityEditor({
       return
     }
 
+    saveInFlight.current = true
     setSaving(true)
     setSaveState('saving')
     if (!silent) setMessage('')
@@ -482,7 +495,19 @@ export function MainActivityEditor({
       setSavedRevision(savedActivity.revision)
       setRevisionConflict(false)
       savedSignature.current = draftSignature
-      window.localStorage.removeItem(recoveryKey)
+      // Keep edits made while the request was in flight recoverable.
+      try {
+        if (latestDraftSignature.current === draftSignature) {
+          window.localStorage.removeItem(recoveryKey)
+        } else {
+          window.localStorage.setItem(recoveryKey, JSON.stringify({
+            ...JSON.parse(latestDraftSignature.current),
+            baseRevision: savedActivity.revision,
+          }))
+        }
+      } catch {
+        setRecoveryError('Browser storage is unavailable or full. Download your local draft before closing this page.')
+      }
       setSaveState('saved')
       onWorkspaceSaved(workspace)
       setCurrentLinkedClassCount(workspace.linked_class_count)
@@ -497,6 +522,7 @@ export function MainActivityEditor({
         setMessage(`Changes are still in this browser. ${toErrorMessage(caughtError)}`)
       }
     } finally {
+      saveInFlight.current = false
       setSaving(false)
     }
   }
@@ -516,6 +542,16 @@ export function MainActivityEditor({
         subtitle="Website-based, auto-graded lesson work. This Quiz saves separately from the lesson."
         title="Quiz"
       />
+
+      {saveState === 'error' || recoveryError ? (
+        <section className="activity-readiness activity-readiness--warning" role="alert">
+          <p>{recoveryError || 'Your quiz has not been saved to the server. Download a copy before leaving; retry saving when the server is available.'}</p>
+          <div className="lesson-editor__actions">
+            <button className="button button--secondary" type="button" onClick={() => downloadRecoveryDraft({ ...JSON.parse(draftSignature), baseRevision: savedRevision })}>Download local draft</button>
+            <button className="button button--primary" type="button" disabled={saving || revisionConflict} onClick={() => void saveActivity()}>Retry saving quiz</button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="activity-readiness-strip" aria-label="Quiz readiness summary">
         <span className={!dirty && saveState === 'saved' ? 'status-badge status-badge--ready' : 'status-badge'}>
@@ -560,7 +596,7 @@ export function MainActivityEditor({
             <p>Download the local draft before reloading if you need to compare or recover its contents.</p>
           </div>
           <div className="lesson-editor__actions">
-            <button className="button button--secondary button--compact" onClick={() => downloadRecoveryDraft(recoveredDraft ?? JSON.parse(draftSignature))} type="button">Download local draft</button>
+            <button className="button button--secondary button--compact" onClick={() => downloadRecoveryDraft(staleRecovery ? recoveredDraft ?? JSON.parse(draftSignature) : { ...JSON.parse(draftSignature), baseRevision: savedRevision })} type="button">Download local draft</button>
             <button className="button button--primary button--compact" onClick={() => {
               window.localStorage.removeItem(recoveryKey)
               setStaleRecovery(false)

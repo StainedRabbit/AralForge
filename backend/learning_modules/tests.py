@@ -4245,6 +4245,35 @@ class LessonMainActivityApiTests(APITestCase):
         self.assertEqual(response.data['choices'], [])
         self.assertEqual(response.data['matching_pairs'], [])
 
+    def test_answer_key_edit_does_not_recalculate_all_linked_class_grades(self):
+        from .serializers import ModuleActivitySerializer
+
+        with patch('grades.signals.sync_items') as sync_items:
+            serializer = ModuleActivitySerializer(
+                self.activity,
+                data={'instructions': 'Corrected answer-key instructions.'},
+                partial=True,
+            )
+            self.assertTrue(serializer.is_valid(), serializer.errors)
+            serializer.save()
+            sync_items.assert_not_called()
+
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.instructions, 'Corrected answer-key instructions.')
+
+    def test_quiz_points_change_still_synchronizes_linked_grades(self):
+        from .serializers import ModuleActivitySerializer
+
+        with patch('grades.signals.sync_items') as sync_items:
+            serializer = ModuleActivitySerializer(
+                self.activity,
+                data={'points_possible': '15.00'},
+                partial=True,
+            )
+            self.assertTrue(serializer.is_valid(), serializer.errors)
+            serializer.save()
+            sync_items.assert_called_once()
+
     def test_atomic_editor_create_requires_grading_period(self):
         lesson = ModuleLesson.objects.create(
             topic=self.topic,

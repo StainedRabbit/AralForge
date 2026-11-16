@@ -147,7 +147,10 @@ SOURCE_MODELS = {
 
 @receiver(post_save, sender=ModuleActivity)
 @receiver(post_save, sender=AttendanceSession)
-def sync_source_metadata(sender, instance, **kwargs):
+def sync_source_metadata(sender, instance, update_fields=None, **kwargs):
+    metadata_fields = {'title', 'date', 'points_possible', 'activity_type'}
+    if update_fields is not None and not metadata_fields.intersection(update_fields):
+        return
     source_type, field = SOURCE_MODELS[sender]
     items = _items_for_source(source_type, field, instance.pk)
     title = str(getattr(instance, 'title', '') or getattr(instance, 'date', ''))

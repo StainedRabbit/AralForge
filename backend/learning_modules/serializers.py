@@ -654,6 +654,16 @@ class ModuleLessonAssetSerializer(serializers.ModelSerializer):
 
 
 class ModuleActivitySerializer(serializers.ModelSerializer):
+    def update(self, instance, validated_data):
+        changed_fields = []
+        for field, value in validated_data.items():
+            if getattr(instance, field) != value:
+                setattr(instance, field, value)
+                changed_fields.append(field)
+        if changed_fields:
+            instance.save(update_fields=changed_fields)
+        return instance
+
     class Meta:
         model = ModuleActivity
         fields = (
